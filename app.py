@@ -2,224 +2,416 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 import re
+import requests
 import folium
-from folium.plugins import AntPath
 from streamlit_folium import st_folium
 import time
 
-# ตั้งค่าหน้าเว็บ Streamlit
-st.set_page_config(page_title="การตรวจสอบเส้นทางการจัดส่ง", layout="wide")
+# ตั้งค่าคอนฟิกของหน้า Streamlit
+st.set_page_config(
+    page_title="การตรวจสอบเส้นทางการจัดส่ง",
+    page_icon="🚚",
+    layout="wide"
+)
 
-st.title("🚚 การตรวจสอบเส้นทางการจัดส่ง")
-st.markdown("ระบบวิเคราะห์เส้นทางการจัดส่งสินค้าจาก PDF คำนวณเที่ยวส่ง และจำลองการวิ่งของรถ")
+st.title("🚚 โปรเจกต์: การตรวจสอบเส้นทางการจัดส่ง")
+st.markdown("ระบบวิเคราะห์รายงานการส่งสินค้า คำนวณเที่ยววิ่ง และจำลองเส้นทางบนถนนจริง (OSRM Routing)")
 
-# --- SIDEBAR: การตั้งค่าพิกัดคลัง และการควบคุม Simulation ---
+# --- SIDEBAR: การตั้งค่าพิกัดคลัง และความเร็ว ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
-wh_lat = st.sidebar.number_input("Latitude คลัง", value=13.66800, format="%.5f")
-wh_lng = st.sidebar.number_input("Longitude คลัง", value=100.61000, format="%.5f")
+wh_lat = st.sidebar.number_input("Latitude คลังสินค้า", value=13.66800, format="%.5f")
+wh_lng = st.sidebar.number_input("Longitude คลังสินค้า", value=100.61000, format="%.5f")
 warehouse_coord = (wh_lat, wh_lng)
 
-st.sidebar.header("🎬 ควบคุมการจำลองการวิ่ง (Simulation)")
-speed = st.sidebar.slider("ความเร็วการเล่น (วินาที/จุด)", min_value=0.2, max_value=3.0, value=1.0, step=0.2)
-run_sim = st.sidebar.button("▶️ เริ่ม/เล่น การแสดงเส้นทาง")
+st.sidebar.header("🎬 การตั้งค่าการจำลอง (Simulation)")
+play_mode = st.sidebar.radio(
+    "รูปแบบการแสดงผลบนแผนที่:",
+    (
+        "แบบที่ 1: แสดงหมุดครบทั้งหมดก่อน (เส้นทางค่อยๆ วิ่ง)",
+        "แบบที่ 2: ปรากฏหมุดและเส้นทางทีละจุดตามลำดับเวลา"
+    )
+)
 
-# --- FUNCTION: แกะข้อมูลจาก PDF ---
-def parse_pdf(file):
-    dw_net = {}
-    records = []
+anim_speed = st.sidebar.slider("ความเร็วในการเล่น (วินาที/Step)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+
+
+# --- FUNCTION: ดึงเส้นทางบนถนนจริงจาก OSRM ---
+@st.cache_data(show_spinner=False)
+def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
+    """
+    เรียกใช้งาน OSRM API เพื่อหาเส้นทางบนถนนจริงสำหรับรถยนต์
+    ระหว่างพิกัด p1 และ p2
+    """
+    url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
+    try:
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("routes"):
+                # ดึงพิกัดถนน [lon, lat] แล้วแปลงเป็น [lat, lon] สำหรับ Folium
+                coords = data["routes"][0]["geometry"]["coordinates"]
+                route_latlon = [[pt[1], pt[0]] for pt in coords]
+                return route_latlon
+    except Exception as e:
+        pass
+    # Fallback กรณี API ขัดข้อง ให้ใช้เส้นตรงแทน
+    return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
+
+
+# --- FUNCTION: ดึงข้อมูลจากไฟล์ PDF ---
+def parse_pdf_data(pdf_file):
+    header_info = {
+        "date": "ไม่ระบุ",
+        "truck_no": "ไม่ระบุ",
+        "driver": "ไม่ระบุ"
+    }
     
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
+    dw_net = {} # ยอดเบิกสุทธิตามรอบ {trip_number: net_qty}
+    records = []
+
+    with pdfplumber.open(pdf_file) as pdf:
+        for page_idx, page in enumerate(pdf.pages):
             text = page.extract_text()
             if not text:
                 continue
-            
+
             lines = text.split('\n')
             for line in lines:
-                # 1. ค้นหาเอกสารเบิก/คืน DW / RE เพื่อคำนวณยอดเบิกสุทธิตามรอบ
-                # ตัวอย่าง DW: DWF2609/07003 -> เที่ยว 3
-                dw_match = re.search(r'DW\w+/(\d+)\s+(\d+)', line)
-                if dw_match:
-                    trip_num = int(dw_match.group(1))
-                    qty = int(dw_match.group(2))
-                    dw_net[trip_num] = dw_net.get(trip_num, 0) + qty
-                
-                re_match = re.search(r'RE\w+/(\d+)\s+(\d+)', line)
-                if re_match:
-                    trip_num = int(re_match.group(1))
-                    qty = int(re_match.group(2))
-                    dw_net[trip_num] = dw_net.get(trip_num, 0) - qty
+                # ดึงข้อมูล Header ในหน้าแรก
+                if "ประจําวัน" in line and header_info["date"] == "ไม่ระบุ":
+                    date_match = re.search(r'ประจําวัน\s*([\d/]+)', line)
+                    if date_match:
+                        header_info["date"] = date_match.group(1)
+                    
+                    truck_match = re.search(r'รถส่ง\s*(\w+)', line)
+                    if truck_match:
+                        header_info["truck_no"] = truck_match.group(1)
 
-                # 2. ค้นหาพิกัด GPS, เวลา และ ยอดส่ง
-                # แพทเทิร์นพิกัด: 13.xxx, 100.xxx
+                if "พนักงานขับรถ" in line and header_info["driver"] == "ไม่ระบุ":
+                    driver_match = re.search(r'พนักงานขับรถ\s*(.*)', line)
+                    if driver_match:
+                        header_info["driver"] = driver_match.group(1).strip()
+
+                # 1. อ่านข้อมูลเอกสารเบิก/คืน (DW / RE)
+                # DW คือการเบิก เลข 3 ตัวท้ายคือรอบส่ง
+                dw_match = re.search(r'DW\w+/(\d{3})\s+(\d+)', line)
+                if dw_match:
+                    trip_no = int(dw_match.group(1))
+                    qty = int(dw_match.group(2))
+                    dw_net[trip_no] = dw_net.get(trip_no, 0) + qty
+
+                # RE คือการคืน
+                re_match = re.search(r'RE\w+/(\d{3})\s+(\d+)', line)
+                if re_match:
+                    trip_no = int(re_match.group(1))
+                    qty = int(re_match.group(2))
+                    dw_net[trip_no] = dw_net.get(trip_no, 0) - qty
+
+                # 2. ดึงข้อมูลรายการจัดส่ง
                 gps_match = re.search(r'(\d{1,2}\.\d+),(\d{1,3}\.\d+)', line)
                 time_match = re.search(r'(\d{2}:\d{2})\s*น\.', line)
-                
+
                 if gps_match and time_match:
-                    lat, lng = float(gps_match.group(1)), float(gps_match.group(2))
+                    lat = float(gps_match.group(1))
+                    lng = float(gps_match.group(2))
                     delivery_time = time_match.group(1)
-                    
-                    # ตรวจสอบสถานะการจัดส่ง
-                    status = "ตรงเวลา"
-                    if "ไม่ตรงเวลา" in line:
-                        status = "ไม่ตรงเวลา"
+
+                    # อ่านรหัสลูกค้า
+                    cust_id_match = re.search(r'^([\d/]+)\s+', line.strip())
+                    cust_id = cust_id_match.group(1) if cust_id_match else "N/A"
+
+                    # อ่านสถานะการส่ง
+                    status = "จัดส่งตรงเวลา"
+                    if "จัดส่งไม่ตรงเวลา" in line or "ไม่ตรงเวลา" in line:
+                        status = "จัดส่งไม่ตรงเวลา"
                     elif "สมาชิกใหม่" in line:
                         status = "สมาชิกใหม่"
                     elif "รอบเสริม" in line:
                         status = "รอบเสริม"
+                    elif "ย้ายรอบ" in line:
+                        status = "ย้ายรอบ"
 
-                    # ดึงยอดส่ง (พยายามดึงตัวเลขก่อนหน้าพิกัด หรือตั้งค่า Default = 1)
-                    # ใน PDF ยอดส่งมักจะตรงกับตัวเลขจำนวนคูปอง/ถัง
+                    # อ่านชื่อลูกค้า และ ยอดส่ง
+                    # ใช้การตัดคำและตรวจสอบแพตเทิร์น
+                    tokens = line.strip().split()
+                    cust_name = "ไม่ระบุ"
                     qty_sent = 1
-                    tokens = line.split()
-                    for idx, token in enumerate(tokens):
-                        if token == status or "น." in token:
-                            # ย้อนดูตัวเลขใกล้เคียง
-                            for prev in reversed(tokens[:idx]):
-                                if prev.isdigit():
-                                    qty_sent = int(prev)
-                                    break
+
+                    # ค้นหาตำแหน่ง GPS Token เพื่อแยกฝั่งชื่อลูกค้าและยอดส่ง
+                    for idx, t in enumerate(tokens):
+                        if "," in t and ("13." in t or "14." in t):
+                            # ก่อนพิกัด จะเป็น คูปอง / ยอดส่ง
+                            if idx >= 2 and tokens[idx-2].isdigit():
+                                qty_sent = int(tokens[idx-2])
+                            
+                            # ชื่อลูกค้าจะอยู่ถัดจากรหัสลูกค้า ตัวแรกๆ
+                            if len(tokens) > 2:
+                                name_tokens = []
+                                for name_t in tokens[1:idx-2]:
+                                    if not name_t.isdigit():
+                                        name_tokens.append(name_t)
+                                if name_tokens:
+                                    cust_name = " ".join(name_tokens)
                             break
 
                     records.append({
+                        "cust_id": cust_id,
+                        "cust_name": cust_name,
                         "lat": lat,
                         "lng": lng,
                         "time": delivery_time,
                         "qty": qty_sent,
-                        "status": status,
-                        "raw_line": line
+                        "status": status
                     })
 
     df = pd.DataFrame(records)
+
     if not df.empty:
         # เรียงลำดับตามเวลาส่งจากน้อยไปมาก
         df = df.sort_values(by="time").reset_index(drop=True)
-        
-        # จัดสรรรอบส่ง (Trip Assignment)
+
+        # คำนวณเที่ยวส่ง (Trip Assignment) และ ยอดส่งสะสม (Accumulated Qty)
         trips = []
+        acc_qty_list = []
+        
         current_trip = 1
-        accumulated_qty = 0
-        max_qty_for_trip = dw_net.get(current_trip, 80) # ค่าเริ่มต้นเผื่อค้นหาไม่พบ
+        current_trip_acc = 0
+        total_acc = 0
+
+        # หากใน PDF ไม่มีข้อมูล DW ให้ตั้งค่า Default 80
+        max_trip_qty = dw_net.get(current_trip, 80)
 
         for idx, row in df.iterrows():
-            accumulated_qty += row['qty']
-            trips.append(f"เที่ยวที่ {current_trip}")
+            qty = row['qty']
             
-            # ถ้าส่งครบตามยอดเบิกของเที่ยว ให้ปรับขึ้นเที่ยวถัดไป
-            if accumulated_qty >= max_qty_for_trip:
+            # ตรวจสอบว่าเกินยอดเบิกในเที่ยวนี้หรือไม่
+            if current_trip_acc + qty > max_trip_qty and current_trip_acc > 0:
                 current_trip += 1
-                accumulated_qty = 0
-                max_qty_for_trip = dw_net.get(current_trip, 80)
+                current_trip_acc = 0
+                max_trip_qty = dw_net.get(current_trip, 80)
+
+            current_trip_acc += qty
+            total_acc += qty
+
+            trips.append(f"เที่ยวที่ {current_trip}")
+            acc_qty_list.append(total_acc)
 
         df['trip'] = trips
-        
-    return df, dw_net
+        df['acc_qty'] = acc_qty_list
 
-# --- MAIN APP LOGIC ---
-uploaded_file = st.file_uploader("อัปโหลดไฟล์รายงาน PDF (เช่น REP115_...pdf)", type=["pdf"])
+    return df, dw_net, header_info
+
+
+# --- MAIN INTERFACE ---
+uploaded_file = st.file_uploader("📂 กรุณาอัปโหลดไฟล์รายงานการส่งสินค้า (PDF)", type=["pdf"])
 
 if uploaded_file:
-    df, dw_net = parse_pdf(uploaded_file)
-    
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจาก PDF..."):
+        df, dw_net, header_info = parse_pdf_data(uploaded_file)
+
     if df.empty:
-        st.error("ไม่สามารถดึงข้อมูลพิกัดจากไฟล์ PDF นี้ได้ กรุณาตรวจสอบรูปแบบเอกสาร")
+        st.error("❌ ไม่พบข้อมูลพิกัด GPS หรือรายการจัดส่งในไฟล์ PDF นี้")
     else:
-        st.success(f"ดึงข้อมูลสำเร็จ! พบรายการจัดส่งทั้งหมด {len(df)} รายการ")
-        
-        # สรุปข้อมูลด้านบน
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("จำนวนจุดจัดส่ง", f"{len(df)} จุด")
-        col2.metric("ตรงเวลา", f"{len(df[df['status']=='ตรงเวลา'])} จุด")
-        col3.metric("ไม่ตรงเวลา/อื่นๆ", f"{len(df[df['status']!='ตรงเวลา'])} จุด")
-        col4.metric("จำนวนรอบส่งที่พบ", f"{df['trip'].nunique()} เที่ยว")
+        st.success("✅ ประมวลผลข้อมูลสำเร็จ!")
 
-        st.subheader("📋 ตารางข้อมูลการจัดส่งเรียงตามเวลา")
-        st.dataframe(df[['time', 'trip', 'qty', 'status', 'lat', 'lng']], use_container_width=True)
+        # --- ส่วนแสดง HEADER ข้อมูลประจำวัน ---
+        st.subheader("📌 ข้อมูลปฏิบัติงานประจำวัน")
+        h_col1, h_col2, h_col3 = st.columns(3)
+        h_col1.info(f"📅 **งานประจำวันที่:** {header_info['date']}")
+        h_col2.info(f"🚛 **รถส่ง:** {header_info['truck_no']}")
+        h_col3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        # --- MAP VISUALIZATION ---
-        st.subheader("🗺️ แผนที่เส้นทางการจัดส่ง")
+        # --- ตารางแสดงรายการจัดส่ง ---
+        st.subheader("📋 ตารางรายการจัดส่งสินค้า (เรียงตามลำดับเวลา)")
         
-        # กำหนดสีของแต่ละรอบส่ง
-        color_map = {
+        # ปรับแต่งการแสดงผลตาราง
+        display_df = df[[
+            'time', 'trip', 'cust_id', 'cust_name', 
+            'qty', 'acc_qty', 'status', 'lat', 'lng'
+        ]].copy()
+
+        display_df.columns = [
+            'เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า', 
+            'ยอดส่ง (ใบ/ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude'
+        ]
+
+        st.dataframe(display_df, use_container_width=True, height=280)
+
+        # --- สรุปยอดส่งแต่ละเที่ยว ---
+        st.subheader("📊 รายงานสรุปยอดส่งแบ่งตามเที่ยว (Trip Summary)")
+        
+        trip_summaries = []
+        for trip_name, group in df.groupby('trip', sort=False):
+            trip_num = int(trip_name.replace("เที่ยวที่ ", ""))
+            net_withdraw = dw_net.get(trip_num, "N/A")
+            total_sent = group['qty'].sum()
+            ontime_count = len(group[group['status'] == 'จัดส่งตรงเวลา'])
+            late_count = len(group[group['status'] != 'จัดส่งตรงเวลา'])
+
+            trip_summaries.append({
+                "เที่ยวการส่ง": trip_name,
+                "ยอดเบิกสุทธิ (DW-RE)": net_withdraw,
+                "ยอดจัดส่งจริงสุทธิ": total_sent,
+                "จำนวนจุดส่งทั้งหมด": len(group),
+                "จัดส่งตรงเวลา (จุด)": ontime_count,
+                "จัดส่งไม่ตรงเวลา/อื่นๆ (จุด)": late_count,
+                "หมายเหตุ": "วิ่งออกจากคลัง -> ส่งสินค้า -> วิ่งกลับคลัง"
+            })
+
+        summary_df = pd.DataFrame(trip_summaries)
+        st.table(summary_df)
+
+        st.hr()
+
+        # --- MAP VISUALIZATION & SIMULATION ---
+        st.subheader("🗺️ แผนที่และระบบจำลองการวิ่งจัดส่ง (Road Routing Animation)")
+
+        # กำหนดชุดสีประจำแต่ละเที่ยว
+        trip_colors = {
             "เที่ยวที่ 1": "blue",
             "เที่ยวที่ 2": "green",
             "เที่ยวที่ 3": "orange",
             "เที่ยวที่ 4": "purple",
-            "เที่ยวที่ 5": "darkred"
+            "เที่ยวที่ 5": "red"
         }
 
-        # การประมวลผลสำหรับ Simulation
-        if run_sim:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            map_placeholder = st.empty()
-
-            # สร้าง Sequence การเดินทาง: คลัง -> จุดส่ง 1..N เที่ยว 1 -> คลัง -> จุดส่ง 1..N เที่ยว 2 ...
-            route_points = []
+        # คำนวณหา Route Segments บนถนนจริง
+        # โครงสร้าง: [(start_point, end_point, trip_name, segment_type, [latlon_path])]
+        with st.spinner("กำลังคำนวณเส้นทางบนถนนจริงจาก OSRM (อาจใช้เวลาสักครู่)..."):
+            segments = []
             
-            # แยกรายการตามเที่ยวส่ง
+            # จัดกลุ่มตามเที่ยวเพื่อสร้างลูป ออกจากคลัง -> จุด1 -> จุด2 -> กลับคลัง
             grouped = df.groupby('trip', sort=False)
             
-            step_count = 0
-            total_steps = len(df) + df['trip'].nunique() # รวมจุดคลังที่ต้องแวะกลับ
-
-            current_sim_df = pd.DataFrame()
-
             for trip_name, group in grouped:
-                # เริ่มต้นออกจากคลัง
-                current_trip_color = color_map.get(trip_name, "red")
+                pts = [warehouse_coord] + list(zip(group['lat'], group['lng'])) + [warehouse_coord]
+                group_records = group.to_dict('records')
+
+                for i in range(len(pts) - 1):
+                    p1 = pts[i]
+                    p2 = pts[i+1]
+                    
+                    # เรียกดึงเส้นทางถนนจริง
+                    route_path = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
+                    
+                    # ระบุรายละเอียดจุดปลายทาง
+                    if i < len(group_records):
+                        target_info = group_records[i]
+                    else:
+                        target_info = {"cust_name": "คลังสินค้า", "status": "กลับคลัง", "qty": 0, "time": "จบเที่ยว"}
+
+                    segments.append({
+                        "trip": trip_name,
+                        "from": p1,
+                        "to": p2,
+                        "path": route_path,
+                        "target_info": target_info,
+                        "is_return_wh": (i == len(pts) - 2)
+                    })
+
+        # แถบควบคุมลำดับ Step การแสดงผล
+        total_steps = len(df)
+        
+        col_ctrl1, col_ctrl2 = st.columns([1, 4])
+        
+        with col_ctrl1:
+            auto_play = st.checkbox("▶️ เล่นอัตโนมัติ (Auto Play)")
+            
+        with col_ctrl2:
+            step_idx = st.slider(
+                "เลื่อนดูความคืบหน้าตามลำดับจุดจัดส่ง:",
+                min_value=1,
+                max_value=total_steps,
+                value=1,
+                step=1
+            )
+
+        # ปรับ Step อัตโนมัติหากเลือก Auto Play
+        if auto_play:
+            placeholder_map = st.empty()
+            placeholder_info = st.empty()
+
+            for current_step in range(1, total_steps + 1):
+                # สร้างแผนที่ Folium
+                m = folium.Map(location=[df['lat'].mean(), df['lng'].mean()], zoom_start=13)
+
+                # ปักหมุดคลังสินค้า
+                folium.Marker(
+                    location=warehouse_coord,
+                    popup="<b>คลังสินค้า (Warehouse)</b>",
+                    icon=folium.Icon(color="black", icon="home", prefix="fa")
+                ).add_to(m)
+
+                current_row = df.iloc[current_step - 1]
                 
-                # Dynamic Map Rendering แต่ละ Step
-                for idx, row in group.iterrows():
-                    step_count += 1
-                    progress_bar.progress(step_count / total_steps)
-                    status_text.text(f"กำลังจัดส่ง: {trip_name} | เวลา {row['time']} | สถานะ: {row['status']}")
-
-                    # สร้างแผนที่ Folium
-                    m = folium.Map(location=[df['lat'].mean(), df['lng'].mean()], zoom_start=13)
-                    
-                    # ปักหมุดคลังสินค้า
-                    folium.Marker(
-                        location=warehouse_coord,
-                        popup="<b>คลังสินค้า (Warehouse)</b>",
-                        icon=folium.Icon(color="black", icon="home", prefix="fa")
-                    ).add_to(m)
-
-                    # วาดเส้นทางการวิ่งที่ผ่านมาแล้ว
-                    # วาดจุดส่งทั้งหมดจนถึงปัจจุบัน
-                    sub_df = df.iloc[:idx+1]
-                    
-                    for trip_k, trip_g in sub_df.groupby('trip', sort=False):
-                        t_color = color_map.get(trip_k, "blue")
-                        pts = [warehouse_coord] + list(zip(trip_g['lat'], trip_g['lng']))
-                        
-                        # ถ้ารอบนั้นจบแล้วและมีการเริ่มรอบใหม่ ให้เชื่อมเส้นกลับมาคลัง
-                        if trip_k != trip_name:
-                            pts.append(warehouse_coord)
-                            
-                        folium.PolyLine(pts, color=t_color, weight=4, opacity=0.8).add_to(m)
-
-                    # แสดงหมุดจุดจัดส่ง
-                    for i, r in sub_df.iterrows():
-                        icon_color = "green" if r['status'] == "ตรงเวลา" else "red"
-                        folium.Marker(
-                            location=[r['lat'], r['lng']],
-                            popup=f"ลำดับ: {i+1}<br>เวลา: {r['time']}<br>รอบ: {r['trip']}<br>สถานะ: {r['status']}",
-                            icon=folium.Icon(color=icon_color, icon="info-sign")
+                # --- การแสดงผลแบบที่ 1 ---
+                if "แบบที่ 1" in play_mode:
+                    # ปักหมุดรอไว้ทั้งหมดก่อน
+                    for idx_all, r_all in df.iterrows():
+                        color_marker = "green" if r_all['status'] == "จัดส่งตรงเวลา" else "red"
+                        folium.CircleMarker(
+                            location=[r_all['lat'], r_all['lng']],
+                            radius=7,
+                            color=color_marker,
+                            fill=True,
+                            fill_color=trip_colors.get(r_all['trip'], 'blue'),
+                            fill_opacity=0.8,
+                            popup=f"ลำดับที่ {idx_all+1}: {r_all['cust_name']} ({r_all['time']})"
                         ).add_to(m)
 
-                    with map_placeholder.container():
-                        st_folium(m, width=1000, height=500, key=f"map_{step_count}")
+                    # วาดเส้นทางเฉพาะจุดที่วิ่งถึงแล้ว
+                    active_df = df.iloc[:current_step]
+                    for trip_k, trip_g in active_df.groupby('trip', sort=False):
+                        t_color = trip_colors.get(trip_k, 'blue')
+                        
+                        # ดึง Segments ที่เกี่ยวข้อง
+                        for seg in segments:
+                            if seg['trip'] == trip_k and seg['target_info'] in trip_g.to_dict('records'):
+                                folium.PolyLine(
+                                    seg['path'], color=t_color, weight=5, opacity=0.8
+                                ).add_to(m)
 
-                    time.sleep(speed)
-            
-            progress_bar.progress(1.0)
-            status_text.success("จำลองเส้นทางการจัดส่งเสร็จสิ้น!")
+                # --- การแสดงผลแบบที่ 2 ---
+                else:
+                    # แสดงเฉพาะหมุดที่วิ่งถึงแล้วเท่านั้น
+                    active_df = df.iloc[:current_step]
+                    for idx_act, r_act in active_df.iterrows():
+                        color_marker = "green" if r_act['status'] == "จัดส่งตรงเวลา" else "red"
+                        folium.Marker(
+                            location=[r_act['lat'], r_act['lng']],
+                            popup=f"ลำดับที่ {idx_act+1}: {r_act['cust_name']}<br>เวลา: {r_act['time']}",
+                            icon=folium.Icon(color=color_marker, icon="flag")
+                        ).add_to(m)
+
+                        # วาดเส้นทางถนนเชื่อมต่อทีละ Step
+                        for seg in segments:
+                            if seg['target_info'] == r_act.to_dict():
+                                folium.PolyLine(
+                                    seg['path'], 
+                                    color=trip_colors.get(seg['trip'], 'blue'), 
+                                    weight=5, 
+                                    opacity=0.8
+                                ).add_to(m)
+
+                with placeholder_map.container():
+                    st_folium(m, width=1100, height=550, key=f"sim_map_{current_step}")
+
+                with placeholder_info.container():
+                    st.info(
+                        f"🚚 **กำลังจัดส่งจุดที่ {current_step}/{total_steps}** | "
+                        f"**เที่ยว:** {current_row['trip']} | "
+                        f"**เวลา:** {current_row['time']} น. | "
+                        f"**ลูกค้า:** {current_row['cust_name']} (รหัส: {current_row['cust_id']}) | "
+                        f"**ยอดส่ง:** {current_row['qty']} | "
+                        f"**สถานะ:** {current_row['status']}"
+                    )
+
+                time.sleep(anim_speed)
 
         else:
-            # การแสดงผลแผนที่แบบ Static (แสดงภาพรวมทั้งหมด)
+            # การแสดงผลตาม Slider Step Manual
             m = folium.Map(location=[df['lat'].mean(), df['lng'].mean()], zoom_start=13)
-            
+
             # ปักหมุดคลังสินค้า
             folium.Marker(
                 location=warehouse_coord,
@@ -227,45 +419,62 @@ if uploaded_file:
                 icon=folium.Icon(color="black", icon="home", prefix="fa")
             ).add_to(m)
 
-            # วาด เส้นทาง และ หมุด ของแต่ละรอบ
-            grouped = df.groupby('trip', sort=False)
-            for trip_name, group in grouped:
-                t_color = color_map.get(trip_name, "blue")
-                
-                # ลากเส้น: เริ่มคลัง -> จุดส่งตามลำดับ -> กลับคลัง
-                points = [warehouse_coord] + list(zip(group['lat'], group['lng'])) + [warehouse_coord]
-                
-                folium.PolyLine(
-                    points, 
-                    color=t_color, 
-                    weight=4, 
-                    opacity=0.7, 
-                    tooltip=f"เส้นทาง {trip_name}"
-                ).add_to(m)
+            current_row = df.iloc[step_idx - 1]
 
-                # ปักหมุดพิกัดจัดส่ง
-                for seq, (_, row) in enumerate(group.iterrows(), 1):
-                    # แยกสีหมุดกรณี ตรงเวลา vs ไม่ตรงเวลา
-                    border_color = "green" if row['status'] == "ตรงเวลา" else "red"
-                    
+            if "แบบที่ 1" in play_mode:
+                # 1. แสดงหมุดทั้งหมดรอไว้
+                for idx_all, r_all in df.iterrows():
+                    color_marker = "green" if r_all['status'] == "จัดส่งตรงเวลา" else "red"
                     folium.CircleMarker(
-                        location=[row['lat'], row['lng']],
-                        radius=8,
-                        color=border_color,
+                        location=[r_all['lat'], r_all['lng']],
+                        radius=7,
+                        color=color_marker,
                         fill=True,
-                        fill_color=t_color,
-                        fill_opacity=0.9,
-                        popup=f"""
-                        <b>ลำดับส่ง: {seq} ({trip_name})</b><br>
-                        เวลา: {row['time']}<br>
-                        ยอดส่ง: {row['qty']} ใบ/ถัง<br>
-                        สถานะ: {row['status']}
-                        """
+                        fill_color=trip_colors.get(r_all['trip'], 'blue'),
+                        fill_opacity=0.8,
+                        popup=f"ลำดับที่ {idx_all+1}: {r_all['cust_name']} ({r_all['time']})"
                     ).add_to(m)
 
-            st_folium(m, width=1100, height=600)
+                # 2. วาดเส้นทางถึง Step ปัจจุบัน
+                active_df = df.iloc[:step_idx]
+                for trip_k, trip_g in active_df.groupby('trip', sort=False):
+                    t_color = trip_colors.get(trip_k, 'blue')
+                    g_records = trip_g.to_dict('records')
+                    
+                    for seg in segments:
+                        if seg['trip'] == trip_k and seg['target_info'] in g_records:
+                            folium.PolyLine(
+                                seg['path'], color=t_color, weight=5, opacity=0.8
+                            ).add_to(m)
 
-        # --- SUMMARY REPORT ---
-        st.subheader("📊 สรุปรายงานการจัดส่งตามเที่ยว")
-        summary_df = df.groupby(['trip', 'status']).size().unstack(fill_value=0)
-        st.dataframe(summary_df, use_container_width=True)
+            else:
+                # แสดงเฉพาะหมุดและเส้นทางที่สแกนถึงแล้วเท่านั้น
+                active_df = df.iloc[:step_idx]
+                for idx_act, r_act in active_df.iterrows():
+                    color_marker = "green" if r_act['status'] == "จัดส่งตรงเวลา" else "red"
+                    folium.Marker(
+                        location=[r_act['lat'], r_act['lng']],
+                        popup=f"ลำดับที่ {idx_act+1}: {r_act['cust_name']}<br>เวลา: {r_act['time']}",
+                        icon=folium.Icon(color=color_marker, icon="info-sign")
+                    ).add_to(m)
+
+                    for seg in segments:
+                        if seg['target_info'] == r_act.to_dict():
+                            folium.PolyLine(
+                                seg['path'], 
+                                color=trip_colors.get(seg['trip'], 'blue'), 
+                                weight=5, 
+                                opacity=0.8
+                            ).add_to(m)
+
+            st_folium(m, width=1100, height=550, key="manual_map")
+
+            st.info(
+                f"🚚 **สถานะจุดที่ {step_idx}/{total_steps}** | "
+                f"**เที่ยว:** {current_row['trip']} | "
+                f"**เวลา:** {current_row['time']} น. | "
+                f"**ลูกค้า:** {current_row['cust_name']} (รหัส: {current_row['cust_id']}) | "
+                f"**ยอดส่ง:** {current_row['qty']} | "
+                f"**ยอดส่งสะสม:** {current_row['acc_qty']} | "
+                f"**สถานะ:** {current_row['status']}"
+            )
