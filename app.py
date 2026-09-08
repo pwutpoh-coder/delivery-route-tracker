@@ -4,8 +4,8 @@ import pdfplumber
 import re
 import requests
 import folium
-from streamlit_folium import st_folium
-import time
+import streamlit.components.v1 as components
+import json
 
 # ตั้งค่าคอนฟิกของหน้า Streamlit
 st.set_page_config(
@@ -17,22 +17,22 @@ st.set_page_config(
 st.title("🚚 โปรเจกต์: การตรวจสอบเส้นทางการจัดส่ง")
 st.markdown("ระบบวิเคราะห์รายงานการส่งสินค้า คำนวณเที่ยววิ่ง และจำลองเส้นทางบนถนนจริง (OSRM Routing)")
 
-# --- SIDEBAR: การตั้งค่าพิกัดคลัง และความเร็ว ---
+# --- SIDEBAR: การตั้งค่าพิกัดคลัง และรูปแบบการแสดงผล ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
 wh_lat = st.sidebar.number_input("Latitude คลังสินค้า", value=13.66800, format="%.5f")
 wh_lng = st.sidebar.number_input("Longitude คลังสินค้า", value=100.61000, format="%.5f")
 warehouse_coord = (wh_lat, wh_lng)
 
-st.sidebar.header("🎬 การตั้งค่าการจำลอง (Simulation)")
+st.sidebar.header("🎬 การตั้งค่ารูปแบบแผนที่")
 play_mode = st.sidebar.radio(
     "รูปแบบการแสดงผลบนแผนที่:",
     (
-        "แบบที่ 1: แสดงหมุดครบทั้งหมดก่อน (เส้นทางค่อยๆ วิ่ง)",
+        "แบบที่ 1: แสดงหมุดครบทั้งหมดก่อน (เส้นทางวิ่งเชื่อมตามถนนจริง)",
         "แบบที่ 2: ปรากฏหมุดและเส้นทางทีละจุดตามลำดับเวลา"
     )
 )
 
-anim_speed = st.sidebar.slider("ความเร็วในการเล่น (วินาที/Step)", min_value=0.1, max_value=2.0, value=0.5, step=0.1)
+anim_speed_ms = st.sidebar.slider("ความเร็วการเล่น (มิลลิวินาที/เฟรม)", min_value=100, max_value=2000, value=500, step=100)
 
 
 # --- FUNCTION: ดึงเส้นทางบนถนนจริงจาก OSRM ---
@@ -49,6 +49,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
             data = response.json()
             if data.get("routes"):
                 coords = data["routes"][0]["geometry"]["coordinates"]
+                # OSRM คืนค่าเป็น [lon, lat] ต้องสลับเป็น [lat, lon]
                 route_latlon = [[pt[1], pt[0]] for pt in coords]
                 return route_latlon
     except Exception:
@@ -56,7 +57,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- FUNCTION: ดึงข้อมูลจากไฟล์ PDF ---
+# --- FUNCTION: แกะข้อมูล PDF ครบถ้วนทุกบรรทัด ---
 def parse_pdf_data(pdf_file):
     header_info = {
         "date": "ไม่ระบุ",
@@ -69,11 +70,10 @@ def parse_pdf_data(pdf_file):
 
     with pdfplumber.open(pdf_file) as pdf:
         for page_idx, page in enumerate(pdf.pages):
-            text = page.extract_text()
-            if not text:
-                continue
-
+            text = page.extract_text() or ""
             lines = text.split('\n')
+            
+            # แกะ Header
             for line in lines:
                 if "ประจําวัน" in line and header_info["date"] == "ไม่ระบุ":
                     date_match = re.search(r'ประจําวัน\s*([\d/]+)', line)
@@ -101,30 +101,44 @@ def parse_pdf_data(pdf_file):
                     qty = int(re_match.group(2))
                     dw_net[trip_no] = dw_net.get(trip_no, 0) - qty
 
-                gps_match = re.search(r'(\d{1,2}\.\d+),(\d{1,3}\.\d+)', line)
-                time_match = re.search(r'(\d{2}:\d{2})\s*น\.', line)
+            # ใช้ extract_words เพื่อไม่ให้หลุดบรรทัดที่ตารางซ้อนกัน
+            words = page.extract_words()
+            
+            # รวมคำเป็นบรรทัดตามพิกัด Y
+            lines_by_y = {}
+            for w in words:
+                top = round(w['top'], 1)
+                lines_by_y.setdefault(top, []).append(w['text'])
+
+            for top_y in sorted(lines_by_y.keys()):
+                line_str = " ".join(lines_by_y[top_y])
+                
+                # ค้นหาพิกัด GPS และ เวลาส่ง
+                gps_match = re.search(r'(\d{1,2}\.\d+),\s*(\d{1,3}\.\d+)', line_str)
+                time_match = re.search(r'(\d{2}:\d{2})\s*น', line_str)
 
                 if gps_match and time_match:
                     lat = float(gps_match.group(1))
                     lng = float(gps_match.group(2))
                     delivery_time = time_match.group(1)
 
-                    cust_id_match = re.search(r'^([\d/]+)\s+', line.strip())
+                    cust_id_match = re.search(r'^([\d/]+)\s+', line_str.strip())
                     cust_id = cust_id_match.group(1) if cust_id_match else "N/A"
 
                     status = "จัดส่งตรงเวลา"
-                    if "จัดส่งไม่ตรงเวลา" in line or "ไม่ตรงเวลา" in line:
+                    if "ไม่ตรงเวลา" in line_str:
                         status = "จัดส่งไม่ตรงเวลา"
-                    elif "สมาชิกใหม่" in line:
+                    elif "สมาชิกใหม่" in line_str:
                         status = "สมาชิกใหม่"
-                    elif "รอบเสริม" in line:
+                    elif "รอบเสริม" in line_str:
                         status = "รอบเสริม"
-                    elif "ย้ายรอบ" in line:
+                    elif "ย้ายรอบ" in line_str:
                         status = "ย้ายรอบ"
 
-                    tokens = line.strip().split()
-                    cust_name = "ไม่ระบุ"
+                    # ดึงยอดส่ง (ตัวเลขก่อนหน้าพิกัด GPS)
+                    tokens = line_str.split()
                     qty_sent = 1
+                    cust_name = "ไม่ระบุ"
 
                     for idx, t in enumerate(tokens):
                         if "," in t and ("13." in t or "14." in t):
@@ -132,10 +146,7 @@ def parse_pdf_data(pdf_file):
                                 qty_sent = int(tokens[idx-2])
                             
                             if len(tokens) > 2:
-                                name_tokens = []
-                                for name_t in tokens[1:idx-2]:
-                                    if not name_t.isdigit():
-                                        name_tokens.append(name_t)
+                                name_tokens = [nt for nt in tokens[1:idx-2] if not nt.isdigit()]
                                 if name_tokens:
                                     cust_name = " ".join(name_tokens)
                             break
@@ -152,8 +163,9 @@ def parse_pdf_data(pdf_file):
 
     df = pd.DataFrame(records)
 
+    # ตัดรายการซ้ำซ้อนถ้ามี
     if not df.empty:
-        df = df.sort_values(by="time").reset_index(drop=True)
+        df = df.drop_duplicates(subset=['time', 'lat', 'lng']).sort_values(by="time").reset_index(drop=True)
 
         trips = []
         acc_qty_list = []
@@ -188,13 +200,13 @@ def parse_pdf_data(pdf_file):
 uploaded_file = st.file_uploader("📂 กรุณาอัปโหลดไฟล์รายงานการส่งสินค้า (PDF)", type=["pdf"])
 
 if uploaded_file:
-    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจาก PDF..."):
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลพิกัดทั้งหมดจาก PDF..."):
         df, dw_net, header_info = parse_pdf_data(uploaded_file)
 
     if df.empty:
         st.error("❌ ไม่พบข้อมูลพิกัด GPS หรือรายการจัดส่งในไฟล์ PDF นี้")
     else:
-        st.success("✅ ประมวลผลข้อมูลสำเร็จ!")
+        st.success(f"✅ ประมวลผลข้อมูลสำเร็จ! พบรายการจัดส่งทั้งหมด {len(df)} จุดส่ง")
 
         # --- ส่วนแสดง HEADER ข้อมูลประจำวัน ---
         st.subheader("📌 ข้อมูลปฏิบัติงานประจำวัน")
@@ -242,197 +254,174 @@ if uploaded_file:
         summary_df = pd.DataFrame(trip_summaries)
         st.table(summary_df)
 
-        # แก้ไขบรรทัดนี้จาก st.hr() เป็น st.divider()
         st.divider()
 
-        # --- MAP VISUALIZATION & SIMULATION ---
-        st.subheader("🗺️ แผนที่และระบบจำลองการวิ่งจัดส่ง (Road Routing Animation)")
+        # --- MAP VISUALIZATION (NO-FLICKER HTML5 CANVAS ENGINE) ---
+        st.subheader("🗺️ แผนที่และระบบจำลองการวิ่งจัดส่งตามถนนจริง (Smooth Animation)")
 
         trip_colors = {
-            "เที่ยวที่ 1": "blue",
-            "เที่ยวที่ 2": "green",
-            "เที่ยวที่ 3": "orange",
-            "เที่ยวที่ 4": "purple",
-            "เที่ยวที่ 5": "red"
+            "เที่ยวที่ 1": "#1E90FF",
+            "เที่ยวที่ 2": "#2E8B57",
+            "เที่ยวที่ 3": "#FF8C00",
+            "เที่ยวที่ 4": "#9370DB",
+            "เที่ยวที่ 5": "#DC143C"
         }
 
-        with st.spinner("กำลังคำนวณเส้นทางบนถนนจริงจาก OSRM (อาจใช้เวลาสักครู่)..."):
-            segments = []
+        # คำนวณเส้นทาง OSRM ถนนจริงเตรียมไว้ล่วงหน้า
+        with st.spinner("กำลังคำนวณเส้นทางถนนจริง (OSRM Engine)..."):
+            segments_data = []
             grouped = df.groupby('trip', sort=False)
-            
+
             for trip_name, group in grouped:
                 pts = [warehouse_coord] + list(zip(group['lat'], group['lng'])) + [warehouse_coord]
-                group_records = group.to_dict('records')
+                records_list = group.to_dict('records')
 
                 for i in range(len(pts) - 1):
                     p1 = pts[i]
                     p2 = pts[i+1]
-                    
-                    route_path = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
-                    
-                    if i < len(group_records):
-                        target_info = group_records[i]
-                    else:
-                        target_info = {"cust_name": "คลังสินค้า", "status": "กลับคลัง", "qty": 0, "time": "จบเที่ยว"}
+                    road_path = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
 
-                    segments.append({
+                    info = records_list[i] if i < len(records_list) else {"cust_name": "คลังสินค้า", "time": "จบเที่ยว", "qty": 0, "status": "กลับคลัง"}
+
+                    segments_data.append({
                         "trip": trip_name,
-                        "from": p1,
-                        "to": p2,
-                        "path": route_path,
-                        "target_info": target_info,
-                        "is_return_wh": (i == len(pts) - 2)
+                        "color": trip_colors.get(trip_name, "#1E90FF"),
+                        "path": road_path,
+                        "info": info
                     })
 
-        total_steps = len(df)
-        
-        col_ctrl1, col_ctrl2 = st.columns([1, 4])
-        
-        with col_ctrl1:
-            auto_play = st.checkbox("▶️ เล่นอัตโนมัติ (Auto Play)")
-            
-        with col_ctrl2:
-            step_idx = st.slider(
-                "เลื่อนดูความคืบหน้าตามลำดับจุดจัดส่ง:",
-                min_value=1,
-                max_value=total_steps,
-                value=1,
-                step=1
-            )
+        # แปลงข้อมูลเป็น JSON เพื่อส่งให้ JavaScript เล่น Animation
+        points_json = json.dumps(df.to_dict('records'))
+        segments_json = json.dumps(segments_data)
+        wh_json = json.dumps(warehouse_coord)
+        is_mode_1 = "แบบที่ 1" in play_mode
 
-        if auto_play:
-            placeholder_map = st.empty()
-            placeholder_info = st.empty()
+        # HTML5 + Leaflet.js Client-Side Animation Engine (ไม่กระพริบ 100%)
+        map_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            <style>
+                #map {{ width: 100%; height: 550px; border-radius: 10px; }}
+                .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; }}
+                button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }}
+                button:hover {{ background-color: #005f73; }}
+                #info-box {{ margin-top: 10px; padding: 10px; background: #eef2f5; border-left: 5px solid #008CBA; font-family: sans-serif; border-radius: 4px; }}
+            </style>
+        </head>
+        <body>
+            <div class="controls">
+                <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
+                <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
+                <button onclick="resetAnimation()">🔄 เริ่มใหม่ (Reset)</button>
+                <span id="status-text" style="font-weight: bold; font-family: sans-serif;">เตรียมพร้อมสำหรับการจำลอง...</span>
+            </div>
+            <div id="map"></div>
+            <div id="info-box">📍 **ข้อมูลจุดส่ง**: กดปุ่ม "เริ่มเล่น" เพื่อดูเส้นทางการจัดส่งตามถนนจริง</div>
 
-            for current_step in range(1, total_steps + 1):
-                m = folium.Map(location=[df['lat'].mean(), df['lng'].mean()], zoom_start=13)
+            <script>
+                const points = {points_json};
+                const segments = {segments_json};
+                const warehouse = {wh_json};
+                const isMode1 = {str(is_mode_1).lower()};
+                const speedMs = {anim_speed_ms};
 
-                folium.Marker(
-                    location=warehouse_coord,
-                    popup="<b>คลังสินค้า (Warehouse)</b>",
-                    icon=folium.Icon(color="black", icon="home", prefix="fa")
-                ).add_to(m)
+                const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
+                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                    attribution: '© OpenStreetMap'
+                }}).addTo(map);
 
-                current_row = df.iloc[current_step - 1]
-                
-                if "แบบที่ 1" in play_mode:
-                    for idx_all, r_all in df.iterrows():
-                        color_marker = "green" if r_all['status'] == "จัดส่งตรงเวลา" else "red"
-                        folium.CircleMarker(
-                            location=[r_all['lat'], r_all['lng']],
-                            radius=7,
-                            color=color_marker,
-                            fill=True,
-                            fill_color=trip_colors.get(r_all['trip'], 'blue'),
-                            fill_opacity=0.8,
-                            popup=f"ลำดับที่ {idx_all+1}: {r_all['cust_name']} ({r_all['time']})"
-                        ).add_to(m)
+                // หมุดคลังสินค้า
+                L.marker(warehouse).addTo(map).bindPopup("<b>🏢 คลังสินค้าหลัก (Warehouse)</b>");
 
-                    active_df = df.iloc[:current_step]
-                    for trip_k, trip_g in active_df.groupby('trip', sort=False):
-                        t_color = trip_colors.get(trip_k, 'blue')
-                        for seg in segments:
-                            if seg['trip'] == trip_k and seg['target_info'] in trip_g.to_dict('records'):
-                                folium.PolyLine(
-                                    seg['path'], color=t_color, weight=5, opacity=0.8
-                                ).add_to(m)
+                let allMarkers = [];
+                let activePolylines = [];
+                let currentStep = 0;
+                let animTimer = null;
 
-                else:
-                    active_df = df.iloc[:current_step]
-                    for idx_act, r_act in active_df.iterrows():
-                        color_marker = "green" if r_act['status'] == "จัดส่งตรงเวลา" else "red"
-                        folium.Marker(
-                            location=[r_act['lat'], r_act['lng']],
-                            popup=f"ลำดับที่ {idx_act+1}: {r_act['cust_name']}<br>เวลา: {r_act['time']}",
-                            icon=folium.Icon(color=color_marker, icon="flag")
-                        ).add_to(m)
+                // วาดหมุดทั้งหมดไว้ล่วงหน้าสำหรับแบบที่ 1
+                if (isMode1) {{
+                    points.forEach((pt, idx) => {{
+                        let color = pt.status === "จัดส่งตรงเวลา" ? "green" : "red";
+                        let circle = L.circleMarker([pt.lat, pt.lng], {{
+                            radius: 6,
+                            color: color,
+                            fillColor: "#3388ff",
+                            fillOpacity: 0.3
+                        }}).addTo(map).bindPopup(`<b>ลำดับที่ ${{idx+1}}: ${{pt.cust_name}}</b><br>เวลา: ${{pt.time}} น.`);
+                        allMarkers.push(circle);
+                    }});
+                }}
 
-                        for seg in segments:
-                            if seg['target_info'] == r_act.to_dict():
-                                folium.PolyLine(
-                                    seg['path'], 
-                                    color=trip_colors.get(seg['trip'], 'blue'), 
-                                    weight=5, 
-                                    opacity=0.8
-                                ).add_to(m)
+                function renderStep(step) {{
+                    if (step >= segments.length) return;
 
-                with placeholder_map.container():
-                    st_folium(m, width=1100, height=550, key=f"sim_map_{current_step}")
+                    const seg = segments[step];
+                    const info = seg.info;
 
-                with placeholder_info.container():
-                    st.info(
-                        f"🚚 **กำลังจัดส่งจุดที่ {current_step}/{total_steps}** | "
-                        f"**เที่ยว:** {current_row['trip']} | "
-                        f"**เวลา:** {current_row['time']} น. | "
-                        f"**ลูกค้า:** {current_row['cust_name']} (รหัส: {current_row['cust_id']}) | "
-                        f"**ยอดส่ง:** {current_row['qty']} | "
-                        f"**สถานะ:** {current_row['status']}"
-                    )
+                    // วาดเส้นทางถนน OSRM
+                    const polyline = L.polyline(seg.path, {{
+                        color: seg.color,
+                        weight: 5,
+                        opacity: 0.8
+                    }}).addTo(map);
+                    activePolylines.push(polyline);
 
-                time.sleep(anim_speed)
+                    // ขึ้นหมุดใหม่เมื่อถึงจุด (สำหรับแบบที่ 2 หรือเน้นหมุดในแบบที่ 1)
+                    if (info.lat && info.lng) {{
+                        let markerColor = info.status === "จัดส่งตรงเวลา" ? "green" : "red";
+                        let m = L.circleMarker([info.lat, info.lng], {{
+                            radius: 8,
+                            color: markerColor,
+                            fillColor: seg.color,
+                            fillOpacity: 0.9
+                        }}).addTo(map).bindPopup(`<b>${{info.cust_name}}</b><br>เวลา: ${{info.time}} น.`);
+                        allMarkers.push(m);
+                    }}
 
-        else:
-            m = folium.Map(location=[df['lat'].mean(), df['lng'].mean()], zoom_start=13)
+                    // อัปเดตกล่องข้อความ
+                    document.getElementById('status-text').innerText = `กำลังรันจุดที่ ${{step + 1}} / ${{segments.length}} (${{seg.trip}})`;
+                    document.getElementById('info-box').innerHTML = `
+                        <b>🚚 สถานะปัจจุบัน:</b> ${{seg.trip}} | 
+                        <b>เวลา:</b> ${{info.time || 'N/A'}} | 
+                        <b>ลูกค้า:</b> ${{info.cust_name}} | 
+                        <b>ยอดส่ง:</b> ${{info.qty || 0}} ใบ | 
+                        <b>สถานะ:</b> ${{info.status}}
+                    `;
+                }}
 
-            folium.Marker(
-                location=warehouse_coord,
-                popup="<b>คลังสินค้า (Warehouse)</b>",
-                icon=folium.Icon(color="black", icon="home", prefix="fa")
-            ).add_to(m)
+                function startAnimation() {{
+                    if (animTimer) clearInterval(animTimer);
+                    animTimer = setInterval(() => {{
+                        if (currentStep < segments.length) {{
+                            renderStep(currentStep);
+                            currentStep++;
+                        }} else {{
+                            clearInterval(animTimer);
+                            document.getElementById('status-text').innerText = "✅ จำลองการจัดส่งครบถ้วนทุกจุดแล้ว!";
+                        }}
+                    }}, speedMs);
+                }}
 
-            current_row = df.iloc[step_idx - 1]
+                function pauseAnimation() {{
+                    if (animTimer) clearInterval(animTimer);
+                    document.getElementById('status-text').innerText = "⏸️ หยุดการจำลองชั่วคราว";
+                }}
 
-            if "แบบที่ 1" in play_mode:
-                for idx_all, r_all in df.iterrows():
-                    color_marker = "green" if r_all['status'] == "จัดส่งตรงเวลา" else "red"
-                    folium.CircleMarker(
-                        location=[r_all['lat'], r_all['lng']],
-                        radius=7,
-                        color=color_marker,
-                        fill=True,
-                        fill_color=trip_colors.get(r_all['trip'], 'blue'),
-                        fill_opacity=0.8,
-                        popup=f"ลำดับที่ {idx_all+1}: {r_all['cust_name']} ({r_all['time']})"
-                    ).add_to(m)
+                function resetAnimation() {{
+                    if (animTimer) clearInterval(animTimer);
+                    currentStep = 0;
+                    activePolylines.forEach(p => map.removeLayer(p));
+                    activePolylines = [];
+                    document.getElementById('status-text').innerText = "เตรียมพร้อมสำหรับการจำลอง...";
+                    document.getElementById('info-box').innerHTML = "📍 **ข้อมูลจุดส่ง**: กดปุ่ม 'เริ่มเล่น' เพื่อดูเส้นทางการจัดส่งตามถนนจริง";
+                }}
+            </script>
+        </body>
+        </html>
+        """
 
-                active_df = df.iloc[:step_idx]
-                for trip_k, trip_g in active_df.groupby('trip', sort=False):
-                    t_color = trip_colors.get(trip_k, 'blue')
-                    g_records = trip_g.to_dict('records')
-                    
-                    for seg in segments:
-                        if seg['trip'] == trip_k and seg['target_info'] in g_records:
-                            folium.PolyLine(
-                                seg['path'], color=t_color, weight=5, opacity=0.8
-                            ).add_to(m)
-
-            else:
-                active_df = df.iloc[:step_idx]
-                for idx_act, r_act in active_df.iterrows():
-                    color_marker = "green" if r_act['status'] == "จัดส่งตรงเวลา" else "red"
-                    folium.Marker(
-                        location=[r_act['lat'], r_act['lng']],
-                        popup=f"ลำดับที่ {idx_act+1}: {r_act['cust_name']}<br>เวลา: {r_act['time']}",
-                        icon=folium.Icon(color=color_marker, icon="info-sign")
-                    ).add_to(m)
-
-                    for seg in segments:
-                        if seg['target_info'] == r_act.to_dict():
-                            folium.PolyLine(
-                                seg['path'], 
-                                color=trip_colors.get(seg['trip'], 'blue'), 
-                                weight=5, 
-                                opacity=0.8
-                            ).add_to(m)
-
-            st_folium(m, width=1100, height=550, key="manual_map")
-
-            st.info(
-                f"🚚 **สถานะจุดที่ {step_idx}/{total_steps}** | "
-                f"**เที่ยว:** {current_row['trip']} | "
-                f"**เวลา:** {current_row['time']} น. | "
-                f"**ลูกค้า:** {current_row['cust_name']} (รหัส: {current_row['cust_id']}) | "
-                f"**ยอดส่ง:** {current_row['qty']} | "
-                f"**ยอดส่งสะสม:** {current_row['acc_qty']} | "
-                f"**สถานะ:** {current_row['status']}"
-            )
+        # แสดงแผนที่ JavaScript บน Streamlit
+        components.html(map_html, height=650)
