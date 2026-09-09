@@ -55,7 +55,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- FUNCTION: PARSER สมบูรณ์แบบที่ใช้วิธี X-Y Position grouping ---
+# --- PARSER ขั้นสูง: สกัดด้วยระบบ Spatial Coordinate Boundary ---
 def parse_pdf_data(pdf_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
@@ -65,7 +65,7 @@ def parse_pdf_data(pdf_file):
         for page_idx, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             
-            # 1. ดึง Header และรายการ DW
+            # 1. สกัด Header และ DW
             if page_idx == 0:
                 d_match = re.search(r'ประจําวัน\s*([\d/]+)', text) or re.search(r'ประจำวัน\s*([\d/]+)', text)
                 if d_match:
@@ -83,104 +83,96 @@ def parse_pdf_data(pdf_file):
                 for dw_val in dw_matches:
                     dw_list.append(int(dw_val))
 
-            # 2. ดึงตารางโดยสกัดพิกัดตัวอักษร (Word Level Extraction)
+            # 2. ดึงคำทั้งหมดพร้อมพิกัด (Bounding Box Words)
             words = page.extract_words()
             
-            # จัดกลุ่มคำตามพิกัดแนวตั้ง Y (ผ่อนปรนระยะ Y บรรทัดที่ 3px)
-            rows_by_y = {}
+            # ค้นหาคำที่เป็นพิกัด GPS เพื่อใช้เป็นAnchor จุดจัดส่ง
+            gps_anchors = []
             for w in words:
-                y_pos = round(w['top'] / 3.0) * 3
-                rows_by_y.setdefault(y_pos, []).append(w)
-
-            # เรียงลำดับบรรทัดตามระยะบนลงล่าง
-            sorted_y = sorted(rows_by_y.keys())
-            
-            # รวมกลุ่มคำที่อยู่ในบรรทัดเดียวกัน
-            lines = []
-            for y in sorted_y:
-                line_words = sorted(rows_by_y[y], key=lambda item: item['x0'])
-                line_text = " ".join([w['text'] for w in line_words])
-                lines.append((y, line_words, line_text))
-
-            # วนลูปอ่านข้อมูลรายการจัดส่ง
-            for i, (y, l_words, l_text) in enumerate(lines):
-                gps_match = re.search(r'(1[2-9]\.\d+)\s*[\,\/]\s*(10[0-5]\.\d+)', l_text)
-                if gps_match:
-                    lat = float(gps_match.group(1))
-                    lng = float(gps_match.group(2))
-
-                    # สกัดเวลาส่ง
-                    time_m = re.search(r'(\d{1,2}:\d{2}\s*น\.)', l_text)
-                    deliv_time = time_m.group(1) if time_m else "ไม่ระบุ"
-
-                    # สกัดสถานะ
-                    status = "จัดส่งตรงเวลา"
-                    if "จัดส่งไม่ตรงเวลา" in l_text:
-                        status = "จัดส่งไม่ตรงเวลา"
-                    elif "รอบเสริม" in l_text:
-                        status = "รอบเสริม"
-                    elif "ย้าย" in l_text:
-                        status = "ย้ายรอบ"
-
-                    # สกัดรหัสลูกค้า ยอดส่ง และชื่อลูกค้า จากตำแหน่ง X-Coordinate
-                    cust_id = "N/A"
-                    cust_name = ""
-                    qty = 1
-
-                    # กรองเอาคำที่อยู่ด้านซ้ายของพิกัด GPS
-                    left_words = [w for w in l_words if w['x0'] < gps_match.start()]
-                    
-                    # ถ้ารายชื่อลูกค้ายาวขึ้นบรรทัดใหม่ ให้ดึงคำจากบรรทัดก่อนหน้า (y_prev) มารวม
-                    if i > 0:
-                        prev_y, prev_words, prev_text = lines[i-1]
-                        # ตรวจสอบว่าบรรทัดก่อนหน้าไม่ใช่ส่วนหัวตาราง หรือบรรทัดที่มี GPS
-                        if not re.search(r'(1[2-9]\.\d+)|รหัสลูกค้า|รายละเอียด|DWS|RES', prev_text):
-                            left_words = prev_words + left_words
-
-                    # สกัดรหัสลูกค้า (คำแรกที่เป็นตัวเลข/รหัส)
-                    for w in left_words:
-                        if re.match(r'^[\d/]{4,}$', w['text']):
-                            cust_id = w['text']
-                            break
-
-                    # สกัดยอดส่ง (ตัวเลขถัดจากชื่อลูกค้า)
-                    num_candidates = [w for w in left_words if w['text'].isdigit() and int(w['text']) <= 100]
-                    if num_candidates:
-                        qty = int(num_candidates[0]['text'])
-
-                    # สกัดชื่อลูกค้า (รวมคำที่ไม่ใช่ตัวเลขรหัส และไม่ใช่อักขระพิเศษ)
-                    name_parts = []
-                    for w in left_words:
-                        t = w['text']
-                        if t in ['|', '(', ')'] or t == cust_id:
-                            continue
-                        if t.isdigit() and int(t) <= 100:
-                            continue
-                        if not re.search(r'^\d{1,2}:\d{2}', t):
-                            name_parts.append(t)
-
-                    cust_name = " ".join(name_parts).strip()
-                    cust_name = re.sub(r'^[\|\s\d]+', '', cust_name).strip()
-                    if not cust_name:
-                        cust_name = "ไม่ระบุชื่อ"
-
-                    records.append({
-                        "cust_id": cust_id,
-                        "cust_name": cust_name,
-                        "qty": qty,
-                        "lat": lat,
-                        "lng": lng,
-                        "time": deliv_time,
-                        "status": status
+                m = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', w['text'])
+                if m:
+                    gps_anchors.append({
+                        'lat': float(m.group(1)),
+                        'lng': float(m.group(2)),
+                        'top': w['top'],
+                        'bottom': w['bottom']
                     })
 
-    # สรุปสร้าง DataFrame และแบ่งเที่ยวส่ง
+            # จัดเรียง Anchor จากบนลงล่างตามตำแหน่งบนหน้ากระดาษ
+            gps_anchors = sorted(gps_anchors, key=lambda x: x['top'])
+
+            # กำหนดขอบเขตกลุ่มข้อมูล (Data Block Boundary) ของแต่ละรายการ
+            for idx, anchor in enumerate(gps_anchors):
+                # ขอบเขตแนวตั้ง: ตั้งแต่จุดสิ้นสุดรายการก่อนหน้า ถึงจุดสิ้นสุดรายการนี้
+                top_bound = gps_anchors[idx-1]['bottom'] if idx > 0 else (anchor['top'] - 30)
+                bottom_bound = anchor['bottom'] + 15
+
+                # กรองคำที่อยู่ในขอบเขตแนวตั้งของรายการนี้
+                block_words = [w for w in words if top_bound <= w['top'] <= bottom_bound]
+
+                cust_id = "N/A"
+                cust_name_parts = []
+                qty = 1
+                deliv_time = "ไม่ระบุ"
+                status = "จัดส่งตรงเวลา"
+
+                for w in block_words:
+                    txt = w['text'].strip()
+                    x_pos = w['x0']
+
+                    # สกัดสถานะ
+                    if "จัดส่งไม่ตรงเวลา" in txt:
+                        status = "จัดส่งไม่ตรงเวลา"
+                    elif "รอบเสริม" in txt:
+                        status = "รอบเสริม"
+                    elif "ย้าย" in txt:
+                        status = "ย้ายรอบ"
+
+                    # สกัดเวลาส่ง (รูปแบบ 09:30, 13:45, 10:12 น.)
+                    time_m = re.search(r'(\d{1,2}:\d{2})', txt)
+                    if time_m and deliv_time == "ไม่ระบุ":
+                        deliv_time = time_m.group(1) + " น."
+
+                    # สกัดรหัสลูกค้า (คอลัมน์ซ้ายสุด X < 80)
+                    if x_pos < 80 and re.match(r'^[\d/]{4,}$', txt) and cust_id == "N/A":
+                        cust_id = txt
+                        continue
+
+                    # สกัดยอดส่ง (คอลัมน์ยอดส่ง X อยู่ช่วง 180 ถึง 260)
+                    if 180 <= x_pos <= 260 and txt.isdigit() and int(txt) <= 100:
+                        qty = int(txt)
+                        continue
+
+                    # สกัดชื่อลูกค้า (คอลัมน์ชื่อ X อยู่ช่วง 70 ถึง 210)
+                    if 70 <= x_pos < 210:
+                        if txt in ['|', '(', ')', 'รายการ'] or txt == cust_id:
+                            continue
+                        if txt.isdigit() and int(txt) <= 100:
+                            continue
+                        if re.search(r'\d{1,2}:\d{2}|จัดส่ง|ตรงเวลา|รอบเสริม|ย้าย', txt):
+                            continue
+                        cust_name_parts.append(txt)
+
+                # รวมชื่อลูกค้าและทำความสะอาดคำขยะ
+                cust_name = " ".join(cust_name_parts).strip()
+                cust_name = re.sub(r'^[\|\s\d]+', '', cust_name).strip()
+                if not cust_name:
+                    cust_name = "ไม่ระบุชื่อ"
+
+                records.append({
+                    "cust_id": cust_id,
+                    "cust_name": cust_name,
+                    "qty": qty,
+                    "lat": anchor['lat'],
+                    "lng": anchor['lng'],
+                    "time": deliv_time,
+                    "status": status
+                })
+
+    # 3. จัดกลุ่มสร้าง DataFrame และแบ่งเที่ยวส่งตาม DW (80, 80)
     df = pd.DataFrame(records)
     if not df.empty:
-        # ตัดข้อมูลที่ซ้ำกันออก
-        df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
-
-        # จัดแบ่งเที่ยวการส่งตามวงเงินเบิกสินค้าจริง DW (80, 80)
+        # กำหนดโควต้า DW แต่ละรอบ (เช่น 80, 80)
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80]
         trips = []
         acc_qty_list = []
@@ -192,6 +184,7 @@ def parse_pdf_data(pdf_file):
 
         for idx, row in df.iterrows():
             q = row['qty']
+            # ถ้าส่งสะสมเกินโควต้า DW เที่ยวปัจจุบัน ให้ตัดขึ้นเที่ยวใหม่
             if curr_trip_qty + q > curr_limit and curr_trip_qty > 0 and curr_trip < len(dw_limits):
                 curr_trip += 1
                 curr_trip_qty = 0
@@ -231,7 +224,7 @@ if uploaded_file:
         st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (Data Table)")
         disp_df = df[['time', 'trip', 'cust_id', 'cust_name', 'qty', 'acc_qty', 'status', 'lat', 'lng']].copy()
         disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude']
-        st.dataframe(disp_df, use_container_width=True, height=320)
+        st.dataframe(disp_df, use_container_width=True, height=350)
 
         # --- สรุปยอดตามเที่ยววิ่ง ---
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
