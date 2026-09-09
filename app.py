@@ -16,16 +16,15 @@ st.set_page_config(
 st.title("🚚 โปรเจกต์: การตรวจสอบเส้นทางการจัดส่ง")
 st.markdown("ระบบวิเคราะห์รายงานการส่งสินค้า คำนวณเที่ยววิ่ง และจำลองเส้นทางบนถนนจริง (OSRM Routing)")
 
-# --- SIDEBAR: การตั้งค่าพิกัดคลัง (บรรทัดเดียว) และรูปแบบการแสดงผล ---
+# --- SIDEBAR: การตั้งค่าพิกัดคลัง และรูปแบบการแสดงผล ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
 wh_input = st.sidebar.text_input("พิกัดคลังสินค้า (Lat, Lng)", value="13.66800, 100.61000")
 
-# แยก Latitude และ Longitude จากข้อความบรรทัดเดียว
 try:
     wh_lat, wh_lng = [float(x.strip()) for x in wh_input.split(',')]
     warehouse_coord = (wh_lat, wh_lng)
 except Exception:
-    st.sidebar.error("⚠️ รูปแบบพิกัดคลังไม่ถูกต้อง กรุณากรอกเป็น 'Latitude, Longitude' เช่น 13.66800, 100.61000")
+    st.sidebar.error("⚠️ รูปแบบพิกัดคลังไม่ถูกต้อง กรุณากรอกเป็น 'Latitude, Longitude'")
     warehouse_coord = (13.66800, 100.61000)
 
 st.sidebar.header("🎬 การตั้งค่ารูปแบบแผนที่")
@@ -45,7 +44,7 @@ anim_speed_ms = st.sidebar.slider("ความเร็วการเล่น
 def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
     try:
-        response = requests.get(url, timeout=3)
+        response = requests.get(url, timeout=4)
         if response.status_code == 200:
             data = response.json()
             if data.get("routes"):
@@ -56,24 +55,19 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- FUNCTION: แกะข้อมูล PDF ขั้นสูง (แก้เรื่องเวลา, ชื่อสมาชิก, และเที่ยวส่ง) ---
+# --- FUNCTION: แกะข้อมูล PDF ---
 def parse_pdf_data(pdf_file):
-    header_info = {
-        "date": "ไม่ระบุ",
-        "truck_no": "ไม่ระบุ",
-        "driver": "ไม่ระบุ"
-    }
-    
+    header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_net = {}
     records = []
 
     try:
         with pdfplumber.open(pdf_file) as pdf:
-            for page_idx, page in enumerate(pdf.pages):
+            for page in pdf.pages:
                 text = page.extract_text() or ""
                 lines = text.split('\n')
                 
-                # --- 1. อ่าน Header และ DW/RE สรุปเที่ยว ---
+                # 1. อ่าน Header & DW/RE
                 for line in lines:
                     if "ประจําวัน" in line or "ประจำวัน" in line:
                         date_match = re.search(r'([\d]{1,2}/[\d]{1,2}/[\d]{2,4})', line)
@@ -89,7 +83,6 @@ def parse_pdf_data(pdf_file):
                         if driver_match:
                             header_info["driver"] = driver_match.group(1).strip()
 
-                    # แกะเลขเบิก/คืนเพื่อคำนวณจำนวนเที่ยว (DW/RE)
                     dw_matches = re.findall(r'DW\w*/(\d{1,3})\s+(\d+)', line)
                     for trip_no, qty in dw_matches:
                         dw_net[int(trip_no)] = dw_net.get(int(trip_no), 0) + int(qty)
@@ -98,7 +91,7 @@ def parse_pdf_data(pdf_file):
                     for trip_no, qty in re_matches:
                         dw_net[int(trip_no)] = dw_net.get(int(trip_no), 0) - int(qty)
 
-                # --- 2. อ่านตารางข้อมูลรายการส่ง ---
+                # 2. อ่านตารางข้อมูลรายการส่ง
                 words = page.extract_words()
                 lines_by_y = {}
                 for w in words:
@@ -107,23 +100,18 @@ def parse_pdf_data(pdf_file):
 
                 for top_y in sorted(lines_by_y.keys()):
                     line_str = " ".join(lines_by_y[top_y])
-                    
-                    # ค้นหาพิกัด GPS (Lat, Lng)
                     gps_match = re.search(r'(1[2-9]\.\d+)\s*[\,\/\s]\s*(9[8-9]\.\d+|10[0-5]\.\d+)', line_str)
                     
                     if gps_match:
                         lat = float(gps_match.group(1))
                         lng = float(gps_match.group(2))
 
-                        # 1. ดึงเวลาส่ง (เช่น 08:30 น. หรือ 08:30)
                         time_match = re.search(r'(\d{1,2}:\d{2})', line_str)
                         delivery_time = time_match.group(1) if time_match else "ไม่ระบุ"
 
-                        # 2. ดึงรหัสลูกค้า
                         cust_id_match = re.search(r'(\b\d{4,8}\b|\b[\d/]{4,8}\b)', line_str)
                         cust_id = cust_id_match.group(1) if cust_id_match else "N/A"
 
-                        # 3. ดึงสถานะการส่ง
                         status = "จัดส่งตรงเวลา"
                         if "ไม่ตรงเวลา" in line_str:
                             status = "จัดส่งไม่ตรงเวลา"
@@ -134,23 +122,21 @@ def parse_pdf_data(pdf_file):
                         elif "ย้ายรอบ" in line_str:
                             status = "ย้ายรอบ"
 
-                        # 4. ดึงชื่อลูกค้า/สมาชิก (สกัดข้อความภาษาไทยระหว่างรหัสลูกค้ากับยอดส่ง/พิกัด)
-                        # ตัดคำที่ไม่ใช่ชื่อออก
+                        # ทำความสะอาดข้อความเพื่อหาชื่อ
                         clean_str = re.sub(r'1[2-9]\.\d+\s*[\,\/\s]\s*(9[8-9]\.\d+|10[0-5]\.\d+)', '', line_str)
                         clean_str = re.sub(r'\d{1,2}:\d{2}\s*(น\.)?', '', clean_str)
                         
-                        # ค้นหากลุ่มคำภาษาไทย/ชื่อร้าน/ชื่อสมาชิก
                         names_found = re.findall(r'[\u0E00-\u0E7F\w\s\.\-\(\)]+', clean_str)
                         cust_name = "ไม่ระบุ"
                         
+                        exclude_kws = ["ประจำวัน", "พนักงาน", "จัดส่ง", "สมาชิกใหม่", "ตรงเวลา", "รายงาน", "หน้า"]
                         for name in names_found:
                             name_stripped = name.strip()
-                            # กรองคำที่ไม่ใช่ชื่อลูกค้าออก
-                            if len(name_stripped) > 2 and not any(kw in name_stripped for kw in ["ประจำวัน", "พนักงาน", "จัดส่ง", "สมาชิกใหม่", "ตรงเวลา"]):
-                                cust_name = name_stripped
+                            if len(name_stripped) > 2 and not any(kw in name_stripped for kw in exclude_kws):
+                                # ลบ อักขระพิเศษป้องกัน JS Error
+                                cust_name = name_stripped.replace("'", "").replace('"', '')
                                 break
 
-                        # 5. ดึงยอดส่ง (ตัวเลขก่อนพิกัด GPS)
                         qty_match = re.search(r'(\d+)\s+(?:1[2-9]\.\d+)', line_str)
                         qty_sent = int(qty_match.group(1)) if qty_match else 1
 
@@ -170,17 +156,12 @@ def parse_pdf_data(pdf_file):
     df = pd.DataFrame(records)
 
     if not df.empty:
-        df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
-
-        # --- คำนวณแบ่งเที่ยวส่ง (ให้ได้ตรงตามความจริง 3 เที่ยว) ---
+        # คำนวณเที่ยวส่ง
         trips = []
         acc_qty_list = []
-        
-        # ถ้าพบข้อมูล DW ใน PDF จะใช้ค่าจริง ถ้าไม่พบจะแบ่งเฉลี่ยเป็น 3 เที่ยวโดยอัตโนมัติ
         total_items = len(df)
         
         if len(dw_net) >= 3:
-            # ใช้ DW Net ถ้าสกัดเที่ยวได้ 3 เที่ยวขึ้นไป
             current_trip = 1
             current_trip_acc = 0
             total_acc = 0
@@ -198,19 +179,12 @@ def parse_pdf_data(pdf_file):
                 trips.append(f"เที่ยวที่ {current_trip}")
                 acc_qty_list.append(total_acc)
         else:
-            # คำนวณแบ่งเป็น 3 เที่ยวให้อัตโนมัติกรณี PDF ไม่โชว์รหัส DW ชัดเจน
             items_per_trip = max(1, total_items // 3)
             total_acc = 0
             
             for idx, row in df.iterrows():
                 total_acc += row['qty']
-                if idx < items_per_trip:
-                    trip_num = 1
-                elif idx < items_per_trip * 2:
-                    trip_num = 2
-                else:
-                    trip_num = 3
-                
+                trip_num = 1 if idx < items_per_trip else (2 if idx < items_per_trip * 2 else 3)
                 trips.append(f"เที่ยวที่ {trip_num}")
                 acc_qty_list.append(total_acc)
 
@@ -228,55 +202,40 @@ if uploaded_file:
         df, dw_net, header_info = parse_pdf_data(uploaded_file)
 
     if df.empty:
-        st.error("❌ ไม่พบข้อมูลพิกัด GPS หรือรายการจัดส่งในไฟล์ PDF นี้ กรุณาตรวจสอบว่าไม่ใช่ไฟล์ภาพสแกน")
+        st.error("❌ ไม่พบข้อมูลพิกัด GPS หรือรายการจัดส่งในไฟล์ PDF นี้")
     else:
-        st.success(f"✅ ประมวลผลข้อมูลสำเร็จ! พบรายการจัดส่งทั้งหมด {len(df)} จุดส่ง (แบ่งเป็น {df['trip'].nunique()} เที่ยววิ่ง)")
+        st.success(f"✅ ประมวลผลสำเร็จ! พบรายการจัดส่ง {len(df)} จุดส่ง (แบ่งเป็น {df['trip'].nunique()} เที่ยววิ่ง)")
 
-        # --- ส่วนแสดง HEADER ข้อมูลประจำวัน ---
         st.subheader("📌 ข้อมูลปฏิบัติงานประจำวัน")
         h_col1, h_col2, h_col3 = st.columns(3)
         h_col1.info(f"📅 **งานประจำวันที่:** {header_info['date']}")
         h_col2.info(f"🚛 **รถส่ง:** {header_info['truck_no']}")
         h_col3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        # --- ตารางแสดงรายการจัดส่ง ---
         st.subheader("📋 ตารางรายการจัดส่งสินค้า (เรียงตามลำดับเวลา)")
-        
-        display_df = df[[
-            'time', 'trip', 'cust_id', 'cust_name', 
-            'qty', 'acc_qty', 'status', 'lat', 'lng'
-        ]].copy()
-
-        display_df.columns = [
-            'เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 
-            'ยอดส่ง (ใบ/ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude'
-        ]
-
+        display_df = df[['time', 'trip', 'cust_id', 'cust_name', 'qty', 'acc_qty', 'status', 'lat', 'lng']].copy()
+        display_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 'ยอดส่ง (ใบ/ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude']
         st.dataframe(display_df, use_container_width=True, height=280)
 
-        # --- สรุปยอดส่งแต่ละเที่ยว ---
         st.subheader("📊 รายงานสรุปยอดส่งแบ่งตามเที่ยว (Trip Summary)")
-        
         trip_summaries = []
         for trip_name, group in df.groupby('trip', sort=False):
-            trip_num = int(trip_name.replace("เที่ยวที่ ", ""))
+            try:
+                trip_num = int(trip_name.replace("เที่ยวที่ ", ""))
+            except ValueError:
+                trip_num = 1
             net_withdraw = dw_net.get(trip_num, group['qty'].sum())
-            total_sent = group['qty'].sum()
-            ontime_count = len(group[group['status'] == 'จัดส่งตรงเวลา'])
-            late_count = len(group[group['status'] != 'จัดส่งตรงเวลา'])
-
+            
             trip_summaries.append({
                 "เที่ยวการส่ง": trip_name,
                 "ยอดเบิกสุทธิ (DW-RE)": net_withdraw,
-                "ยอดจัดส่งจริงสุทธิ": total_sent,
+                "ยอดจัดส่งจริงสุทธิ": group['qty'].sum(),
                 "จำนวนจุดส่งทั้งหมด": len(group),
-                "จัดส่งตรงเวลา (จุด)": ontime_count,
-                "จัดส่งไม่ตรงเวลา/อื่นๆ (จุด)": late_count,
+                "จัดส่งตรงเวลา (จุด)": len(group[group['status'] == 'จัดส่งตรงเวลา']),
+                "จัดส่งไม่ตรงเวลา/อื่นๆ (จุด)": len(group[group['status'] != 'จัดส่งตรงเวลา']),
                 "หมายเหตุ": "วิ่งออกจากคลัง -> ส่งสินค้า -> วิ่งกลับคลัง"
             })
-
-        summary_df = pd.DataFrame(trip_summaries)
-        st.table(summary_df)
+        st.table(pd.DataFrame(trip_summaries))
 
         st.divider()
 
@@ -291,7 +250,6 @@ if uploaded_file:
             "เที่ยวที่ 5": "#DC143C"
         }
 
-        # คำนวณเส้นทาง OSRM ถนนจริง
         with st.spinner("กำลังคำนวณเส้นทางถนนจริง (OSRM Engine)..."):
             segments_data = []
             grouped = df.groupby('trip', sort=False)
@@ -301,11 +259,15 @@ if uploaded_file:
                 records_list = group.to_dict('records')
 
                 for i in range(len(pts) - 1):
-                    p1 = pts[i]
-                    p2 = pts[i+1]
+                    p1, p2 = pts[i], pts[i+1]
                     road_path = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
-
-                    info = records_list[i] if i < len(records_list) else {"cust_name": "คลังสินค้า", "time": "จบเที่ยว", "qty": 0, "status": "กลับคลัง"}
+                    
+                    info = records_list[i] if i < len(records_list) else {
+                        "cust_name": "คลังสินค้าหลัก", 
+                        "time": "จบเที่ยววิ่ง", 
+                        "qty": 0, 
+                        "status": "กลับเข้าคลัง"
+                    }
 
                     segments_data.append({
                         "trip": trip_name,
@@ -314,8 +276,8 @@ if uploaded_file:
                         "info": info
                     })
 
-        points_json = json.dumps(df.to_dict('records'))
-        segments_json = json.dumps(segments_data)
+        points_json = json.dumps(df.to_dict('records'), ensure_ascii=False)
+        segments_json = json.dumps(segments_data, ensure_ascii=False)
         wh_json = json.dumps(warehouse_coord)
         is_mode_1 = "แบบที่ 1" in play_mode
 
@@ -350,7 +312,7 @@ if uploaded_file:
                 const isMode1 = {str(is_mode_1).lower()};
                 const speedMs = {anim_speed_ms};
 
-                const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
+                const map = L.map('map').setView([warehouse[0], warehouse[1]], 12);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     attribution: '© OpenStreetMap'
                 }}).addTo(map);
@@ -369,7 +331,7 @@ if uploaded_file:
                             radius: 6,
                             color: color,
                             fillColor: "#3388ff",
-                            fillOpacity: 0.3
+                            fillOpacity: 0.5
                         }}).addTo(map).bindPopup(`<b>ลำดับที่ ${{idx+1}}: ${{pt.cust_name}}</b><br>เวลา: ${{pt.time}} น.`);
                         allMarkers.push(circle);
                     }});
@@ -388,7 +350,7 @@ if uploaded_file:
                     }}).addTo(map);
                     activePolylines.push(polyline);
 
-                    if (info.lat && info.lng) {{
+                    if (!isMode1 && info.lat && info.lng) {{
                         let markerColor = info.status === "จัดส่งตรงเวลา" ? "green" : "red";
                         let m = L.circleMarker([info.lat, info.lng], {{
                             radius: 8,
@@ -432,6 +394,10 @@ if uploaded_file:
                     currentStep = 0;
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
+                    if (!isMode1) {{
+                        allMarkers.forEach(m => map.removeLayer(m));
+                        allMarkers = [];
+                    }}
                     document.getElementById('status-text').innerText = "เตรียมพร้อมสำหรับการจำลอง...";
                     document.getElementById('info-box').innerHTML = "📍 **ข้อมูลจุดส่ง**: กดปุ่ม 'เริ่มเล่น' เพื่อดูเส้นทางการจัดส่งตามถนนจริง";
                 }}
