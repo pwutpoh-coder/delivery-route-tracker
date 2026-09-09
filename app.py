@@ -55,69 +55,114 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- FUNCTION: PARSE PDF (แก้ปัญหาอ่านข้อมูลไม่ครบยอดไม่ตรงอย่างสมบูรณ์) ---
+# --- FUNCTION: PARSER สมบูรณ์แบบที่ใช้วิธี X-Y Position grouping ---
 def parse_pdf_data(pdf_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
     records = []
 
     with pdfplumber.open(pdf_file) as pdf:
-        for page_num, page in enumerate(pdf.pages):
+        for page_idx, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             
-            # 1. สกัดข้อมูล Header & DW
-            if page_num == 0:
-                date_m = re.search(r'ประจําวัน\s*([\d/]+)', text) or re.search(r'ประจำวัน\s*([\d/]+)', text)
-                if date_m:
-                    header_info["date"] = date_m.group(1)
+            # 1. ดึง Header และรายการ DW
+            if page_idx == 0:
+                d_match = re.search(r'ประจําวัน\s*([\d/]+)', text) or re.search(r'ประจำวัน\s*([\d/]+)', text)
+                if d_match:
+                    header_info["date"] = d_match.group(1)
                 
-                truck_m = re.search(r'รถส่ง\s*(\w+)', text)
-                if truck_m:
-                    header_info["truck_no"] = truck_m.group(1)
+                t_match = re.search(r'รถส่ง\s*(\w+)', text)
+                if t_match:
+                    header_info["truck_no"] = t_match.group(1)
 
-                driver_m = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', text)
-                if driver_m:
-                    header_info["driver"] = driver_m.group(1).split("พนักงานยก")[0].strip()
+                drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', text)
+                if drv_match:
+                    header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
 
-                # แกะ DW เบิกสินค้า
-                dw_matches = re.findall(r'DWS\d+/\d+\s+\|\s*(\d+)', text)
+                dw_matches = re.findall(r'DWS\d+/\d+\s*\|\s*(\d+)', text)
                 for dw_val in dw_matches:
                     dw_list.append(int(dw_val))
 
-            # 2. สกัดตารางข้อมูลรายการส่งด้วย Regex Pattern ขั้นสูง
-            # ค้นหาบล็อกรายการส่งจากพิกัด GPS เช่น 13.74693,100.59154
-            raw_lines = text.split('\n')
+            # 2. ดึงตารางโดยสกัดพิกัดตัวอักษร (Word Level Extraction)
+            words = page.extract_words()
             
-            # รวมบรรทัดเพื่อจัดการกรณีชื่อลูกค้าอยู่คนละบรรทัดกับพิกัด
-            full_text = "\n".join(raw_lines)
-            
-            # Regex ตรวจจับรูปแบบแพทเทิร์นรายการส่งใน PDF Sprinkle
-            pattern = re.compile(
-                r'([\d/]+)\s*\n?\s*\|\s*([^\n|]+?)\s*\n?\s*\|\s*(\d+)\s*\|\s*[\d\s|]*?\s*(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)\s*\|\s*[\d\.]+\s*\|\s*(\d{1,2}:\d{2}\s*น\.[^\n]*)'
-            )
+            # จัดกลุ่มคำตามพิกัดแนวตั้ง Y (ผ่อนปรนระยะ Y บรรทัดที่ 3px)
+            rows_by_y = {}
+            for w in words:
+                y_pos = round(w['top'] / 3.0) * 3
+                rows_by_y.setdefault(y_pos, []).append(w)
 
-            matches = pattern.findall(full_text)
+            # เรียงลำดับบรรทัดตามระยะบนลงล่าง
+            sorted_y = sorted(rows_by_y.keys())
             
-            if matches:
-                for m in matches:
-                    cust_id = m[0].strip()
-                    cust_name = m[1].replace('\n', ' ').strip()
-                    qty = int(m[2])
-                    lat = float(m[3])
-                    lng = float(m[4])
-                    time_status_str = m[5].strip()
+            # รวมกลุ่มคำที่อยู่ในบรรทัดเดียวกัน
+            lines = []
+            for y in sorted_y:
+                line_words = sorted(rows_by_y[y], key=lambda item: item['x0'])
+                line_text = " ".join([w['text'] for w in line_words])
+                lines.append((y, line_words, line_text))
 
-                    # แยกเวลาและสถานะ
-                    time_m = re.search(r'(\d{1,2}:\d{2}\s*น\.)', time_status_str)
+            # วนลูปอ่านข้อมูลรายการจัดส่ง
+            for i, (y, l_words, l_text) in enumerate(lines):
+                gps_match = re.search(r'(1[2-9]\.\d+)\s*[\,\/]\s*(10[0-5]\.\d+)', l_text)
+                if gps_match:
+                    lat = float(gps_match.group(1))
+                    lng = float(gps_match.group(2))
+
+                    # สกัดเวลาส่ง
+                    time_m = re.search(r'(\d{1,2}:\d{2}\s*น\.)', l_text)
                     deliv_time = time_m.group(1) if time_m else "ไม่ระบุ"
 
+                    # สกัดสถานะ
                     status = "จัดส่งตรงเวลา"
-                    if "จัดส่งไม่ตรงเวลา" in time_status_str:
+                    if "จัดส่งไม่ตรงเวลา" in l_text:
                         status = "จัดส่งไม่ตรงเวลา"
-                    elif "รอบเสริม" in time_status_str:
+                    elif "รอบเสริม" in l_text:
                         status = "รอบเสริม"
-                    elif "ย้าย" in time_status_str:
+                    elif "ย้าย" in l_text:
                         status = "ย้ายรอบ"
+
+                    # สกัดรหัสลูกค้า ยอดส่ง และชื่อลูกค้า จากตำแหน่ง X-Coordinate
+                    cust_id = "N/A"
+                    cust_name = ""
+                    qty = 1
+
+                    # กรองเอาคำที่อยู่ด้านซ้ายของพิกัด GPS
+                    left_words = [w for w in l_words if w['x0'] < gps_match.start()]
+                    
+                    # ถ้ารายชื่อลูกค้ายาวขึ้นบรรทัดใหม่ ให้ดึงคำจากบรรทัดก่อนหน้า (y_prev) มารวม
+                    if i > 0:
+                        prev_y, prev_words, prev_text = lines[i-1]
+                        # ตรวจสอบว่าบรรทัดก่อนหน้าไม่ใช่ส่วนหัวตาราง หรือบรรทัดที่มี GPS
+                        if not re.search(r'(1[2-9]\.\d+)|รหัสลูกค้า|รายละเอียด|DWS|RES', prev_text):
+                            left_words = prev_words + left_words
+
+                    # สกัดรหัสลูกค้า (คำแรกที่เป็นตัวเลข/รหัส)
+                    for w in left_words:
+                        if re.match(r'^[\d/]{4,}$', w['text']):
+                            cust_id = w['text']
+                            break
+
+                    # สกัดยอดส่ง (ตัวเลขถัดจากชื่อลูกค้า)
+                    num_candidates = [w for w in left_words if w['text'].isdigit() and int(w['text']) <= 100]
+                    if num_candidates:
+                        qty = int(num_candidates[0]['text'])
+
+                    # สกัดชื่อลูกค้า (รวมคำที่ไม่ใช่ตัวเลขรหัส และไม่ใช่อักขระพิเศษ)
+                    name_parts = []
+                    for w in left_words:
+                        t = w['text']
+                        if t in ['|', '(', ')'] or t == cust_id:
+                            continue
+                        if t.isdigit() and int(t) <= 100:
+                            continue
+                        if not re.search(r'^\d{1,2}:\d{2}', t):
+                            name_parts.append(t)
+
+                    cust_name = " ".join(name_parts).strip()
+                    cust_name = re.sub(r'^[\|\s\d]+', '', cust_name).strip()
+                    if not cust_name:
+                        cust_name = "ไม่ระบุชื่อ"
 
                     records.append({
                         "cust_id": cust_id,
@@ -128,67 +173,14 @@ def parse_pdf_data(pdf_file):
                         "time": deliv_time,
                         "status": status
                     })
-            else:
-                # Fallback Parsing (บรรทัดต่อบรรทัดแบบยืดหยุ่น)
-                i = 0
-                while i < len(raw_lines):
-                    line = raw_lines[i]
-                    gps_m = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', line)
-                    if gps_m:
-                        lat = float(gps_m.group(1))
-                        lng = float(gps_m.group(2))
-                        
-                        time_m = re.search(r'(\d{1,2}:\d{2}\s*น\.)', line)
-                        deliv_time = time_m.group(1) if time_m else "ไม่ระบุ"
-                        
-                        status = "จัดส่งตรงเวลา"
-                        if "จัดส่งไม่ตรงเวลา" in line:
-                            status = "จัดส่งไม่ตรงเวลา"
-                        elif "รอบเสริม" in line:
-                            status = "รอบเสริม"
-                        elif "ย้าย" in line:
-                            status = "ย้ายรอบ"
 
-                        # ถอยหลังหาส่วนของ รหัส, ชื่อ, ยอดส่ง
-                        cust_id = "N/A"
-                        cust_name = "ไม่ระบุชื่อ"
-                        qty = 1
-
-                        # ค้นหาข้อความในบรรทัดย้อนหลัง 1-2 บรรทัด
-                        search_block = " ".join(raw_lines[max(0, i-2):i+1])
-                        
-                        # ค้นหารหัสลูกค้า
-                        cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', search_block)
-                        if cid_m:
-                            cust_id = cid_m.group(1)
-
-                        # ค้นหายอดส่ง
-                        qty_m = re.search(r'\|\s*(\d{1,2})\s*\|', line) or re.search(r'\s(\d{1,2})\s+\|\s*\d+', search_block)
-                        if qty_m:
-                            qty = int(qty_m.group(1))
-
-                        # ค้นหาชื่อ
-                        name_m = re.search(r'\|\s*([\u0E00-\u0E7FA-Za-z\s\.\(\)]+)\s*\|', search_block)
-                        if name_m:
-                            cust_name = name_m.group(1).strip()
-
-                        records.append({
-                            "cust_id": cust_id,
-                            "cust_name": cust_name,
-                            "qty": qty,
-                            "lat": lat,
-                            "lng": lng,
-                            "time": deliv_time,
-                            "status": status
-                        })
-                    i += 1
-
-    # สร้าง DataFrame และขจัดรายการซ้ำ (ถ้ามี)
+    # สรุปสร้าง DataFrame และแบ่งเที่ยวส่ง
     df = pd.DataFrame(records)
     if not df.empty:
+        # ตัดข้อมูลที่ซ้ำกันออก
         df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
 
-        # จัดกลุ่มเที่ยวส่งตาม DW (ยอดเบิกจริง)
+        # จัดแบ่งเที่ยวการส่งตามวงเงินเบิกสินค้าจริง DW (80, 80)
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80]
         trips = []
         acc_qty_list = []
@@ -216,19 +208,19 @@ def parse_pdf_data(pdf_file):
     return df, dw_list, header_info
 
 
-# --- MAIN APP LOGIC ---
+# --- MAIN APP INTERFACE ---
 uploaded_file = st.file_uploader("📂 กรุณาอัปโหลดไฟล์ PDF รายงานการจัดส่ง (REP115_90306.pdf)", type=["pdf"])
 
 if uploaded_file:
-    with st.spinner("กำลังประมวลผลอ่านข้อมูลตารางและพิกัดจาก PDF..."):
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร PDF..."):
         df, dw_list, header_info = parse_pdf_data(uploaded_file)
 
     if df.empty:
-        st.error("❌ ไม่สามารถดึงข้อมูลได้ กรุณาตรวจสอบว่าเป็นไฟล์เอกสาร Sprinkle PDF ที่ถูกต้อง")
+        st.error("❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ PDF กรุณาตรวจสอบว่าเป็นไฟล์ Sprinkle PDF ที่ถูกต้อง")
     else:
         st.success(f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ | ยอดจัดส่งรวม {df['qty'].sum()} ถัง | เที่ยวการส่ง {df['trip'].nunique()} เที่ยว")
 
-        # --- ส่วนแสดง HEADERS ---
+        # --- ส่วนแสดง HEADER ---
         st.subheader("📌 ข้อมูลสรุปการปฏิบัติงาน")
         c1, c2, c3 = st.columns(3)
         c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
@@ -239,7 +231,7 @@ if uploaded_file:
         st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (Data Table)")
         disp_df = df[['time', 'trip', 'cust_id', 'cust_name', 'qty', 'acc_qty', 'status', 'lat', 'lng']].copy()
         disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude']
-        st.dataframe(disp_df, use_container_width=True, height=300)
+        st.dataframe(disp_df, use_container_width=True, height=320)
 
         # --- สรุปยอดตามเที่ยววิ่ง ---
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
@@ -258,7 +250,7 @@ if uploaded_file:
 
         st.divider()
 
-        # ---ส่วนแผนที่ MAP ANIMATION & ROUTING ---
+        # --- ส่วนแผนที่ MAP ANIMATION & ROUTING ---
         st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
 
         # กำหนดสีแต่ละเที่ยว
