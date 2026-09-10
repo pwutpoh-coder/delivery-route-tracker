@@ -16,7 +16,7 @@ st.set_page_config(
 st.title("🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)")
 st.markdown("ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (PDF) พร้อมจำลองเส้นทางบนถนนจริงผ่าน OSRM")
 
-# --- SIDEBAR: ตั้งค่าคลังสินค้า (พิมพ์ชื่อสถานที่ หรือ พิกัด Lat, Lng) ---
+# --- SIDEBAR: ตั้งค่าคลังสินค้า ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
 
 @st.cache_data(show_spinner=False)
@@ -27,15 +27,15 @@ def geocode_location(location_str):
         
     clean_str = location_str.strip()
     
-    # 1. เช็คว่าเป็นรูปแบบพิกัดโดยตรงหรือไม่ เช่น "13.66800, 100.61000" หรือ "13.66800 100.61000"
+    # 1. เช็คว่าเป็นรูปแบบพิกัดโดยตรงหรือไม่ เช่น "13.66800, 100.61000"
     coord_match = re.match(r'^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$', clean_str)
     if coord_match:
         lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
         return (lat, lng), f"พิกัดแบบระบุเอง ({lat:.5f}, {lng:.5f})"
     
-    # 2. ค้นหาผ่าน OpenStreetMap Nominatim API แบบเจาะจงพื้นที่ประเทศไทย
+    # 2. ค้นหาผ่าน OpenStreetMap Nominatim API
     headers = {
-        "User-Agent": "SprinkleDeliveryApp/2.0 (Contact: delivery_admin@sprinkle.co.th)",
+        "User-Agent": "SprinkleDeliveryApp/3.0 (Contact: delivery_admin@sprinkle.co.th)",
         "Accept-Language": "th,en;q=0.9"
     }
     
@@ -61,7 +61,7 @@ def geocode_location(location_str):
             
     return None, None
 
-# ช่องกรอกข้อความเริ่มต้นว่างเปล่า (value="")
+# ช่องกรอกสถานที่เริ่มต้นว่างเปล่า
 wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
     value="",
@@ -69,7 +69,6 @@ wh_input = st.sidebar.text_input(
     help="สามารถพิมพ์ชื่อสถานที่ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง"
 )
 
-# กำหนดพิกัดเริ่มต้นสำรอง (Default Fallback Coordinate) กรณีไม่ได้พิมพ์หรือหาไม่เจอ
 DEFAULT_WAREHOUSE = (13.66800, 100.61000)
 
 if wh_input.strip():
@@ -113,17 +112,18 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- PARSER: Robust Chunk-Based Boundary Extractor ---
+# --- PARSER: PDF Data Extraction System ---
 def parse_pdf_data(pdf_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
+    re_list = []
     records = []
 
     with pdfplumber.open(pdf_file) as pdf:
         for page_idx, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             
-            # 1. สกัด Header และยอดเบิก DW
+            # 1. สกัด Header และรายการ DW / RE (จับที่ DW และ RE โดยตรง ไม่ติดตัว S)
             if page_idx == 0:
                 d_match = re.search(r'ประจําวัน\s*([\d/]+)', text) or re.search(r'ประจำวัน\s*([\d/]+)', text)
                 if d_match:
@@ -137,14 +137,18 @@ def parse_pdf_data(pdf_file):
                 if drv_match:
                     header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
 
-                dw_matches = re.findall(r'DWS\d+/\d+\s*\|\s*(\d+)', text)
+                # จับกุมรูปแบบ DW และ RE โดยตรง
+                dw_matches = re.findall(r'DW[A-Z0-9/]*\s*\|\s*(\d+)', text)
                 for dw_val in dw_matches:
                     dw_list.append(int(dw_val))
 
-            # 2. Extract คำทั้งหมดพร้อมพิกัด
+                re_matches = re.findall(r'RE[A-Z0-9/]*\s*\|\s*(\d+)', text)
+                for re_val in re_matches:
+                    re_list.append(int(re_val))
+
+            # 2. Extract ข้อมูลตารางการจัดส่งตามตำแหน่ง GPS Anchor
             words = page.extract_words()
             
-            # ค้นหาคำที่เป็น Anchor GPS (Lat, Lng)
             gps_anchors = []
             for w in words:
                 m = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', w['text'])
@@ -156,10 +160,8 @@ def parse_pdf_data(pdf_file):
                         'bottom': w['bottom']
                     })
 
-            # เรียงลำดับจุด GPS จากบนลงล่าง
             gps_anchors = sorted(gps_anchors, key=lambda x: x['top'])
 
-            # แกะข้อมูลทีละบล็อกตามตำแหน่ง GPS Anchor
             for idx, anchor in enumerate(gps_anchors):
                 top_b = gps_anchors[idx-1]['bottom'] if idx > 0 else (anchor['top'] - 25)
                 bot_b = anchor['bottom'] + 10
@@ -186,6 +188,7 @@ def parse_pdf_data(pdf_file):
                 elif "ย้าย" in block_text:
                     status = "ย้ายรอบ"
 
+                # สกัดจำนวนถัง (Qty)
                 qty = 1
                 qty_candidates = []
                 for w in block_words:
@@ -202,10 +205,11 @@ def parse_pdf_data(pdf_file):
                     else:
                         qty = qty_candidates[0][1]
 
+                # ทำความสะอาดสกัดชื่อลูกค้า (ตัดตัวเลขหลุด/รหัส/ตัวเลขโดดนำหน้าชื่อออก)
                 name_words = []
                 for w in block_words:
                     t = w['text'].strip()
-                    if t in ['|', '(', ')', 'รายการ', 'DWS', 'RES', cust_id]:
+                    if t in ['|', '(', ')', 'รายการ', 'DW', 'DWS', 'RE', 'RES', cust_id]:
                         continue
                     if re.search(r'(1[2-9]\.\d+)|(10[0-5]\.\d+)', t):
                         continue
@@ -216,6 +220,8 @@ def parse_pdf_data(pdf_file):
                     name_words.append(t)
 
                 cust_name = " ".join(name_words).strip()
+                # ลบตัวเลขโดดที่อยู่ข้างหน้าสุดของชื่อ (เช่น "15 เซ็ต แอนด์..." -> "เซ็ต แอนด์...")
+                cust_name = re.sub(r'^\d+\s+', '', cust_name)
                 cust_name = re.sub(r'^[\|\s\d]+', '', cust_name).strip()
                 if not cust_name:
                     cust_name = "ไม่ระบุชื่อ"
@@ -230,7 +236,7 @@ def parse_pdf_data(pdf_file):
                     "status": status
                 })
 
-    # 3. จัดสร้าง DataFrame และแบ่งเที่ยวการส่งตาม DW
+    # 3. จัดสร้าง DataFrame และการแบ่งเที่ยวการส่ง (Trip) ตามใบเบิก DW จริง
     df = pd.DataFrame(records)
     if not df.empty:
         df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
@@ -246,7 +252,9 @@ def parse_pdf_data(pdf_file):
 
         for idx, row in df.iterrows():
             q = row['qty']
-            if (curr_trip_qty + q > curr_limit) and (curr_trip_qty > 0) and (curr_trip < len(dw_limits)):
+            
+            # เมื่อส่งสะสมในรอบนั้นเกินขีดจำกัด DW ของรอบนั้น ให้ตัดขึ้นรอบถัดไป
+            if (curr_trip_qty + q > curr_limit) and (curr_trip < len(dw_limits)):
                 curr_trip += 1
                 curr_trip_qty = 0
                 curr_limit = dw_limits[curr_trip - 1] if curr_trip <= len(dw_limits) else 80
@@ -259,7 +267,7 @@ def parse_pdf_data(pdf_file):
         df['trip'] = trips
         df['acc_qty'] = acc_qty_list
 
-    return df, dw_list, header_info
+    return df, dw_list, re_list, header_info
 
 
 # --- MAIN APP INTERFACE ---
@@ -267,7 +275,7 @@ uploaded_file = st.file_uploader("📂 กรุณาอัปโหลดไ�
 
 if uploaded_file:
     with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร PDF..."):
-        df, dw_list, header_info = parse_pdf_data(uploaded_file)
+        df, dw_list, re_list, header_info = parse_pdf_data(uploaded_file)
 
     if df.empty:
         st.error("❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ PDF กรุณาตรวจสอบว่าเป็นไฟล์ Sprinkle PDF ที่ถูกต้อง")
@@ -287,7 +295,7 @@ if uploaded_file:
         disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude']
         st.dataframe(disp_df, use_container_width=True, height=350)
 
-        # --- สรุปยอดตามเที่ยววิ่ง ---
+        # --- สรุปยอดตามเที่ยววิ่งตามใบเบิก DW ---
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
         summaries = []
         for idx, (trip_name, group) in enumerate(df.groupby('trip', sort=False)):
@@ -363,7 +371,7 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
-                /* Style สำหรับแสดงตัวเลขลำดับกลางหมุดบนแผนที่ */
+                /* Icon หมุดตัวเลข */
                 .number-icon {{
                     background-color: #008CBA;
                     color: white;
@@ -385,7 +393,7 @@ if uploaded_file:
             <div class="controls">
                 <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
                 <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
-                <button onclick="resetAnimation()">🔄 เริ่มใหม่ (Reset)</button>
+                <button onclick="resetAnimation()">🔄 รีเซ็ต (Reset)</button>
                 <span id="status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50;">พร้อมสำหรับการจำลองเส้นทาง...</span>
             </div>
             <div id="map"></div>
@@ -405,7 +413,6 @@ if uploaded_file:
 
                 // คลังสินค้า Marker
                 L.marker(warehouse).addTo(map)
-                    .bindPopup("<b>🏢 คลังสินค้าหลัก (Warehouse)</b>")
                     .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
                 let allMarkers = [];
@@ -414,7 +421,7 @@ if uploaded_file:
                 let animTimer = null;
                 let currentActiveMarker = null;
 
-                // หากเป็นแบบที่ 1: ปักหมุดตัวเลขลำดับรอไว้ล่วงหน้าทั้งหมด
+                // โหมด 1: ปักหมุดตัวเลขล่วงหน้าทั้งหมด (ไม่มี Popup)
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
@@ -425,10 +432,7 @@ if uploaded_file:
                             iconAnchor: [14, 14]
                         }});
 
-                        let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map)
-                            .bindPopup(`<div style="font-size:16px; font-weight:bold; text-align:center;">${{seqNumber}}</div>`)
-                            .bindTooltip(String(seqNumber), {{permanent: false, direction: 'top'}});
-                        
+                        let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
                         allMarkers.push(marker);
                     }});
                 }}
@@ -438,7 +442,7 @@ if uploaded_file:
 
                     const seg = segments[step];
                     const info = seg.info;
-                    const seqNumber = step + 1; // ลำดับตัวเลขจุดส่ง
+                    const seqNumber = step + 1;
 
                     const polyline = L.polyline(seg.path, {{
                         color: seg.color,
@@ -452,7 +456,6 @@ if uploaded_file:
                     }}
 
                     if (info.lat && info.lng) {{
-                        // ไอคอนตัวเลขเฉพาะลำดับที่ส่ง
                         let dynamicIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
@@ -460,15 +463,11 @@ if uploaded_file:
                             iconAnchor: [16, 16]
                         }});
 
-                        currentActiveMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map)
-                            .bindPopup(`<div style="font-size:18px; font-weight:bold; text-align:center; color:${{seg.color}};">${{seqNumber}}</div>`)
-                            .bindTooltip(String(seqNumber), {{permanent: true, direction: 'top'}})
-                            .openPopup();
+                        // สร้างหมุดตัวเลขโดยไม่ใช้ bindPopup() หรือ bindTooltip()
+                        currentActiveMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
 
                         if (!isMode1) {{
-                            let permanentMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map)
-                                .bindPopup(`<div style="font-size:16px; font-weight:bold; text-align:center;">${{seqNumber}}</div>`)
-                                .bindTooltip(String(seqNumber), {{permanent: false, direction: 'top'}});
+                            let permanentMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
                             allMarkers.push(permanentMarker);
                         }}
 
@@ -477,7 +476,7 @@ if uploaded_file:
 
                     document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{seqNumber}} / ${{segments.length}} (${{seg.trip}})`;
                     
-                    // แสดงรายละเอียดฉบับเต็มไว้ในกล่องข้อความด้านล่างแผนที่แทน
+                    // ข้อมูลทั้งหมดแสดงใน Infobox ด้านล่างแผนที่แทน
                     document.getElementById('info-box').innerHTML = `
                         <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
                         <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
@@ -509,14 +508,18 @@ if uploaded_file:
                 function resetAnimation() {{
                     if (animTimer) clearInterval(animTimer);
                     currentStep = 0;
+                    
+                    // ลบ เส้นทาง (Polylines) ออกทั้งหมด
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
                     
+                    // ลบ หมุดปัจจุบัน
                     if (currentActiveMarker) {{
                         map.removeLayer(currentActiveMarker);
                         currentActiveMarker = null;
                     }}
 
+                    // ลบ หมุดสะสมในแบบที่ 2
                     if (!isMode1) {{
                         allMarkers.forEach(m => map.removeLayer(m));
                         allMarkers = [];
