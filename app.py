@@ -120,16 +120,23 @@ def parse_excel_data(excel_file):
     # อ่านข้อมูล Excel ทั้งแผ่น (ไม่กำหนด header เพื่อจับตำแหน่งเซลล์ถูกต้อง)
     raw_df = pd.read_excel(excel_file, header=None)
 
+    # ฟังก์ชันช่วยดึงค่าตามตำแหน่ง Index อย่างปลอดภัย ป้องกัน KeyError
+    def safe_get(row_obj, idx):
+        if idx < len(row_obj):
+            val = row_obj.iloc[idx]
+            return val if pd.notna(val) else None
+        return None
+
     # 1. สกัด Header Info
     try:
         # วันที่ (ปกติอยู่แถวที่ 3 คอลัมน์ B หรือ index 2, 1)
-        date_val = str(raw_df.iloc[2, 1]) if pd.notna(raw_df.iloc[2, 1]) else ""
+        date_val = str(raw_df.iloc[2, 1]) if len(raw_df) > 2 and len(raw_df.columns) > 1 and pd.notna(raw_df.iloc[2, 1]) else ""
         d_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', date_val)
         if d_match:
             header_info["date"] = d_match.group(1)
 
         # รถส่ง (แถวที่ 3 คอลัมน์ C)
-        truck_val = str(raw_df.iloc[2, 2]) if pd.notna(raw_df.iloc[2, 2]) else ""
+        truck_val = str(raw_df.iloc[2, 2]) if len(raw_df) > 2 and len(raw_df.columns) > 2 and pd.notna(raw_df.iloc[2, 2]) else ""
         t_match = re.search(r'รถส่ง\s*(\w+)', truck_val)
         if t_match:
             header_info["truck_no"] = t_match.group(1)
@@ -137,7 +144,7 @@ def parse_excel_data(excel_file):
             header_info["truck_no"] = truck_val.replace("รถส่ง", "").strip()
 
         # พนักงานขับรถ (แถวที่ 3 คอลัมน์ H)
-        driver_val = str(raw_df.iloc[2, 7]) if pd.notna(raw_df.iloc[2, 7]) else ""
+        driver_val = str(raw_df.iloc[2, 7]) if len(raw_df) > 2 and len(raw_df.columns) > 7 and pd.notna(raw_df.iloc[2, 7]) else ""
         drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', driver_val)
         if drv_match:
             header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
@@ -147,7 +154,7 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 2. สกัดรายการ DW / RE จากส่วนบนของชีต (จุดที่แก้ไข)
+    # 2. สกัดรายการ DW / RE จากส่วนบนของชีต
     header_text_concat = " ".join(
         raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten()
     )
@@ -163,11 +170,20 @@ def parse_excel_data(excel_file):
     for idx in range(5, len(raw_df)):
         row = raw_df.iloc[idx]
         
-        time_val = str(row[0]) if pd.notna(row[0]) else ""
-        cust_info = str(row[3]) if pd.notna(row[3]) else ""
-        qty_val = row[5] if pd.notna(row[5]) else None
-        location_info = str(row[7]) if pd.notna(row[7]) else ""
-        status_info = str(row[8]) if pd.notna(row[8]) else ""
+        # [FIXED KEYERROR] เปลี่ยนการเข้าถึงตำแหน่งเป็นการใช้ .iloc ผ่าน safe_get
+        time_raw = safe_get(row, 0)
+        time_val = str(time_raw) if time_raw is not None else ""
+        
+        cust_raw = safe_get(row, 3)
+        cust_info = str(cust_raw) if cust_raw is not None else ""
+        
+        qty_val = safe_get(row, 5)
+        
+        loc_raw = safe_get(row, 7)
+        location_info = str(loc_raw) if loc_raw is not None else ""
+        
+        status_raw = safe_get(row, 8)
+        status_info = str(status_raw) if status_raw is not None else ""
 
         # ข้ามบรรทัดที่ไม่มีข้อมูลเวลาจัดส่ง
         if not re.search(r'\d{1,2}:\d{2}', time_val):
