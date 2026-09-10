@@ -3,7 +3,6 @@ import pandas as pd
 import re
 import requests
 import json
-import datetime
 import streamlit.components.v1 as components
 
 # --- ตั้งค่าหน้าตาแอปพลิเคชัน ---
@@ -108,7 +107,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- PARSER: Excel Data Extraction System ---
+# --- PARSER: Sprinkle Excel Data Extraction System ---
 def parse_excel_data(excel_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
@@ -117,18 +116,12 @@ def parse_excel_data(excel_file):
 
     raw_df = pd.read_excel(excel_file, header=None)
 
-    def safe_get(row_obj, idx):
-        if idx < len(row_obj):
-            val = row_obj.iloc[idx]
-            return val if pd.notna(val) else None
-        return None
-
-    # 1. สกัด Header Info
+    # 1. สกัดข้อมูล Header (วันที่ / รถส่ง / พนักงานขับรถ)
     try:
-        header_blob = " ".join(raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten())
+        header_blob = " ".join(raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten())
         
         # วันที่
-        d_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', header_blob)
+        d_match = re.search(r'ประจำวันที่\s*([\d/]+)', header_blob)
         if d_match:
             header_info["date"] = d_match.group(1)
 
@@ -140,102 +133,91 @@ def parse_excel_data(excel_file):
         # พนักงานขับรถ
         drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', header_blob)
         if drv_match:
-            header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
+            driver_text = drv_match.group(1).split("พนักงานยก")[0].strip()
+            header_info["driver"] = driver_text
     except Exception:
         pass
 
-    # 2. สกัดรายการ DW / RE
-    header_text_concat = " ".join(raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten())
-    dw_matches = re.findall(r'DW[A-Z0-9/]*\s*\|\s*(\d+)', header_text_concat)
-    for dw_val in dw_matches:
-        dw_list.append(int(dw_val))
+    # 2. สกัดรายการเบิก/คืน (DWS / RES)
+    try:
+        header_text = " ".join(raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten())
+        dw_matches = re.findall(r'DWS\d+/\d+\s+(\d+)', header_text)
+        for dw_val in dw_matches:
+            dw_list.append(int(dw_val))
 
-    re_matches = re.findall(r'RE[A-Z0-9/]*\s*\|\s*(\d+)', header_text_concat)
-    for re_val in re_matches:
-        re_list.append(int(re_val))
+        re_matches = re.findall(r'RES\d+/\d+\s+(\d+)', header_text)
+        for re_val in re_matches:
+            re_list.append(int(re_val))
+    except Exception:
+        pass
 
-    # 3. วนลูปอ่านรายการจัดส่ง
-    for idx in range(3, len(raw_df)):
+    # 3. วนลูปอ่านข้อมูลทุกบรรทัดตั้งแต่ต้นจนจบไฟล์ (รองรับมากกว่า 400 บรรทัด)
+    for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
         
-        # แปลงข้อความทั้งแถวเพื่อค้นหาพิกัด GPS ก่อน
-        row_str = " ".join([str(val) for val in row.values if pd.notna(val)])
-        gps_match = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', row_str)
+        val_a = row.iloc[0] if 0 < len(row) else None
+        val_c = row.iloc[2] if 2 < len(row) else None
+        val_e = row.iloc[4] if 4 < len(row) else None
+        val_f = row.iloc[5] if 5 < len(row) else None
+
+        if pd.isna(val_e):
+            continue
+
+        str_e = str(val_e).strip()
         
+        # ดึงพิกัด GPS (Lat, Lng) และ ค่าความต่าง GPS จากคอลัมน์ E (Index 4)
+        gps_match = re.search(r'([1-9]\d*\.\d+)\s*,\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?', str_e)
         if not gps_match:
             continue
-            
+
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
+        gps_diff = gps_match.group(3) if gps_match.group(3) else "0.00"
 
-        # ดึงเวลาแบบยืดหยุ่น (คอลัมน์ A หรือ B)
-        time_raw = safe_get(row, 0)
-        if time_raw is None or str(time_raw).strip() == "":
-            time_raw = safe_get(row, 1)
+        # ดึงรหัสสมาชิกจากคอลัมน์ A (Index 0)
+        cust_id = str(val_a).strip() if pd.notna(val_a) else "N/A"
+        if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"]:
+            continue
 
-        time_formatted = ""
-        if isinstance(time_raw, (datetime.time, pd.Timestamp)):
-            time_formatted = time_raw.strftime("%H:%M")
-        elif time_raw is not None:
-            t_match = re.search(r'(\d{1,2}[:.]\d{2})', str(time_raw))
-            if t_match:
-                time_formatted = t_match.group(1).replace(".", ":")
-            else:
-                time_formatted = str(time_raw).strip()
-
-        if time_formatted and not time_formatted.endswith("น."):
-            time_formatted += " น."
-
-        # ดึงข้อมูลลูกค้า
-        cust_raw = safe_get(row, 3) or safe_get(row, 2) or safe_get(row, 4)
-        cust_info = str(cust_raw) if cust_raw is not None else ""
-
-        cust_id = "N/A"
-        cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', cust_info)
-        if cid_m:
-            cust_id = cid_m.group(1)
-
-        clean_name = re.sub(r'^\s*\|\s*\d+\s*', '', cust_info)
-        clean_name = re.sub(r'\b\d{5,6}(?:/\d+)?\b', '', clean_name)
-        clean_name = clean_name.replace("|", "").strip()
-        if not clean_name:
-            clean_name = "ลูกค้าสมาชิก"
-
-        # ยอดจัดส่ง
-        qty_val = safe_get(row, 5) or safe_get(row, 6)
+        # ดึงยอดส่งสินค้า (ถัง) จากคอลัมน์ C (Index 2)
         try:
-            qty = int(float(qty_val)) if qty_val is not None else 1
+            qty = int(float(val_c)) if pd.notna(val_c) else 1
         except Exception:
             qty = 1
 
-        # สถานะการจัดส่ง
-        status_raw = safe_get(row, 8) or safe_get(row, 7) or ""
-        status_info = str(status_raw)
-        
-        status = "จัดส่งตรงเวลา"
-        if "ไม่ตรงเวลา" in status_info or "ไม่ตรงเวลา" in cust_info:
+        # ดึงเวลาส่ง และ สถานะ จากคอลัมน์ F (Index 5)
+        str_f = str(val_f).strip() if pd.notna(val_f) else ""
+        time_match = re.search(r'(\d{1,2}:\d{2})', str_f)
+        delivery_time = time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
+
+        if "จัดส่งตรงเวลา" in str_f:
+            status = "จัดส่งตรงเวลา"
+        elif "ไม่ตรงเวลา" in str_f:
             status = "จัดส่งไม่ตรงเวลา"
-        elif "รอบเสริม" in status_info or "รอบเสริม" in cust_info:
-            status = "รอบเสริม"
-        elif "ย้าย" in status_info:
+        elif "สมาชิกใหม่" in str_f:
+            status = "สมาชิกใหม่"
+        elif "ย้าย" in str_f:
             status = "ย้ายรอบ"
+        else:
+            status_clean = re.sub(r'^\d{1,2}:\d{2}\s*(น\.)?\s*', '', str_f)
+            status = status_clean if status_clean else "จัดส่งตรงเวลา"
 
         records.append({
             "cust_id": cust_id,
-            "cust_name": clean_name,
             "qty": qty,
             "lat": lat,
             "lng": lng,
-            "time": time_formatted if time_formatted else "ไม่ระบุเวลา",
+            "gps_diff": gps_diff,
+            "time": delivery_time,
             "status": status
         })
 
-    # 4. สร้าง DataFrame และแบ่งเที่ยวการส่ง (Trip)
+    # 4. สร้าง DataFrame และจัดหมวดหมู่เที่ยววิ่ง (Trip)
     df = pd.DataFrame(records)
     if not df.empty:
-        df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
+        df = df.drop_duplicates(subset=['cust_id', 'time', 'lat', 'lng']).reset_index(drop=True)
 
-        dw_limits = dw_list if len(dw_list) > 0 else [80, 80]
+        dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 80]
         trips = []
         acc_qty_list = []
         
@@ -282,9 +264,9 @@ if uploaded_file:
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
         st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (Data Table)")
-        disp_df = df[['time', 'trip', 'cust_id', 'cust_name', 'qty', 'acc_qty', 'status', 'lat', 'lng']].copy()
-        disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude']
-        st.dataframe(disp_df, use_container_width=True, height=350)
+        disp_df = df[['time', 'trip', 'cust_id', 'qty', 'acc_qty', 'status', 'lat', 'lng', 'gps_diff']].copy()
+        disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสสมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude', 'ค่าความต่าง GPS']
+        st.dataframe(disp_df, use_container_width=True, height=400)
 
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
         summaries = []
@@ -292,7 +274,7 @@ if uploaded_file:
             dw_val = dw_list[idx] if idx < len(dw_list) else group['qty'].sum()
             summaries.append({
                 "เที่ยวการส่ง": trip_name,
-                "จำนวนถังที่เบิก (DW)": dw_val,
+                "จำนวนถังที่เบิก (DWS)": dw_val,
                 "ยอดจัดส่งจริง (ถัง)": group['qty'].sum(),
                 "จำนวนจุดส่ง (จุด)": len(group),
                 "จัดส่งตรงเวลา (จุด)": len(group[group['status'] == 'จัดส่งตรงเวลา']),
@@ -325,9 +307,9 @@ if uploaded_file:
                     
                     info = records_list[i] if i < len(records_list) else {
                         "cust_id": "WH-001",
-                        "cust_name": "คลังสินค้าหลัก (Warehouse)", 
                         "time": "จบเที่ยววิ่ง", 
                         "qty": 0, 
+                        "gps_diff": "0.00",
                         "status": "วิ่งกลับเข้าคลังเรียบร้อย"
                     }
 
@@ -376,6 +358,7 @@ if uploaded_file:
             <div class="legend">
                 <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1 (สีน้ำเงิน)</div>
                 <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2 (สีชมพูแดง)</div>
+                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3 (สีเขียว)</div>
             </div>
             <div class="controls">
                 <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
@@ -463,9 +446,9 @@ if uploaded_file:
                     document.getElementById('info-box').innerHTML = `
                         <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
                         <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
-                        <b>รหัสลูกค้า:</b> ${{info.cust_id}} | 
-                        <b>ชื่อลูกค้า / สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_name}}</span><br>
-                        <b>ยอดส่งสินค้า:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | 
+                        <b>รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
+                        <b>ยอดส่งสินค้า:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
+                        <b>ค่าความต่าง GPS:</b> ${{info.gps_diff || '0.00'}} | 
                         <b>สถานะการจัดส่ง:</b> ${{info.status}}
                     `;
                 }}
