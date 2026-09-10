@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import pdfplumber
 import re
 import requests
 import json
@@ -14,7 +13,7 @@ st.set_page_config(
 )
 
 st.title("🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)")
-st.markdown("ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (PDF) พร้อมจำลองเส้นทางบนถนนจริงผ่าน OSRM")
+st.markdown("ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (Excel) พร้อมจำลองเส้นทางบนถนนจริงผ่าน OSRM")
 
 # --- SIDEBAR: ตั้งค่าคลังสินค้า ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
@@ -61,7 +60,6 @@ def geocode_location(location_str):
             
     return None, None
 
-# ช่องกรอกสถานที่เริ่มต้นว่างเปล่า
 wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
     value="",
@@ -112,131 +110,118 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- PARSER: PDF Data Extraction System ---
-def parse_pdf_data(pdf_file):
+# --- PARSER: Excel Data Extraction System ---
+def parse_excel_data(excel_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
     re_list = []
     records = []
 
-    with pdfplumber.open(pdf_file) as pdf:
-        for page_idx, page in enumerate(pdf.pages):
-            text = page.extract_text() or ""
+    # อ่านข้อมูล Excel ทั้งแผ่น (ไม่กำหนด header เพื่อจับตำแหน่งเซลล์ถูกต้อง)
+    raw_df = pd.read_excel(excel_file, header=None)
+
+    # 1. สกัด Header Info
+    try:
+        # วันที่ (ปกติอยู่แถวที่ 3 คอลัมน์ B หรือ index 2, 1)
+        date_val = str(raw_df.iloc[2, 1]) if pd.notna(raw_df.iloc[2, 1]) else ""
+        d_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', date_val)
+        if d_match:
+            header_info["date"] = d_match.group(1)
+
+        # รถส่ง (แถวที่ 3 คอลัมน์ C)
+        truck_val = str(raw_df.iloc[2, 2]) if pd.notna(raw_df.iloc[2, 2]) else ""
+        t_match = re.search(r'รถส่ง\s*(\w+)', truck_val)
+        if t_match:
+            header_info["truck_no"] = t_match.group(1)
+        else:
+            header_info["truck_no"] = truck_val.replace("รถส่ง", "").strip()
+
+        # พนักงานขับรถ (แถวที่ 3 คอลัมน์ H)
+        driver_val = str(raw_df.iloc[2, 7]) if pd.notna(raw_df.iloc[2, 7]) else ""
+        drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', driver_val)
+        if drv_match:
+            header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
+        else:
+            header_info["driver"] = driver_val.replace("พนักงานขับรถ", "").split("พนักงานยก")[0].strip()
             
-            # 1. สกัด Header และรายการ DW / RE (จับที่ DW และ RE โดยตรง ไม่ติดตัว S)
-            if page_idx == 0:
-                d_match = re.search(r'ประจําวัน\s*([\d/]+)', text) or re.search(r'ประจำวัน\s*([\d/]+)', text)
-                if d_match:
-                    header_info["date"] = d_match.group(1)
-                
-                t_match = re.search(r'รถส่ง\s*(\w+)', text)
-                if t_match:
-                    header_info["truck_no"] = t_match.group(1)
+    except Exception:
+        pass
 
-                drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', text)
-                if drv_match:
-                    header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
+    # 2. สกัดรายการ DW / RE จากส่วนบนของชีต
+    header_text_concat = " ".join(raw_df.iloc[:5].astype(str).values.flatten())
+    dw_matches = re.findall(r'DW[A-Z0-9/]*\s*\|\s*(\d+)', header_text_concat)
+    for dw_val in dw_matches:
+        dw_list.append(int(dw_val))
 
-                # จับกุมรูปแบบ DW และ RE โดยตรง
-                dw_matches = re.findall(r'DW[A-Z0-9/]*\s*\|\s*(\d+)', text)
-                for dw_val in dw_matches:
-                    dw_list.append(int(dw_val))
+    re_matches = re.findall(r'RE[A-Z0-9/]*\s*\|\s*(\d+)', header_text_concat)
+    for re_val in re_matches:
+        re_list.append(int(re_val))
 
-                re_matches = re.findall(r'RE[A-Z0-9/]*\s*\|\s*(\d+)', text)
-                for re_val in re_matches:
-                    re_list.append(int(re_val))
+    # 3. วนลูปอ่านรายการจัดส่ง (เริ่มต้นที่แถว index 5 เป็นต้นไป)
+    for idx in range(5, len(raw_df)):
+        row = raw_df.iloc[idx]
+        
+        time_val = str(row[0]) if pd.notna(row[0]) else ""
+        cust_info = str(row[3]) if pd.notna(row[3]) else ""
+        qty_val = row[5] if pd.notna(row[5]) else None
+        location_info = str(row[7]) if pd.notna(row[7]) else ""
+        status_info = str(row[8]) if pd.notna(row[8]) else ""
 
-            # 2. Extract ข้อมูลตารางการจัดส่งตามตำแหน่ง GPS Anchor
-            words = page.extract_words()
+        # ข้ามบรรทัดที่ไม่มีข้อมูลเวลาจัดส่ง
+        if not re.search(r'\d{1,2}:\d{2}', time_val):
+            continue
+
+        # ดึง Lat, Lng จากรายละเอียดสถานที่
+        gps_match = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', location_info)
+        if not gps_match:
+            continue
             
-            gps_anchors = []
-            for w in words:
-                m = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', w['text'])
-                if m:
-                    gps_anchors.append({
-                        'lat': float(m.group(1)),
-                        'lng': float(m.group(2)),
-                        'top': w['top'],
-                        'bottom': w['bottom']
-                    })
+        lat = float(gps_match.group(1))
+        lng = float(gps_match.group(2))
 
-            gps_anchors = sorted(gps_anchors, key=lambda x: x['top'])
+        # สกัดชื่อและรหัสลูกค้า
+        cust_id = "N/A"
+        cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', cust_info)
+        if cid_m:
+            cust_id = cid_m.group(1)
 
-            for idx, anchor in enumerate(gps_anchors):
-                top_b = gps_anchors[idx-1]['bottom'] if idx > 0 else (anchor['top'] - 25)
-                bot_b = anchor['bottom'] + 10
+        # ทำความสะอาดชื่อลูกค้า
+        clean_name = re.sub(r'^\s*\|\s*\d+\s*', '', cust_info)
+        clean_name = re.sub(r'\b\d{5,6}(?:/\d+)?\b', '', clean_name)
+        clean_name = clean_name.replace("|", "").strip()
+        if not clean_name:
+            clean_name = "ไม่ระบุชื่อ"
 
-                block_words = [w for w in words if top_b <= w['top'] <= bot_b]
-                block_words = sorted(block_words, key=lambda w: (w['top'], w['x0']))
-                block_text = " ".join([w['text'] for w in block_words])
+        # ยอดจัดส่ง (ถัง)
+        try:
+            qty = int(float(qty_val)) if qty_val is not None else 1
+        except Exception:
+            qty = 1
 
-                cust_id = "N/A"
-                cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', block_text)
-                if cid_m:
-                    cust_id = cid_m.group(1)
+        # สถานะการจัดส่ง
+        status = "จัดส่งตรงเวลา"
+        if "ไม่ตรงเวลา" in status_info or "ไม่ตรงเวลา" in cust_info:
+            status = "จัดส่งไม่ตรงเวลา"
+        elif "รอบเสริม" in status_info or "รอบเสริม" in cust_info:
+            status = "รอบเสริม"
+        elif "ย้าย" in status_info:
+            status = "ย้ายรอบ"
 
-                deliv_time = "ไม่ระบุ"
-                tm = re.search(r'(\d{1,2}:\d{2})', block_text)
-                if tm:
-                    deliv_time = tm.group(1) + " น."
+        time_formatted = time_val.strip()
+        if not time_formatted.endswith("น."):
+            time_formatted += " น."
 
-                status = "จัดส่งตรงเวลา"
-                if "จัดส่งไม่ตรงเวลา" in block_text:
-                    status = "จัดส่งไม่ตรงเวลา"
-                elif "รอบเสริม" in block_text:
-                    status = "รอบเสริม"
-                elif "ย้าย" in block_text:
-                    status = "ย้ายรอบ"
+        records.append({
+            "cust_id": cust_id,
+            "cust_name": clean_name,
+            "qty": qty,
+            "lat": lat,
+            "lng": lng,
+            "time": time_formatted,
+            "status": status
+        })
 
-                # สกัดจำนวนถัง (Qty)
-                qty = 1
-                qty_candidates = []
-                for w in block_words:
-                    t = w['text'].strip()
-                    if t.isdigit() and int(t) <= 100:
-                        if not re.search(r'\d{1,2}:\d{2}', block_text) or t not in deliv_time:
-                            if t != cust_id and not cust_id.startswith(t):
-                                qty_candidates.append((w['x0'], int(t)))
-                
-                if qty_candidates:
-                    mid_candidates = [c[1] for c in qty_candidates if 160 <= c[0] <= 270]
-                    if mid_candidates:
-                        qty = mid_candidates[0]
-                    else:
-                        qty = qty_candidates[0][1]
-
-                # ทำความสะอาดสกัดชื่อลูกค้า (ตัดตัวเลขหลุด/รหัส/ตัวเลขโดดนำหน้าชื่อออก)
-                name_words = []
-                for w in block_words:
-                    t = w['text'].strip()
-                    if t in ['|', '(', ')', 'รายการ', 'DW', 'DWS', 'RE', 'RES', cust_id]:
-                        continue
-                    if re.search(r'(1[2-9]\.\d+)|(10[0-5]\.\d+)', t):
-                        continue
-                    if re.search(r'\d{1,2}:\d{2}|ตรงเวลา|ไม่ตรงเวลา|รอบเสริม|ย้าย', t):
-                        continue
-                    if t.isdigit() and int(t) == qty:
-                        continue
-                    name_words.append(t)
-
-                cust_name = " ".join(name_words).strip()
-                # ลบตัวเลขโดดที่อยู่ข้างหน้าสุดของชื่อ (เช่น "15 เซ็ต แอนด์..." -> "เซ็ต แอนด์...")
-                cust_name = re.sub(r'^\d+\s+', '', cust_name)
-                cust_name = re.sub(r'^[\|\s\d]+', '', cust_name).strip()
-                if not cust_name:
-                    cust_name = "ไม่ระบุชื่อ"
-
-                records.append({
-                    "cust_id": cust_id,
-                    "cust_name": cust_name,
-                    "qty": qty,
-                    "lat": anchor['lat'],
-                    "lng": anchor['lng'],
-                    "time": deliv_time,
-                    "status": status
-                })
-
-    # 3. จัดสร้าง DataFrame และการแบ่งเที่ยวการส่ง (Trip) ตามใบเบิก DW จริง
+    # 4. สร้าง DataFrame และแบ่งเที่ยวการส่ง (Trip) ตามใบเบิก DW
     df = pd.DataFrame(records)
     if not df.empty:
         df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
@@ -253,7 +238,6 @@ def parse_pdf_data(pdf_file):
         for idx, row in df.iterrows():
             q = row['qty']
             
-            # เมื่อส่งสะสมในรอบนั้นเกินขีดจำกัด DW ของรอบนั้น ให้ตัดขึ้นรอบถัดไป
             if (curr_trip_qty + q > curr_limit) and (curr_trip < len(dw_limits)):
                 curr_trip += 1
                 curr_trip_qty = 0
@@ -271,14 +255,14 @@ def parse_pdf_data(pdf_file):
 
 
 # --- MAIN APP INTERFACE ---
-uploaded_file = st.file_uploader("📂 กรุณาอัปโหลดไฟล์ PDF รายงานการจัดส่ง (REP115_90306.pdf)", type=["pdf"])
+uploaded_file = st.file_uploader("📂 กรุณาอัปโหลดไฟล์ Excel รายงานการจัดส่ง (REP115_XXXXX.xlsx)", type=["xlsx", "xls"])
 
 if uploaded_file:
-    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร PDF..."):
-        df, dw_list, re_list, header_info = parse_pdf_data(uploaded_file)
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร Excel..."):
+        df, dw_list, re_list, header_info = parse_excel_data(uploaded_file)
 
     if df.empty:
-        st.error("❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ PDF กรุณาตรวจสอบว่าเป็นไฟล์ Sprinkle PDF ที่ถูกต้อง")
+        st.error("❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ Excel กรุณาตรวจสอบว่าเป็นไฟล์ Sprinkle Excel ที่ถูกต้อง")
     else:
         st.success(f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ | ยอดจัดส่งรวม {df['qty'].sum()} ถัง | เที่ยวการส่ง {df['trip'].nunique()} เที่ยว")
 
@@ -371,7 +355,6 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
-                /* Icon หมุดตัวเลข */
                 .number-icon {{
                     background-color: #008CBA;
                     color: white;
@@ -411,7 +394,6 @@ if uploaded_file:
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
-                // คลังสินค้า Marker
                 L.marker(warehouse).addTo(map)
                     .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
@@ -421,7 +403,6 @@ if uploaded_file:
                 let animTimer = null;
                 let currentActiveMarker = null;
 
-                // โหมด 1: ปักหมุดตัวเลขล่วงหน้าทั้งหมด (ไม่มี Popup)
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
@@ -463,7 +444,6 @@ if uploaded_file:
                             iconAnchor: [16, 16]
                         }});
 
-                        // สร้างหมุดตัวเลขโดยไม่ใช้ bindPopup() หรือ bindTooltip()
                         currentActiveMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
 
                         if (!isMode1) {{
@@ -476,7 +456,6 @@ if uploaded_file:
 
                     document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{seqNumber}} / ${{segments.length}} (${{seg.trip}})`;
                     
-                    // ข้อมูลทั้งหมดแสดงใน Infobox ด้านล่างแผนที่แทน
                     document.getElementById('info-box').innerHTML = `
                         <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
                         <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
@@ -509,17 +488,14 @@ if uploaded_file:
                     if (animTimer) clearInterval(animTimer);
                     currentStep = 0;
                     
-                    // ลบ เส้นทาง (Polylines) ออกทั้งหมด
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
                     
-                    // ลบ หมุดปัจจุบัน
                     if (currentActiveMarker) {{
                         map.removeLayer(currentActiveMarker);
                         currentActiveMarker = null;
                     }}
 
-                    // ลบ หมุดสะสมในแบบที่ 2
                     if (!isMode1) {{
                         allMarkers.forEach(m => map.removeLayer(m));
                         allMarkers = [];
