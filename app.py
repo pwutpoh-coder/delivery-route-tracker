@@ -147,8 +147,10 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 2. สกัดรายการ DW / RE จากส่วนบนของชีต
-    header_text_concat = " ".join(raw_df.iloc[:5].astype(str).values.flatten())
+    # 2. สกัดรายการ DW / RE จากส่วนบนของชีต (จุดที่แก้ไข)
+    header_text_concat = " ".join(
+        raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten()
+    )
     dw_matches = re.findall(r'DW[A-Z0-9/]*\s*\|\s*(\d+)', header_text_concat)
     for dw_val in dw_matches:
         dw_list.append(int(dw_val))
