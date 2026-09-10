@@ -16,15 +16,43 @@ st.set_page_config(
 st.title("🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)")
 st.markdown("ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (PDF) พร้อมจำลองเส้นทางบนถนนจริงผ่าน OSRM")
 
-# --- SIDEBAR: ตั้งค่าคลังสินค้าและการเล่นแผนที่ ---
+# --- SIDEBAR: ตั้งค่าคลังสินค้า (พิมพ์ชื่อสถานที่ หรือ พิกัด Lat, Lng) ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
-wh_input = st.sidebar.text_input("พิกัดคลังสินค้า (Lat, Lng)", value="13.66800, 100.61000")
 
-try:
-    wh_lat, wh_lng = [float(x.strip()) for x in wh_input.split(',')]
-    warehouse_coord = (wh_lat, wh_lng)
-except Exception:
-    st.sidebar.error("⚠️ รูปแบบพิกัดไม่ถูกต้อง ใช้ค่าเริ่มต้น 13.66800, 100.61000")
+@st.cache_data(show_spinner=False)
+def geocode_location(location_str):
+    """แปลงชื่อสถานที่ หรือ ข้อความพิกัด ให้เป็น (Lat, Lng)"""
+    location_str = location_str.strip()
+    # กรณีผู้ใช้ป้อนแบบพิกัด "13.66800, 100.61000"
+    coord_match = re.match(r'^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$', location_str)
+    if coord_match:
+        return float(coord_match.group(1)), float(coord_match.group(2))
+    
+    # กรณีผู้ใช้พิมพ์ชื่อสถานที่ -> ดึงพิกัดจาก Nominatim OpenStreetMap API
+    url = f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(location_str)}&format=json&limit=1"
+    headers = {"User-Agent": "SprinkleDeliveryApp/1.0"}
+    try:
+        res = requests.get(url, headers=headers, timeout=4)
+        if res.status_code == 200:
+            data = res.json()
+            if data:
+                return float(data[0]['lat']), float(data[0]['lon'])
+    except Exception:
+        pass
+    return None
+
+wh_input = st.sidebar.text_input(
+    "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
+    value="13.66800, 100.61000",
+    help="ตัวอย่าง: 'คลังสินค้า บางนา', 'Bangkok', หรือ '13.66800, 100.61000'"
+)
+
+warehouse_coord = geocode_location(wh_input)
+
+if warehouse_coord:
+    st.sidebar.success(f"📍 พิกัดคลังสินค้า: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}")
+else:
+    st.sidebar.error("⚠️ ไม่พบพิกัดจากชื่อสถานที่นี้ ใช้ค่าเริ่มต้น (13.66800, 100.61000)")
     warehouse_coord = (13.66800, 100.61000)
 
 st.sidebar.header("🎬 การตั้งค่าการจำลองเส้นทาง")
@@ -55,7 +83,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- PARSER ขั้นสูง: สกัดด้วยระบบ Spatial Coordinate Boundary ---
+# --- PARSER ใหม่: Robust Chunk-Based Boundary Extractor ---
 def parse_pdf_data(pdf_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
@@ -65,7 +93,7 @@ def parse_pdf_data(pdf_file):
         for page_idx, page in enumerate(pdf.pages):
             text = page.extract_text() or ""
             
-            # 1. สกัด Header และ DW
+            # 1. สกัด Header และยอดเบิก DW
             if page_idx == 0:
                 d_match = re.search(r'ประจําวัน\s*([\d/]+)', text) or re.search(r'ประจำวัน\s*([\d/]+)', text)
                 if d_match:
@@ -83,10 +111,10 @@ def parse_pdf_data(pdf_file):
                 for dw_val in dw_matches:
                     dw_list.append(int(dw_val))
 
-            # 2. ดึงคำทั้งหมดพร้อมพิกัด (Bounding Box Words)
+            # 2. Extract คำทั้งหมดพร้อมพิกัด
             words = page.extract_words()
             
-            # ค้นหาคำที่เป็นพิกัด GPS เพื่อใช้เป็นAnchor จุดจัดส่ง
+            # ค้นหาคำที่เป็น Anchor GPS (Lat, Lng)
             gps_anchors = []
             for w in words:
                 m = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', w['text'])
@@ -98,63 +126,76 @@ def parse_pdf_data(pdf_file):
                         'bottom': w['bottom']
                     })
 
-            # จัดเรียง Anchor จากบนลงล่างตามตำแหน่งบนหน้ากระดาษ
+            # เรียงลำดับจุด GPS จากบนลงล่าง
             gps_anchors = sorted(gps_anchors, key=lambda x: x['top'])
 
-            # กำหนดขอบเขตกลุ่มข้อมูล (Data Block Boundary) ของแต่ละรายการ
+            # แกะข้อมูลทีละบล็อกตามตำแหน่ง GPS Anchor
             for idx, anchor in enumerate(gps_anchors):
-                # ขอบเขตแนวตั้ง: ตั้งแต่จุดสิ้นสุดรายการก่อนหน้า ถึงจุดสิ้นสุดรายการนี้
-                top_bound = gps_anchors[idx-1]['bottom'] if idx > 0 else (anchor['top'] - 30)
-                bottom_bound = anchor['bottom'] + 15
+                # กำหนดขอบเขตบน-ล่าง ของข้อมูลจุดนี้
+                top_b = gps_anchors[idx-1]['bottom'] if idx > 0 else (anchor['top'] - 25)
+                bot_b = anchor['bottom'] + 10
 
-                # กรองคำที่อยู่ในขอบเขตแนวตั้งของรายการนี้
-                block_words = [w for w in words if top_bound <= w['top'] <= bottom_bound]
+                # ดึงคำในบล็อก
+                block_words = [w for w in words if top_b <= w['top'] <= bot_b]
+                block_words = sorted(block_words, key=lambda w: (w['top'], w['x0']))
+                block_text = " ".join([w['text'] for w in block_words])
 
+                # สกัดรหัสลูกค้า
                 cust_id = "N/A"
-                cust_name_parts = []
-                qty = 1
+                cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', block_text)
+                if cid_m:
+                    cust_id = cid_m.group(1)
+
+                # สกัดเวลาจัดส่ง
                 deliv_time = "ไม่ระบุ"
+                tm = re.search(r'(\d{1,2}:\d{2})', block_text)
+                if tm:
+                    deliv_time = tm.group(1) + " น."
+
+                # สกัดสถานะ
                 status = "จัดส่งตรงเวลา"
+                if "จัดส่งไม่ตรงเวลา" in block_text:
+                    status = "จัดส่งไม่ตรงเวลา"
+                elif "รอบเสริม" in block_text:
+                    status = "รอบเสริม"
+                elif "ย้าย" in block_text:
+                    status = "ย้ายรอบ"
 
+                # สกัดจำนวนถัง (Qty)
+                qty = 1
+                # ค้นหาตัวเลขโดดๆ ที่อยู่กลางบล็อก
+                qty_candidates = []
                 for w in block_words:
-                    txt = w['text'].strip()
-                    x_pos = w['x0']
+                    t = w['text'].strip()
+                    if t.isdigit() and int(t) <= 100:
+                        # กรองไม่ให้เอาชั่วโมง/นาที หรือส่วนหนึ่งของรหัสลูกค้ามาใช้
+                        if not re.search(r'\d{1,2}:\d{2}', block_text) or t not in deliv_time:
+                            if t != cust_id and not cust_id.startswith(t):
+                                qty_candidates.append((w['x0'], int(t)))
+                
+                if qty_candidates:
+                    # เลือกลำดับตัวเลขคอลัมน์ยอดส่ง (ช่วง x0 ประมาณ 170-260)
+                    mid_candidates = [c[1] for c in qty_candidates if 160 <= c[0] <= 270]
+                    if mid_candidates:
+                        qty = mid_candidates[0]
+                    else:
+                        qty = qty_candidates[0][1]
 
-                    # สกัดสถานะ
-                    if "จัดส่งไม่ตรงเวลา" in txt:
-                        status = "จัดส่งไม่ตรงเวลา"
-                    elif "รอบเสริม" in txt:
-                        status = "รอบเสริม"
-                    elif "ย้าย" in txt:
-                        status = "ย้ายรอบ"
-
-                    # สกัดเวลาส่ง (รูปแบบ 09:30, 13:45, 10:12 น.)
-                    time_m = re.search(r'(\d{1,2}:\d{2})', txt)
-                    if time_m and deliv_time == "ไม่ระบุ":
-                        deliv_time = time_m.group(1) + " น."
-
-                    # สกัดรหัสลูกค้า (คอลัมน์ซ้ายสุด X < 80)
-                    if x_pos < 80 and re.match(r'^[\d/]{4,}$', txt) and cust_id == "N/A":
-                        cust_id = txt
+                # สกัดชื่อลูกค้า (คัดคำขยะ รหัส เวลา สถานะ พิกัด ออก)
+                name_words = []
+                for w in block_words:
+                    t = w['text'].strip()
+                    if t in ['|', '(', ')', 'รายการ', 'DWS', 'RES', cust_id]:
                         continue
-
-                    # สกัดยอดส่ง (คอลัมน์ยอดส่ง X อยู่ช่วง 180 ถึง 260)
-                    if 180 <= x_pos <= 260 and txt.isdigit() and int(txt) <= 100:
-                        qty = int(txt)
+                    if re.search(r'(1[2-9]\.\d+)|(10[0-5]\.\d+)', t):
                         continue
+                    if re.search(r'\d{1,2}:\d{2}|ตรงเวลา|ไม่ตรงเวลา|รอบเสริม|ย้าย', t):
+                        continue
+                    if t.isdigit() and int(t) == qty:
+                        continue
+                    name_words.append(t)
 
-                    # สกัดชื่อลูกค้า (คอลัมน์ชื่อ X อยู่ช่วง 70 ถึง 210)
-                    if 70 <= x_pos < 210:
-                        if txt in ['|', '(', ')', 'รายการ'] or txt == cust_id:
-                            continue
-                        if txt.isdigit() and int(txt) <= 100:
-                            continue
-                        if re.search(r'\d{1,2}:\d{2}|จัดส่ง|ตรงเวลา|รอบเสริม|ย้าย', txt):
-                            continue
-                        cust_name_parts.append(txt)
-
-                # รวมชื่อลูกค้าและทำความสะอาดคำขยะ
-                cust_name = " ".join(cust_name_parts).strip()
+                cust_name = " ".join(name_words).strip()
                 cust_name = re.sub(r'^[\|\s\d]+', '', cust_name).strip()
                 if not cust_name:
                     cust_name = "ไม่ระบุชื่อ"
@@ -169,10 +210,12 @@ def parse_pdf_data(pdf_file):
                     "status": status
                 })
 
-    # 3. จัดกลุ่มสร้าง DataFrame และแบ่งเที่ยวส่งตาม DW (80, 80)
+    # 3. จัดสร้าง DataFrame และแบ่งเที่ยวการส่งแบบเข้มงวดตาม DW 80 ถัง
     df = pd.DataFrame(records)
     if not df.empty:
-        # กำหนดโควต้า DW แต่ละรอบ (เช่น 80, 80)
+        # ตัดเคสข้อมูลซ้ำถ้ามี
+        df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
+
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80]
         trips = []
         acc_qty_list = []
@@ -184,8 +227,8 @@ def parse_pdf_data(pdf_file):
 
         for idx, row in df.iterrows():
             q = row['qty']
-            # ถ้าส่งสะสมเกินโควต้า DW เที่ยวปัจจุบัน ให้ตัดขึ้นเที่ยวใหม่
-            if curr_trip_qty + q > curr_limit and curr_trip_qty > 0 and curr_trip < len(dw_limits):
+            # เช็คว่าถ้าบวกยอดส่งจุดนี้แล้วเกินโควต้า DW ให้ตัดไปเที่ยวถัดไป
+            if (curr_trip_qty + q > curr_limit) and (curr_trip_qty > 0) and (curr_trip < len(dw_limits)):
                 curr_trip += 1
                 curr_trip_qty = 0
                 curr_limit = dw_limits[curr_trip - 1] if curr_trip <= len(dw_limits) else 80
@@ -246,7 +289,6 @@ if uploaded_file:
         # --- ส่วนแผนที่ MAP ANIMATION & ROUTING ---
         st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
 
-        # กำหนดสีแต่ละเที่ยว
         trip_colors = {
             "เที่ยวที่ 1": "#0055FF",  # สีน้ำเงินสด
             "เที่ยวที่ 2": "#FF0055",  # สีชมพูแดง
@@ -341,7 +383,6 @@ if uploaded_file:
                 let animTimer = null;
                 let currentActiveMarker = null;
 
-                // Mode 1: ปักหมุดทั้งหมดไว้ล่วงหน้า ชี้เมาส์แล้วโชว์ Tooltip ข้อมูล
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let color = pt.status === "จัดส่งตรงเวลา" ? "#00AA44" : "#FF0000";
@@ -372,7 +413,6 @@ if uploaded_file:
                     const seg = segments[step];
                     const info = seg.info;
 
-                    // วาดเส้นทางตามสีของเที่ยววิ่งนั้นๆ
                     const polyline = L.polyline(seg.path, {{
                         color: seg.color,
                         weight: 6,
