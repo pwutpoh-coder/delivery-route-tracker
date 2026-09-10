@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import requests
 import json
+import datetime
 import streamlit.components.v1 as components
 
 # --- ตั้งค่าหน้าตาแอปพลิเคชัน ---
@@ -20,19 +21,16 @@ st.sidebar.header("📍 ตั้งค่าคลังสินค้า (War
 
 @st.cache_data(show_spinner=False)
 def geocode_location(location_str):
-    """แปลงชื่อสถานที่ หรือ ข้อความพิกัด ให้เป็น (Lat, Lng) และส่งคืนชื่อสถานที่แบบเต็ม"""
     if not location_str or not location_str.strip():
         return None, None
         
     clean_str = location_str.strip()
     
-    # 1. เช็คว่าเป็นรูปแบบพิกัดโดยตรงหรือไม่ เช่น "13.66800, 100.61000"
     coord_match = re.match(r'^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$', clean_str)
     if coord_match:
         lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
         return (lat, lng), f"พิกัดแบบระบุเอง ({lat:.5f}, {lng:.5f})"
     
-    # 2. ค้นหาผ่าน OpenStreetMap Nominatim API
     headers = {
         "User-Agent": "SprinkleDeliveryApp/3.0 (Contact: delivery_admin@sprinkle.co.th)",
         "Accept-Language": "th,en;q=0.9"
@@ -117,10 +115,8 @@ def parse_excel_data(excel_file):
     re_list = []
     records = []
 
-    # อ่านข้อมูล Excel ทั้งแผ่น (ไม่กำหนด header เพื่อจับตำแหน่งเซลล์ถูกต้อง)
     raw_df = pd.read_excel(excel_file, header=None)
 
-    # ฟังก์ชันช่วยดึงค่าตามตำแหน่ง Index อย่างปลอดภัย ป้องกัน KeyError
     def safe_get(row_obj, idx):
         if idx < len(row_obj):
             val = row_obj.iloc[idx]
@@ -129,35 +125,27 @@ def parse_excel_data(excel_file):
 
     # 1. สกัด Header Info
     try:
-        # วันที่ (ปกติอยู่แถวที่ 3 คอลัมน์ B หรือ index 2, 1)
-        date_val = str(raw_df.iloc[2, 1]) if len(raw_df) > 2 and len(raw_df.columns) > 1 and pd.notna(raw_df.iloc[2, 1]) else ""
-        d_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', date_val)
+        header_blob = " ".join(raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten())
+        
+        # วันที่
+        d_match = re.search(r'(\d{1,2}/\d{1,2}/\d{2,4})', header_blob)
         if d_match:
             header_info["date"] = d_match.group(1)
 
-        # รถส่ง (แถวที่ 3 คอลัมน์ C)
-        truck_val = str(raw_df.iloc[2, 2]) if len(raw_df) > 2 and len(raw_df.columns) > 2 and pd.notna(raw_df.iloc[2, 2]) else ""
-        t_match = re.search(r'รถส่ง\s*(\w+)', truck_val)
+        # รถส่ง
+        t_match = re.search(r'รถส่ง\s*([\w\-]+)', header_blob)
         if t_match:
             header_info["truck_no"] = t_match.group(1)
-        else:
-            header_info["truck_no"] = truck_val.replace("รถส่ง", "").strip()
 
-        # พนักงานขับรถ (แถวที่ 3 คอลัมน์ H)
-        driver_val = str(raw_df.iloc[2, 7]) if len(raw_df) > 2 and len(raw_df.columns) > 7 and pd.notna(raw_df.iloc[2, 7]) else ""
-        drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', driver_val)
+        # พนักงานขับรถ
+        drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', header_blob)
         if drv_match:
             header_info["driver"] = drv_match.group(1).split("พนักงานยก")[0].strip()
-        else:
-            header_info["driver"] = driver_val.replace("พนักงานขับรถ", "").split("พนักงานยก")[0].strip()
-            
     except Exception:
         pass
 
-    # 2. สกัดรายการ DW / RE จากส่วนบนของชีต
-    header_text_concat = " ".join(
-        raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten()
-    )
+    # 2. สกัดรายการ DW / RE
+    header_text_concat = " ".join(raw_df.iloc[:5].fillna("").astype(str).to_numpy().flatten())
     dw_matches = re.findall(r'DW[A-Z0-9/]*\s*\|\s*(\d+)', header_text_concat)
     for dw_val in dw_matches:
         dw_list.append(int(dw_val))
@@ -166,57 +154,64 @@ def parse_excel_data(excel_file):
     for re_val in re_matches:
         re_list.append(int(re_val))
 
-    # 3. วนลูปอ่านรายการจัดส่ง (เริ่มต้นที่แถว index 5 เป็นต้นไป)
-    for idx in range(5, len(raw_df)):
+    # 3. วนลูปอ่านรายการจัดส่ง
+    for idx in range(3, len(raw_df)):
         row = raw_df.iloc[idx]
         
-        # [FIXED KEYERROR] เปลี่ยนการเข้าถึงตำแหน่งเป็นการใช้ .iloc ผ่าน safe_get
-        time_raw = safe_get(row, 0)
-        time_val = str(time_raw) if time_raw is not None else ""
+        # แปลงข้อความทั้งแถวเพื่อค้นหาพิกัด GPS ก่อน
+        row_str = " ".join([str(val) for val in row.values if pd.notna(val)])
+        gps_match = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', row_str)
         
-        cust_raw = safe_get(row, 3)
-        cust_info = str(cust_raw) if cust_raw is not None else ""
-        
-        qty_val = safe_get(row, 5)
-        
-        loc_raw = safe_get(row, 7)
-        location_info = str(loc_raw) if loc_raw is not None else ""
-        
-        status_raw = safe_get(row, 8)
-        status_info = str(status_raw) if status_raw is not None else ""
-
-        # ข้ามบรรทัดที่ไม่มีข้อมูลเวลาจัดส่ง
-        if not re.search(r'\d{1,2}:\d{2}', time_val):
-            continue
-
-        # ดึง Lat, Lng จากรายละเอียดสถานที่
-        gps_match = re.search(r'(1[2-9]\.\d+)\s*,\s*(10[0-5]\.\d+)', location_info)
         if not gps_match:
             continue
             
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
 
-        # สกัดชื่อและรหัสลูกค้า
+        # ดึงเวลาแบบยืดหยุ่น (คอลัมน์ A หรือ B)
+        time_raw = safe_get(row, 0)
+        if time_raw is None or str(time_raw).strip() == "":
+            time_raw = safe_get(row, 1)
+
+        time_formatted = ""
+        if isinstance(time_raw, (datetime.time, pd.Timestamp)):
+            time_formatted = time_raw.strftime("%H:%M")
+        elif time_raw is not None:
+            t_match = re.search(r'(\d{1,2}[:.]\d{2})', str(time_raw))
+            if t_match:
+                time_formatted = t_match.group(1).replace(".", ":")
+            else:
+                time_formatted = str(time_raw).strip()
+
+        if time_formatted and not time_formatted.endswith("น."):
+            time_formatted += " น."
+
+        # ดึงข้อมูลลูกค้า
+        cust_raw = safe_get(row, 3) or safe_get(row, 2) or safe_get(row, 4)
+        cust_info = str(cust_raw) if cust_raw is not None else ""
+
         cust_id = "N/A"
         cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', cust_info)
         if cid_m:
             cust_id = cid_m.group(1)
 
-        # ทำความสะอาดชื่อลูกค้า
         clean_name = re.sub(r'^\s*\|\s*\d+\s*', '', cust_info)
         clean_name = re.sub(r'\b\d{5,6}(?:/\d+)?\b', '', clean_name)
         clean_name = clean_name.replace("|", "").strip()
         if not clean_name:
-            clean_name = "ไม่ระบุชื่อ"
+            clean_name = "ลูกค้าสมาชิก"
 
-        # ยอดจัดส่ง (ถัง)
+        # ยอดจัดส่ง
+        qty_val = safe_get(row, 5) or safe_get(row, 6)
         try:
             qty = int(float(qty_val)) if qty_val is not None else 1
         except Exception:
             qty = 1
 
         # สถานะการจัดส่ง
+        status_raw = safe_get(row, 8) or safe_get(row, 7) or ""
+        status_info = str(status_raw)
+        
         status = "จัดส่งตรงเวลา"
         if "ไม่ตรงเวลา" in status_info or "ไม่ตรงเวลา" in cust_info:
             status = "จัดส่งไม่ตรงเวลา"
@@ -225,21 +220,17 @@ def parse_excel_data(excel_file):
         elif "ย้าย" in status_info:
             status = "ย้ายรอบ"
 
-        time_formatted = time_val.strip()
-        if not time_formatted.endswith("น."):
-            time_formatted += " น."
-
         records.append({
             "cust_id": cust_id,
             "cust_name": clean_name,
             "qty": qty,
             "lat": lat,
             "lng": lng,
-            "time": time_formatted,
+            "time": time_formatted if time_formatted else "ไม่ระบุเวลา",
             "status": status
         })
 
-    # 4. สร้าง DataFrame และแบ่งเที่ยวการส่ง (Trip) ตามใบเบิก DW
+    # 4. สร้าง DataFrame และแบ่งเที่ยวการส่ง (Trip)
     df = pd.DataFrame(records)
     if not df.empty:
         df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
@@ -284,20 +275,17 @@ if uploaded_file:
     else:
         st.success(f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ | ยอดจัดส่งรวม {df['qty'].sum()} ถัง | เที่ยวการส่ง {df['trip'].nunique()} เที่ยว")
 
-        # --- ส่วนแสดง HEADER ---
         st.subheader("📌 ข้อมูลสรุปการปฏิบัติงาน")
         c1, c2, c3 = st.columns(3)
         c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        # --- ส่วนแสดง ตารางรายการจัดส่ง ---
         st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (Data Table)")
         disp_df = df[['time', 'trip', 'cust_id', 'cust_name', 'qty', 'acc_qty', 'status', 'lat', 'lng']].copy()
         disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสลูกค้า', 'ชื่อลูกค้า / สมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude']
         st.dataframe(disp_df, use_container_width=True, height=350)
 
-        # --- สรุปยอดตามเที่ยววิ่งตามใบเบิก DW ---
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
         summaries = []
         for idx, (trip_name, group) in enumerate(df.groupby('trip', sort=False)):
@@ -314,7 +302,6 @@ if uploaded_file:
 
         st.divider()
 
-        # --- ส่วนแผนที่ MAP ANIMATION & ROUTING ---
         st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
 
         trip_colors = {
@@ -324,7 +311,6 @@ if uploaded_file:
             "เที่ยวที่ 4": "#AA00FF"
         }
 
-        # คำนวณเส้นทาง OSRM
         with st.spinner("กำลังคำนวณเส้นทางถนนจริง (OSRM Routing)..."):
             segments_data = []
             grouped = df.groupby('trip', sort=False)
