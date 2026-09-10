@@ -21,36 +21,59 @@ st.sidebar.header("📍 ตั้งค่าคลังสินค้า (War
 
 @st.cache_data(show_spinner=False)
 def geocode_location(location_str):
-    """แปลงชื่อสถานที่ หรือ ข้อความพิกัด ให้เป็น (Lat, Lng)"""
-    location_str = location_str.strip()
-    # กรณีผู้ใช้ป้อนแบบพิกัด "13.66800, 100.61000"
-    coord_match = re.match(r'^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$', location_str)
-    if coord_match:
-        return float(coord_match.group(1)), float(coord_match.group(2))
+    """แปลงชื่อสถานที่ หรือ ข้อความพิกัด ให้เป็น (Lat, Lng) และส่งคืนชื่อสถานที่แบบเต็ม"""
+    if not location_str or not location_str.strip():
+        return None, None
+        
+    clean_str = location_str.strip()
     
-    # กรณีผู้ใช้พิมพ์ชื่อสถานที่ -> ดึงพิกัดจาก Nominatim OpenStreetMap API
-    url = f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(location_str)}&format=json&limit=1"
-    headers = {"User-Agent": "SprinkleDeliveryApp/1.0"}
-    try:
-        res = requests.get(url, headers=headers, timeout=4)
-        if res.status_code == 200:
-            data = res.json()
-            if data:
-                return float(data[0]['lat']), float(data[0]['lon'])
-    except Exception:
-        pass
-    return None
+    # 1. เช็คว่าเป็นรูปแบบพิกัดโดยตรงหรือไม่ เช่น "13.66800, 100.61000" หรือ "13.66800 100.61000"
+    coord_match = re.match(r'^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$', clean_str)
+    if coord_match:
+        lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
+        return (lat, lng), f"พิกัดแบบระบุเอง ({lat:.5f}, {lng:.5f})"
+    
+    # 2. ค้นหาผ่าน OpenStreetMap Nominatim API แบบเจาะจงพื้นที่ประเทศไทย
+    headers = {
+        "User-Agent": "SprinkleDeliveryApp/2.0 (Contact: delivery_admin@sprinkle.co.th)",
+        "Accept-Language": "th,en;q=0.9"
+    }
+    
+    # คำค้นหาแบบปรับแต่งเพื่อเพิ่มความแม่นยำ
+    search_queries = [
+        clean_str,
+        f"{clean_str} ประเทศไทย",
+        f"{clean_str} Thailand"
+    ]
+    
+    for query in search_queries:
+        url = f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(query)}&format=json&limit=1&countrycodes=th"
+        try:
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                if data and len(data) > 0:
+                    lat = float(data[0]['lat'])
+                    lon = float(data[0]['lon'])
+                    display_name = data[0].get('display_name', clean_str)
+                    return (lat, lon), display_name
+        except Exception:
+            continue
+            
+    return None, None
 
 wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
     value="13.66800, 100.61000",
-    help="ตัวอย่าง: 'คลังสินค้า บางนา', 'Bangkok', หรือ '13.66800, 100.61000'"
+    help="ตัวอย่าง: 'คลังสินค้า บางนา', 'บางนา', 'Bangkok', หรือ '13.66800, 100.61000'"
 )
 
-warehouse_coord = geocode_location(wh_input)
+warehouse_coord, location_display_name = geocode_location(wh_input)
 
 if warehouse_coord:
-    st.sidebar.success(f"📍 พิกัดคลังสินค้า: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}")
+    st.sidebar.success(f"📍 พบพิกัดคลังสินค้า: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}")
+    if location_display_name:
+        st.sidebar.caption(f"🏢 **สถานที่:** {location_display_name[:60]}...")
 else:
     st.sidebar.error("⚠️ ไม่พบพิกัดจากชื่อสถานที่นี้ ใช้ค่าเริ่มต้น (13.66800, 100.61000)")
     warehouse_coord = (13.66800, 100.61000)
@@ -72,7 +95,7 @@ anim_speed_ms = st.sidebar.slider("ความเร็วการจำลอ
 def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
     try:
-        res = requests.get(url, timeout=3)
+        res = requests.get(url, timeout=4)
         if res.status_code == 200:
             data = res.json()
             if data.get("routes"):
@@ -163,25 +186,22 @@ def parse_pdf_data(pdf_file):
 
                 # สกัดจำนวนถัง (Qty)
                 qty = 1
-                # ค้นหาตัวเลขโดดๆ ที่อยู่กลางบล็อก
                 qty_candidates = []
                 for w in block_words:
                     t = w['text'].strip()
                     if t.isdigit() and int(t) <= 100:
-                        # กรองไม่ให้เอาชั่วโมง/นาที หรือส่วนหนึ่งของรหัสลูกค้ามาใช้
                         if not re.search(r'\d{1,2}:\d{2}', block_text) or t not in deliv_time:
                             if t != cust_id and not cust_id.startswith(t):
                                 qty_candidates.append((w['x0'], int(t)))
                 
                 if qty_candidates:
-                    # เลือกลำดับตัวเลขคอลัมน์ยอดส่ง (ช่วง x0 ประมาณ 170-260)
                     mid_candidates = [c[1] for c in qty_candidates if 160 <= c[0] <= 270]
                     if mid_candidates:
                         qty = mid_candidates[0]
                     else:
                         qty = qty_candidates[0][1]
 
-                # สกัดชื่อลูกค้า (คัดคำขยะ รหัส เวลา สถานะ พิกัด ออก)
+                # สกัดชื่อลูกค้า
                 name_words = []
                 for w in block_words:
                     t = w['text'].strip()
@@ -210,10 +230,9 @@ def parse_pdf_data(pdf_file):
                     "status": status
                 })
 
-    # 3. จัดสร้าง DataFrame และแบ่งเที่ยวการส่งแบบเข้มงวดตาม DW 80 ถัง
+    # 3. จัดสร้าง DataFrame และแบ่งเที่ยวการส่งตาม DW
     df = pd.DataFrame(records)
     if not df.empty:
-        # ตัดเคสข้อมูลซ้ำถ้ามี
         df = df.drop_duplicates(subset=['lat', 'lng', 'time']).reset_index(drop=True)
 
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80]
@@ -227,7 +246,6 @@ def parse_pdf_data(pdf_file):
 
         for idx, row in df.iterrows():
             q = row['qty']
-            # เช็คว่าถ้าบวกยอดส่งจุดนี้แล้วเกินโควต้า DW ให้ตัดไปเที่ยวถัดไป
             if (curr_trip_qty + q > curr_limit) and (curr_trip_qty > 0) and (curr_trip < len(dw_limits)):
                 curr_trip += 1
                 curr_trip_qty = 0
