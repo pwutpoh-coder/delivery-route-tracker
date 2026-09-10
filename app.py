@@ -61,7 +61,6 @@ def geocode_location(location_str):
             
     return None, None
 
-# ปรับปรุง: ไม่ใส่ค่าเริ่มต้นในช่องกรอก (value="") และใช้ placeholder แนะนำแทน
 wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
     value="",
@@ -69,7 +68,6 @@ wh_input = st.sidebar.text_input(
     help="สามารถพิมพ์ชื่อสถานที่ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง"
 )
 
-# กำหนดพิกัดเริ่มต้นสำรอง (Default Fallback Coordinate) กรณีไม่ได้พิมพ์หรือหาไม่เจอ
 DEFAULT_WAREHOUSE = (13.66800, 100.61000)
 
 if wh_input.strip():
@@ -404,13 +402,9 @@ if uploaded_file:
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let color = pt.status === "จัดส่งตรงเวลา" ? "#00AA44" : "#FF0000";
-                        let popupText = `<b>ลำดับที่ ${{idx+1}}: ${{pt.cust_name}}</b><br>` +
-                                        `รหัสลูกค้า: ${{pt.cust_id}}<br>` +
-                                        `เวลาส่ง: ${{pt.time}}<br>` +
-                                        `ยอดส่ง: ${{pt.qty}} ถัง<br>` +
-                                        `สถานะ: ${{pt.status}}`;
-                        
-                        let tooltipText = `${{idx+1}}. ${{pt.cust_name}} (${{pt.time}} - ${{pt.qty}}ถัง)`;
+                        // ปรับแต่ง Pop-up ให้แสดงเฉพาะลำดับการจัดส่ง
+                        let popupText = `<b>จุดส่งลำดับที่ ${{idx + 1}}</b>`;
+                        let tooltipText = `ลำดับที่ ${{idx + 1}}`;
 
                         let circle = L.circleMarker([pt.lat, pt.lng], {{
                             radius: 7,
@@ -443,13 +437,9 @@ if uploaded_file:
                     }}
 
                     if (info.lat && info.lng) {{
-                        let popupText = `<b>🚚 จุดส่งล่าสุด: ${{info.cust_name}}</b><br>` +
-                                        `รหัสลูกค้า: ${{info.cust_id}}<br>` +
-                                        `เวลาส่ง: ${{info.time}}<br>` +
-                                        `ยอดส่ง: ${{info.qty}} ถัง<br>` +
-                                        `เที่ยววิ่ง: ${{seg.trip}}`;
-
-                        let tooltipText = `📍 ${{info.cust_name}} (${{info.time}} - ${{info.qty}}ถัง)`;
+                        // ปรับแต่ง Pop-up ระหว่างเล่นทางให้แสดงเฉพาะลำดับส่ง
+                        let popupText = `<b>จุดส่งลำดับที่ ${{step + 1}}</b>`;
+                        let tooltipText = `ลำดับที่ ${{step + 1}}`;
 
                         currentActiveMarker = L.circleMarker([info.lat, info.lng], {{
                             radius: 12,
@@ -478,6 +468,8 @@ if uploaded_file:
                     }}
 
                     document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{step + 1}} / ${{segments.length}} (${{seg.trip}})`;
+                    
+                    // รายละเอียดเชิงลึกคงไว้อย่างครบถ้วนที่ Info Box ด้านล่างแผนที่
                     document.getElementById('info-box').innerHTML = `
                         <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งที่ ${{step + 1}}</div>
                         <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
