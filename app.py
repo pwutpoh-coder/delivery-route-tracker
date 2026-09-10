@@ -61,6 +61,7 @@ def geocode_location(location_str):
             
     return None, None
 
+# ช่องกรอกข้อความเริ่มต้นว่างเปล่า (value="")
 wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
     value="",
@@ -68,6 +69,7 @@ wh_input = st.sidebar.text_input(
     help="สามารถพิมพ์ชื่อสถานที่ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง"
 )
 
+# กำหนดพิกัดเริ่มต้นสำรอง (Default Fallback Coordinate) กรณีไม่ได้พิมพ์หรือหาไม่เจอ
 DEFAULT_WAREHOUSE = (13.66800, 100.61000)
 
 if wh_input.strip():
@@ -360,6 +362,19 @@ if uploaded_file:
                 .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; }}
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
+                
+                /* Style สำหรับแสดงตัวเลขลำดับกลางหมุดบนแผนที่ */
+                .number-icon {{
+                    background-color: #008CBA;
+                    color: white;
+                    border: 2px solid white;
+                    border-radius: 50%;
+                    text-align: center;
+                    font-weight: bold;
+                    font-size: 13px;
+                    line-height: 24px;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+                }}
             </style>
         </head>
         <body>
@@ -399,23 +414,22 @@ if uploaded_file:
                 let animTimer = null;
                 let currentActiveMarker = null;
 
+                // หากเป็นแบบที่ 1: ปักหมุดตัวเลขลำดับรอไว้ล่วงหน้าทั้งหมด
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
-                        let color = pt.status === "จัดส่งตรงเวลา" ? "#00AA44" : "#FF0000";
-                        // ปรับแต่ง Pop-up ให้แสดงเฉพาะลำดับการจัดส่ง
-                        let popupText = `<b>จุดส่งลำดับที่ ${{idx + 1}}</b>`;
-                        let tooltipText = `ลำดับที่ ${{idx + 1}}`;
+                        let seqNumber = idx + 1;
+                        let customIcon = L.divIcon({{
+                            className: 'number-icon',
+                            html: String(seqNumber),
+                            iconSize: [28, 28],
+                            iconAnchor: [14, 14]
+                        }});
 
-                        let circle = L.circleMarker([pt.lat, pt.lng], {{
-                            radius: 7,
-                            color: color,
-                            fillColor: color,
-                            fillOpacity: 0.7
-                        }}).addTo(map)
-                        .bindPopup(popupText)
-                        .bindTooltip(tooltipText, {{permanent: false, direction: 'top'}});
+                        let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map)
+                            .bindPopup(`<div style="font-size:16px; font-weight:bold; text-align:center;">${{seqNumber}}</div>`)
+                            .bindTooltip(String(seqNumber), {{permanent: false, direction: 'top'}});
                         
-                        allMarkers.push(circle);
+                        allMarkers.push(marker);
                     }});
                 }}
 
@@ -424,6 +438,7 @@ if uploaded_file:
 
                     const seg = segments[step];
                     const info = seg.info;
+                    const seqNumber = step + 1; // ลำดับตัวเลขจุดส่ง
 
                     const polyline = L.polyline(seg.path, {{
                         color: seg.color,
@@ -437,41 +452,34 @@ if uploaded_file:
                     }}
 
                     if (info.lat && info.lng) {{
-                        // ปรับแต่ง Pop-up ระหว่างเล่นทางให้แสดงเฉพาะลำดับส่ง
-                        let popupText = `<b>จุดส่งลำดับที่ ${{step + 1}}</b>`;
-                        let tooltipText = `ลำดับที่ ${{step + 1}}`;
+                        // ไอคอนตัวเลขเฉพาะลำดับที่ส่ง
+                        let dynamicIcon = L.divIcon({{
+                            className: 'number-icon',
+                            html: String(seqNumber),
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        }});
 
-                        currentActiveMarker = L.circleMarker([info.lat, info.lng], {{
-                            radius: 12,
-                            color: "#FFFFFF",
-                            weight: 3,
-                            fillColor: seg.color,
-                            fillOpacity: 1.0
-                        }}).addTo(map)
-                        .bindPopup(popupText)
-                        .bindTooltip(tooltipText, {{permanent: true, direction: 'top'}})
-                        .openPopup();
+                        currentActiveMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map)
+                            .bindPopup(`<div style="font-size:18px; font-weight:bold; text-align:center; color:${{seg.color}};">${{seqNumber}}</div>`)
+                            .bindTooltip(String(seqNumber), {{permanent: true, direction: 'top'}})
+                            .openPopup();
 
                         if (!isMode1) {{
-                            let permanentMarker = L.circleMarker([info.lat, info.lng], {{
-                                radius: 7,
-                                color: seg.color,
-                                fillColor: seg.color,
-                                fillOpacity: 0.7
-                            }}).addTo(map)
-                            .bindPopup(popupText)
-                            .bindTooltip(tooltipText, {{permanent: false, direction: 'top'}});
+                            let permanentMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map)
+                                .bindPopup(`<div style="font-size:16px; font-weight:bold; text-align:center;">${{seqNumber}}</div>`)
+                                .bindTooltip(String(seqNumber), {{permanent: false, direction: 'top'}});
                             allMarkers.push(permanentMarker);
                         }}
 
                         map.panTo([info.lat, info.lng]);
                     }}
 
-                    document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{step + 1}} / ${{segments.length}} (${{seg.trip}})`;
+                    document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{seqNumber}} / ${{segments.length}} (${{seg.trip}})`;
                     
-                    // รายละเอียดเชิงลึกคงไว้อย่างครบถ้วนที่ Info Box ด้านล่างแผนที่
+                    // แสดงรายละเอียดฉบับเต็มไว้ในกล่องข้อความด้านล่างแผนที่แทน
                     document.getElementById('info-box').innerHTML = `
-                        <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งที่ ${{step + 1}}</div>
+                        <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
                         <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
                         <b>รหัสลูกค้า:</b> ${{info.cust_id}} | 
                         <b>ชื่อลูกค้า / สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_name}}</span><br>
