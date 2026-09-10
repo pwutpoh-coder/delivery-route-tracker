@@ -39,7 +39,6 @@ def geocode_location(location_str):
         "Accept-Language": "th,en;q=0.9"
     }
     
-    # คำค้นหาแบบปรับแต่งเพื่อเพิ่มความแม่นยำ
     search_queries = [
         clean_str,
         f"{clean_str} ประเทศไทย",
@@ -62,21 +61,29 @@ def geocode_location(location_str):
             
     return None, None
 
+# ปรับปรุง: ไม่ใส่ค่าเริ่มต้นในช่องกรอก (value="") และใช้ placeholder แนะนำแทน
 wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):", 
-    value="13.66800, 100.61000",
-    help="ตัวอย่าง: 'คลังสินค้า บางนา', 'บางนา', 'Bangkok', หรือ '13.66800, 100.61000'"
+    value="",
+    placeholder="ตัวอย่าง: คลังสินค้า บางนา, บางนา, หรือ 13.66800, 100.61000",
+    help="สามารถพิมพ์ชื่อสถานที่ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง"
 )
 
-warehouse_coord, location_display_name = geocode_location(wh_input)
+# กำหนดพิกัดเริ่มต้นสำรอง (Default Fallback Coordinate) กรณีไม่ได้พิมพ์หรือหาไม่เจอ
+DEFAULT_WAREHOUSE = (13.66800, 100.61000)
 
-if warehouse_coord:
-    st.sidebar.success(f"📍 พบพิกัดคลังสินค้า: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}")
-    if location_display_name:
-        st.sidebar.caption(f"🏢 **สถานที่:** {location_display_name[:60]}...")
+if wh_input.strip():
+    warehouse_coord, location_display_name = geocode_location(wh_input)
+    if warehouse_coord:
+        st.sidebar.success(f"📍 พบพิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}")
+        if location_display_name:
+            st.sidebar.caption(f"🏢 **สถานที่:** {location_display_name[:60]}...")
+    else:
+        st.sidebar.warning("⚠️ ไม่พบพิกัดจากชื่อสถานที่นี้ (ใช้พิกัดเริ่มต้นสำรอง บางนา)")
+        warehouse_coord = DEFAULT_WAREHOUSE
 else:
-    st.sidebar.error("⚠️ ไม่พบพิกัดจากชื่อสถานที่นี้ ใช้ค่าเริ่มต้น (13.66800, 100.61000)")
-    warehouse_coord = (13.66800, 100.61000)
+    st.sidebar.info("ℹ️ ใช้พิกัดคลังสินค้าเริ่มต้น (13.66800, 100.61000)")
+    warehouse_coord = DEFAULT_WAREHOUSE
 
 st.sidebar.header("🎬 การตั้งค่าการจำลองเส้นทาง")
 play_mode = st.sidebar.radio(
@@ -106,7 +113,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- PARSER ใหม่: Robust Chunk-Based Boundary Extractor ---
+# --- PARSER: Robust Chunk-Based Boundary Extractor ---
 def parse_pdf_data(pdf_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
@@ -154,28 +161,23 @@ def parse_pdf_data(pdf_file):
 
             # แกะข้อมูลทีละบล็อกตามตำแหน่ง GPS Anchor
             for idx, anchor in enumerate(gps_anchors):
-                # กำหนดขอบเขตบน-ล่าง ของข้อมูลจุดนี้
                 top_b = gps_anchors[idx-1]['bottom'] if idx > 0 else (anchor['top'] - 25)
                 bot_b = anchor['bottom'] + 10
 
-                # ดึงคำในบล็อก
                 block_words = [w for w in words if top_b <= w['top'] <= bot_b]
                 block_words = sorted(block_words, key=lambda w: (w['top'], w['x0']))
                 block_text = " ".join([w['text'] for w in block_words])
 
-                # สกัดรหัสลูกค้า
                 cust_id = "N/A"
                 cid_m = re.search(r'(\b\d{5,6}(?:/\d+)?\b)', block_text)
                 if cid_m:
                     cust_id = cid_m.group(1)
 
-                # สกัดเวลาจัดส่ง
                 deliv_time = "ไม่ระบุ"
                 tm = re.search(r'(\d{1,2}:\d{2})', block_text)
                 if tm:
                     deliv_time = tm.group(1) + " น."
 
-                # สกัดสถานะ
                 status = "จัดส่งตรงเวลา"
                 if "จัดส่งไม่ตรงเวลา" in block_text:
                     status = "จัดส่งไม่ตรงเวลา"
@@ -184,7 +186,6 @@ def parse_pdf_data(pdf_file):
                 elif "ย้าย" in block_text:
                     status = "ย้ายรอบ"
 
-                # สกัดจำนวนถัง (Qty)
                 qty = 1
                 qty_candidates = []
                 for w in block_words:
@@ -201,7 +202,6 @@ def parse_pdf_data(pdf_file):
                     else:
                         qty = qty_candidates[0][1]
 
-                # สกัดชื่อลูกค้า
                 name_words = []
                 for w in block_words:
                     t = w['text'].strip()
@@ -308,10 +308,10 @@ if uploaded_file:
         st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
 
         trip_colors = {
-            "เที่ยวที่ 1": "#0055FF",  # สีน้ำเงินสด
-            "เที่ยวที่ 2": "#FF0055",  # สีชมพูแดง
-            "เที่ยวที่ 3": "#00AA44",  # สีเขียว
-            "เที่ยวที่ 4": "#AA00FF"   # สีม่วง
+            "เที่ยวที่ 1": "#0055FF",
+            "เที่ยวที่ 2": "#FF0055",
+            "เที่ยวที่ 3": "#00AA44",
+            "เที่ยวที่ 4": "#AA00FF"
         }
 
         # คำนวณเส้นทาง OSRM
