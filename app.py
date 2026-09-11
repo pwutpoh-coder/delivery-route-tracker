@@ -204,6 +204,11 @@ def parse_excel_data(excel_file):
 
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
+
+        # ป้องกันพิกัดผิดปกติ (Outliers นอกประเทศไทย)
+        if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
+            continue
+
         gps_diff_val = (
             float(gps_match.group(3)) if gps_match.group(3) else 0.0
         )
@@ -223,6 +228,7 @@ def parse_excel_data(excel_file):
         delivery_time = (
             time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
         )
+        time_sort_key = time_match.group(1) if time_match else f"99:{idx:02d}"
 
         if "จัดส่งตรงเวลา" in str_f:
             status = "จัดส่งตรงเวลา"
@@ -237,6 +243,7 @@ def parse_excel_data(excel_file):
             status = status_clean if status_clean else "จัดส่งตรงเวลา"
 
         records.append({
+            "excel_idx": idx,
             "cust_id": cust_id,
             "qty": qty,
             "lat": lat,
@@ -244,11 +251,15 @@ def parse_excel_data(excel_file):
             "gps_diff": gps_diff_str,
             "gps_diff_num": gps_diff_val,
             "time": delivery_time,
+            "time_key": time_sort_key,
             "status": status,
         })
 
     df = pd.DataFrame(records)
     if not df.empty:
+        # เรียงลำดับรายการตามเวลาส่งจริง ป้องกันเส้นทาง OSRM วิ่งกระโดดสลับไปมา
+        df = df.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
+
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
         trips = []
         acc_qty_list = []
@@ -311,7 +322,7 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (Data Table)")
+        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (เรียงตามลำดับเวลาส่งจริง)")
         disp_df = df[[
             "time",
             "trip",
@@ -438,26 +449,35 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
+                /* แก้ไข CSS สไตล์หมุด ไม่ให้โปร่งใส และใช้สีเต็มแผ่น */
+                .leaflet-div-icon {{
+                    background: transparent !important;
+                    border: none !important;
+                }}
+
                 .number-icon {{
-                    color: white;
-                    border: 1.5px solid #ffffff;
-                    border-radius: 50%;
-                    text-align: center;
-                    font-weight: bold;
-                    font-size: 8px;
-                    line-height: 12px;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-                    transition: transform 0.25s ease, box-shadow 0.25s ease;
+                    color: #FFFFFF !important;
+                    border: 2px solid #FFFFFF !important;
+                    border-radius: 50% !important;
+                    text-align: center !important;
+                    font-weight: bold !important;
+                    font-size: 11px !important;
+                    line-height: 20px !important;
+                    width: 24px !important;
+                    height: 24px !important;
+                    box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
+                    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
                     opacity: 1.0 !important;
+                    display: flex !important;
+                    align-items: center !important;
+                    justify-content: center !important;
                 }}
 
                 .number-icon-active {{
-                    transform: scale(1.83) !important;
+                    transform: scale(1.6) !important;
                     z-index: 1000 !important;
                     border: 2px solid #FFFFFF !important;
-                    font-size: 10px !important;
-                    line-height: 18px !important;
-                    box-shadow: 0 0 12px #FFD700, 0 3px 8px rgba(0,0,0,0.8) !important;
+                    box-shadow: 0 0 14px #FFD700, 0 4px 10px rgba(0,0,0,0.8) !important;
                 }}
 
                 .alert-badge {{
@@ -539,24 +559,20 @@ if uploaded_file:
                     `;
                 }}
 
+                function createMarkerIcon(seqNum, color) {{
+                    return L.divIcon({{
+                        className: '',
+                        html: `<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div>`,
+                        iconSize: [24, 24],
+                        iconAnchor: [12, 12]
+                    }});
+                }}
+
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
-                        let customIcon = L.divIcon({{
-                            className: 'number-icon',
-                            html: String(seqNumber),
-                            iconSize: [12, 12],
-                            iconAnchor: [6, 6]
-                        }});
-
+                        let customIcon = createMarkerIcon(seqNumber, pt.color);
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
-                        
-                        marker.on('add', function() {{
-                            if (marker._icon) {{
-                                marker._icon.style.backgroundColor = pt.color || '#008CBA';
-                                marker._icon.style.opacity = '1.0';
-                            }}
-                        }});
 
                         marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                         allMarkers.push(marker);
@@ -565,24 +581,18 @@ if uploaded_file:
 
                 function highlightMarkerByInfo(info) {{
                     if (activeMarkerRef && activeMarkerRef._icon) {{
-                        activeMarkerRef._icon.classList.remove('number-icon-active');
+                        let innerDiv = activeMarkerRef._icon.querySelector('.number-icon');
+                        if (innerDiv) innerDiv.classList.remove('number-icon-active');
                     }}
                     activeMarkerRef = null;
 
                     if (!info || info.point_idx === undefined || info.point_idx === null) return;
 
-                    if (isMode1 && allMarkers[info.point_idx]) {{
-                        let target = allMarkers[info.point_idx];
-                        if (target._icon) {{
-                            target._icon.classList.add('number-icon-active');
-                            activeMarkerRef = target;
-                        }}
-                    }} else if (!isMode1 && stepMarkers[info.point_idx]) {{
-                        let target = stepMarkers[info.point_idx];
-                        if (target._icon) {{
-                            target._icon.classList.add('number-icon-active');
-                            activeMarkerRef = target;
-                        }}
+                    let target = isMode1 ? allMarkers[info.point_idx] : stepMarkers[info.point_idx];
+                    if (target && target._icon) {{
+                        let innerDiv = target._icon.querySelector('.number-icon');
+                        if (innerDiv) innerDiv.classList.add('number-icon-active');
+                        activeMarkerRef = target;
                     }}
                 }}
 
@@ -597,7 +607,7 @@ if uploaded_file:
                     activePolylines = [];
 
                     if (!isMode1) {{
-                        stepMarkers.forEach(m => map.removeLayer(m));
+                        stepMarkers.forEach(m => {{ if (m) map.removeLayer(m); }});
                         stepMarkers = [];
                     }}
 
@@ -613,20 +623,10 @@ if uploaded_file:
                         if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
                             let pIdx = seg.info.point_idx;
                             let ptInfo = points[pIdx];
-                            if (ptInfo) {{
+                            if (ptInfo && !stepMarkers[pIdx]) {{
                                 let seqNumber = pIdx + 1;
-                                let customIcon = L.divIcon({{
-                                    className: 'number-icon',
-                                    html: String(seqNumber),
-                                    iconSize: [12, 12],
-                                    iconAnchor: [6, 6]
-                                }});
+                                let customIcon = createMarkerIcon(seqNumber, ptInfo.color);
                                 let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(map);
-                                marker.on('add', function() {{
-                                    if (marker._icon) {{
-                                        marker._icon.style.backgroundColor = ptInfo.color || '#008CBA';
-                                    }}
-                                }});
                                 marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                                 stepMarkers[pIdx] = marker;
                             }}
@@ -639,7 +639,6 @@ if uploaded_file:
                     highlightMarkerByInfo(info);
 
                     let infoBox = document.getElementById('info-box');
-                    
                     infoBox.innerHTML = `
                         <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
                         <b>🕒 เวลาส่ง:</b> ${{info.time}} | 
