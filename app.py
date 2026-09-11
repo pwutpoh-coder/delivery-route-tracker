@@ -15,7 +15,7 @@ st.set_page_config(
 st.title("🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)")
 st.markdown("ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (Excel) พร้อมจำลองเส้นทางบนถนนจริงผ่าน OSRM")
 
-# --- SIDEBAR: ตั้งค่าคลังสินค้า ---
+# --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
 
 @st.cache_data(show_spinner=False)
@@ -79,6 +79,16 @@ else:
     st.sidebar.info("ℹ️ ใช้พิกัดคลังสินค้าเริ่มต้น (13.66800, 100.61000)")
     warehouse_coord = DEFAULT_WAREHOUSE
 
+st.sidebar.divider()
+
+# --- SIDEBAR: ปุ่มรีเซ็ตนำเข้าข้อมูลใหม่ ---
+st.sidebar.header("🔄 จัดการข้อมูล")
+if st.sidebar.button("🗑️ ล้างข้อมูล / นำเข้าไฟล์ใหม่", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.divider()
+
 st.sidebar.header("🎬 การตั้งค่าการจำลองเส้นทาง")
 play_mode = st.sidebar.radio(
     "รูปแบบการแสดงผลบนแผนที่:",
@@ -88,7 +98,7 @@ play_mode = st.sidebar.radio(
     )
 )
 
-anim_speed_ms = st.sidebar.slider("ความเร็วการจำลอง (มิลลิวินาที/จุด)", min_value=100, max_value=2000, value=600, step=100)
+anim_speed_ms = st.sidebar.slider("ความเร็วการจำลอง (มิลลิวินาที/จุด)", min_value=100, max_value=3000, value=600, step=100)
 
 
 # --- FUNCTION: ดึงเส้นทางถนนจริงจาก OSRM ---
@@ -172,7 +182,8 @@ def parse_excel_data(excel_file):
 
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
-        gps_diff = gps_match.group(3) if gps_match.group(3) else "0.00"
+        gps_diff_val = float(gps_match.group(3)) if gps_match.group(3) else 0.0
+        gps_diff_str = f"{gps_diff_val:.2f}"
 
         # ดึงรหัสสมาชิก
         cust_id = str(val_a).strip() if pd.notna(val_a) else "N/A"
@@ -207,12 +218,13 @@ def parse_excel_data(excel_file):
             "qty": qty,
             "lat": lat,
             "lng": lng,
-            "gps_diff": gps_diff,
+            "gps_diff": gps_diff_str,
+            "gps_diff_num": gps_diff_val,
             "time": delivery_time,
             "status": status
         })
 
-    # 4. สร้าง DataFrame และคำนวณแบ่งเที่ยวส่ง (Trip Allocation Logic - Fixed)
+    # 4. สร้าง DataFrame และคำนวณแบ่งเที่ยวส่ง
     df = pd.DataFrame(records)
     if not df.empty:
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
@@ -227,14 +239,12 @@ def parse_excel_data(excel_file):
             q = row['qty']
             target_limit = dw_limits[curr_trip_idx] if curr_trip_idx < len(dw_limits) else dw_limits[-1]
 
-            # รวมยอดปัจจุบันเข้าเที่ยวก่อน
             curr_trip_qty += q
             total_acc += q
             
             trips.append(f"เที่ยวที่ {curr_trip_idx + 1}")
             acc_qty_list.append(total_acc)
 
-            # ตรวจสอบว่ายอดส่งสะสมในเที่ยวนี้เต็มหรือเกิน DWS หรือยัง ถ้าเกินแล้วให้ขยับไปเที่ยวถัดไปสำหรับรายการถัดไป
             if (curr_trip_qty >= target_limit) and (curr_trip_idx + 1 < len(dw_limits)):
                 curr_trip_idx += 1
                 curr_trip_qty = 0
@@ -310,8 +320,10 @@ if uploaded_file:
                         "time": "จบเที่ยววิ่ง", 
                         "qty": 0, 
                         "gps_diff": "0.00",
+                        "gps_diff_num": 0.0,
                         "status": "วิ่งกลับเข้าคลังเรียบร้อย"
                     }
+                    info["trip"] = trip_name
 
                     segments_data.append({
                         "trip": trip_name,
@@ -320,7 +332,12 @@ if uploaded_file:
                         "info": info
                     })
 
-        points_json = json.dumps(df.to_dict('records'), ensure_ascii=False)
+        # ให้ข้อมูลแต่ละจุดมีสีตามเที่ยวการส่งติดไปด้วย
+        df_records = df.to_dict('records')
+        for r in df_records:
+            r['color'] = trip_colors.get(r.get('trip'), '#0055FF')
+
+        points_json = json.dumps(df_records, ensure_ascii=False)
         segments_json = json.dumps(segments_data, ensure_ascii=False)
         wh_json = json.dumps(warehouse_coord)
         is_mode_1 = "แบบที่ 1" in play_mode
@@ -332,26 +349,41 @@ if uploaded_file:
             <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <style>
-                #map {{ width: 100%; height: 580px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
-                .controls {{ margin-bottom: 12px; font-family: 'Sarabun', sans-serif; display: flex; gap: 10px; align-items: center; }}
-                button {{ padding: 8px 18px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
+                #map {{ width: 100%; height: 560px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                .controls {{ margin-bottom: 10px; font-family: 'Sarabun', sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+                button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
                 button:hover {{ background-color: #005f73; transform: scale(1.02); }}
-                #info-box {{ margin-top: 12px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 15px; line-height: 1.6; color: #333; }}
-                .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; }}
+                
+                .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; }}
+                .timeline-slider {{ flex-grow: 1; height: 6px; cursor: pointer; }}
+                
+                #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
+                .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; flex-wrap: wrap; }}
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
                 .number-icon {{
-                    background-color: #008CBA;
                     color: white;
                     border: 2px solid white;
                     border-radius: 50%;
                     text-align: center;
                     font-weight: bold;
-                    font-size: 13px;
+                    font-size: 12px;
                     line-height: 24px;
                     box-shadow: 0 2px 6px rgba(0,0,0,0.4);
                 }}
+
+                .alert-badge {{
+                    display: inline-block;
+                    padding: 2px 6px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    color: white;
+                    margin-left: 4px;
+                }}
+                .badge-late {{ background-color: #d9534f; }}
+                .badge-gps {{ background-color: #f0ad4e; color: #000; }}
             </style>
         </head>
         <body>
@@ -359,28 +391,38 @@ if uploaded_file:
                 <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1 (สีน้ำเงิน)</div>
                 <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2 (สีชมพูแดง)</div>
                 <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3 (สีเขียว)</div>
+                <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4 (สีม่วง)</div>
             </div>
+
             <div class="controls">
                 <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
                 <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
                 <button onclick="resetAnimation()">🔄 รีเซ็ต (Reset)</button>
                 <span id="status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50;">พร้อมสำหรับการจำลองเส้นทาง...</span>
             </div>
+
+            <div class="timeline-container">
+                <span style="font-weight:bold; font-size:13px;">⏱️ เลื่อนช่วงเวลา:</span>
+                <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{len(segments_data)-1}" value="0" oninput="onSliderChange(this.value)">
+                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:80px; text-align:right;">จุดที่ 0 / {len(segments_data)}</span>
+            </div>
+
             <div id="map"></div>
-            <div id="info-box">📍 **สถานะพิกัด**: กดปุ่ม "เริ่มเล่น" เพื่อดูการเดินทางแบบ Real-time</div>
+            <div id="info-box">📍 **สถานะพิกัด**: กดปุ่ม "เริ่มเล่น" หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด</div>
 
             <script>
                 const points = {points_json};
                 const segments = {segments_json};
                 const warehouse = {wh_json};
                 const isMode1 = {str(is_mode_1).lower()};
-                const speedMs = {anim_speed_ms};
+                let currentSpeedMs = {anim_speed_ms};
 
                 const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
+                // คลังสินค้า
                 L.marker(warehouse).addTo(map)
                     .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
@@ -388,19 +430,50 @@ if uploaded_file:
                 let activePolylines = [];
                 let currentStep = 0;
                 let animTimer = null;
+                let isPlaying = false;
                 let currentActiveMarker = null;
 
+                // ฟังก์ชันสร้าง Tooltip Content เมื่อชี้เมาส์ที่หมุด
+                function createTooltipHtml(info, seqNum) {{
+                    let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
+                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
+
+                    let lateBadge = isLate ? `<span class="alert-badge badge-late">⚠️ ส่งไม่ตรงเวลา</span>` : '';
+                    let gpsBadge = isGpsDiff ? `<span class="alert-badge badge-gps">⚠️ GPS ห่าง >100m</span>` : '';
+
+                    return `
+                        <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
+                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b> ${{lateBadge}}${{gpsBadge}}<br>
+                            <b>เวลา:</b> ${{info.time || '-'}}<br>
+                            <b>สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
+                            <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
+                            <b>สถานะ:</b> ${{info.status}}<br>
+                            <b>ต่าง GPS:</b> ${{info.gps_diff || '0.00'}} m
+                        </div>
+                    `;
+                }}
+
+                // โหมด 1: วาดหมุดทั้งหมดล่วงหน้าพร้อมสีแยกตามเที่ยว
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
                         let customIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
-                            iconSize: [28, 28],
-                            iconAnchor: [14, 14]
+                            iconSize: [26, 26],
+                            iconAnchor: [13, 13]
                         }});
 
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
+                        
+                        // ปรับสีหมุดตามเที่ยวส่ง
+                        marker.on('add', function() {{
+                            if (marker._icon) {{
+                                marker._icon.style.backgroundColor = pt.color || '#008CBA';
+                            }}
+                        }});
+
+                        marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                         allMarkers.push(marker);
                     }});
                 }}
@@ -412,13 +485,19 @@ if uploaded_file:
                     const info = seg.info;
                     const seqNumber = step + 1;
 
+                    // อัปเดตแถบ Slider
+                    document.getElementById('timeSlider').value = step;
+                    document.getElementById('slider-label').innerText = `จุดที่ ${{seqNumber}} / ${{segments.length}}`;
+
+                    // วาดเส้นทาง
                     const polyline = L.polyline(seg.path, {{
                         color: seg.color,
-                        weight: 6,
+                        weight: 5,
                         opacity: 0.85
                     }}).addTo(map);
                     activePolylines.push(polyline);
 
+                    // เอาหมุด Highlight ล่าสุดออกเพื่อวาดใหม่
                     if (currentActiveMarker) {{
                         map.removeLayer(currentActiveMarker);
                     }}
@@ -432,47 +511,78 @@ if uploaded_file:
                         }});
 
                         currentActiveMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
+                        
+                        if (currentActiveMarker._icon) {{
+                            currentActiveMarker._icon.style.backgroundColor = seg.color;
+                            currentActiveMarker._icon.style.border = "3px solid #FFFF00"; // ขอบเหลืองเด่นสำหรับจุดปัจจุบัน
+                        }}
+
+                        currentActiveMarker.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
 
                         if (!isMode1) {{
                             let permanentMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
+                            if (permanentMarker._icon) {{
+                                permanentMarker._icon.style.backgroundColor = seg.color;
+                            }}
+                            permanentMarker.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                             allMarkers.push(permanentMarker);
                         }}
 
                         map.panTo([info.lat, info.lng]);
                     }}
 
+                    // ตรวจสอบ Pop-up แจ้งเตือนพิเศษแบบกะทัดรัด
+                    let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
+                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
+                    
+                    let alertNotice = "";
+                    if (isLate || isGpsDiff) {{
+                        alertNotice = `<div style="margin-top:6px; padding:4px 8px; background:rgba(255,235,238,0.9); border:1px solid #ffcdd2; border-radius:4px; font-size:12px; color:#c62828; display:inline-block;">`;
+                        if (isLate) alertNotice += `⚠️ <b>เตือน:</b> จัดส่งไม่ตรงเวลารอบปกติ `;
+                        if (isGpsDiff) alertNotice += `🚨 <b>เตือน:</b> พิกัด GPS ต่างเกิน 100 เมตร (${{info.gps_diff}} m)`;
+                        alertNotice += `</div>`;
+                    }}
+
                     document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{seqNumber}} / ${{segments.length}} (${{seg.trip}})`;
                     
                     document.getElementById('info-box').innerHTML = `
-                        <div style="color:${{seg.color}}; font-weight:bold; font-size:16px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
+                        <div style="color:${{seg.color}}; font-weight:bold; font-size:15px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
                         <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
                         <b>รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
                         <b>ยอดส่งสินค้า:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
-                        <b>ค่าความต่าง GPS:</b> ${{info.gps_diff || '0.00'}} | 
+                        <b>ค่าความต่าง GPS:</b> ${{info.gps_diff || '0.00'}} m | 
                         <b>สถานะการจัดส่ง:</b> ${{info.status}}
+                        ${{alertNotice}}
                     `;
                 }}
 
                 function startAnimation() {{
+                    if (isPlaying) return;
+                    isPlaying = true;
+                    runLoop();
+                }}
+
+                function runLoop() {{
                     if (animTimer) clearInterval(animTimer);
                     animTimer = setInterval(() => {{
                         if (currentStep < segments.length) {{
                             renderStep(currentStep);
                             currentStep++;
                         }} else {{
-                            clearInterval(animTimer);
+                            pauseAnimation();
                             document.getElementById('status-text').innerText = "✅ จำลองการจัดส่งสินค้าเสร็จสิ้นเรียบร้อยแล้ว!";
                         }}
-                    }}, speedMs);
+                    }}, currentSpeedMs);
                 }}
 
                 function pauseAnimation() {{
+                    isPlaying = false;
                     if (animTimer) clearInterval(animTimer);
                     document.getElementById('status-text').innerText = "⏸️ หยุดการจำลองชั่วคราว";
                 }}
 
                 function resetAnimation() {{
-                    if (animTimer) clearInterval(animTimer);
+                    pauseAnimation();
                     currentStep = 0;
                     
                     activePolylines.forEach(p => map.removeLayer(p));
@@ -488,13 +598,49 @@ if uploaded_file:
                         allMarkers = [];
                     }}
                     
+                    document.getElementById('timeSlider').value = 0;
+                    document.getElementById('slider-label').innerText = `จุดที่ 0 / ${{segments.length}}`;
                     map.setView([warehouse[0], warehouse[1]], 13);
                     document.getElementById('status-text').innerText = "พร้อมสำหรับการจำลองเส้นทาง...";
-                    document.getElementById('info-box').innerHTML = "📍 **สถานะพิกัด**: กดปุ่ม 'เริ่มเล่น' เพื่อดูการเดินทางแบบ Real-time";
+                    document.getElementById('info-box').innerHTML = "📍 **สถานะพิกัด**: กดปุ่ม 'เริ่มเล่น' หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด";
+                }}
+
+                // ฟังก์ชันเมื่อผู้ใช้ลาก Slider เปลี่ยนจุด
+                function onSliderChange(targetStep) {{
+                    let wasPlaying = isPlaying;
+                    pauseAnimation();
+                    
+                    // เคลียร์เส้นทางก่อนหน้าทั้งหมดเพื่อวาดใหม่จนถึง targetStep
+                    activePolylines.forEach(p => map.removeLayer(p));
+                    activePolylines = [];
+
+                    if (!isMode1) {{
+                        allMarkers.forEach(m => map.removeLayer(m));
+                        allMarkers = [];
+                    }}
+
+                    targetStep = parseInt(targetStep);
+                    for (let s = 0; s <= targetStep; s++) {{
+                        renderStep(s);
+                    }}
+                    currentStep = targetStep + 1;
+
+                    if (wasPlaying) {{
+                        startAnimation();
+                    }}
+                }}
+
+                // ปรับเปลี่ยนความเร็วการเล่นได้แบบ Real-time
+                function updateSpeed(newSpeed) {{
+                    currentSpeedMs = newSpeed;
+                    if (isPlaying) {{
+                        runLoop(); // เล่นต่อทันทีที่ความเร็วใหม่ ไม่เริ่มนับ 1 ใหม่
+                    }}
                 }}
             </script>
         </body>
         </html>
         """
 
-        components.html(map_html, height=720)
+        # ส่งผ่านค่าความเร็วเข้า iframe
+        components.html(map_html, height=730)
