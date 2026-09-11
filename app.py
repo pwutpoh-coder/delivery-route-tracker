@@ -507,6 +507,7 @@ if uploaded_file:
                             iconSize: [26, 26],
                             iconAnchor: [13, 13]
                         }});
+
                         let m = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
                         m.on('add', function() {{
                             if (m._icon) m._icon.style.backgroundColor = seg.color || '#008CBA';
@@ -515,35 +516,36 @@ if uploaded_file:
                         stepMarkers.push(m);
                     }}
 
-                    // Highlight หมุดปัจจุบัน
+                    // สร้าง วงแหวน Highlight จุดล่าสุด
                     if (info.lat && info.lng) {{
                         currentActiveMarker = L.circleMarker([info.lat, info.lng], {{
                             radius: 12,
+                            color: '#FFD700',
                             fillColor: '#FFD700',
-                            color: '#FF0000',
-                            weight: 3,
-                            opacity: 1,
-                            fillOpacity: 0.8
+                            fillOpacity: 0.6,
+                            weight: 3
                         }}).addTo(map);
                         map.panTo([info.lat, info.lng]);
                     }}
 
-                    // อัปเดตกล่องข้อความสรุปด้านล่าง
+                    // อัปเดตกล่องข้อความสรุป
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
-                    let isGps = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
+                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
                     
+                    let lateStr = isLate ? '<span style="color:red; font-weight:bold;">[⚠️ จัดส่งไม่ตรงเวลา]</span>' : '';
+                    let gpsStr = isGpsDiff ? '<span style="color:orange; font-weight:bold;">[⚠️ พิกัดห่างเกิน 100m]</span>' : '';
+
                     document.getElementById('info-box').innerHTML = `
-                        <b>🚚 สถานะปัจจุบัน [ลำดับที่ ${{seqNumber}} / ${{segments.length}}]:</b> เที่ยวส่ง: <span style="color:${{seg.color}}; font-weight:bold;">${{info.trip}}</span><br>
-                        <b>⏰ เวลา:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> ${{info.cust_id}} | <b>📦 จำนวน:</b> ${{info.qty}} ถัง<br>
-                        <b>📌 สถานะ:</b> ${{info.status}} ${{isLate ? '🚨 (ส่งไม่ตรงเวลา)' : ''}}<br>
-                        <b>📡 ระยะห่างพิกัด GPS:</b> ${{info.gps_diff}} เมตร ${{isGps ? '⚠️ (เกินระยะ 100m)' : ''}}
+                        <b>🚛 กำลังจัดส่งจุดที่ ${{seqNumber}} (${{info.trip || 'คลังสินค้า'}}):</b> รหัสสมาชิก <b>${{info.cust_id}}</b> | 
+                        เวลา: <b>${{info.time}}</b> | ยอดส่ง: <b>${{info.qty}} ถัง</b> | 
+                        สถานะ: <b>${{info.status}}</b> ${{lateStr}} ${{gpsStr}}
                     `;
                 }}
 
-                function clearAnimationLayers() {{
+                function clearCurrentMap() {{
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
-                    
+
                     stepMarkers.forEach(m => map.removeLayer(m));
                     stepMarkers = [];
 
@@ -568,7 +570,7 @@ if uploaded_file:
                             currentStep++;
                         }} else {{
                             pauseAnimation();
-                            document.getElementById('status-text').innerText = "✅ จำลองเส้นทางเสร็จสิ้น!";
+                            document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้นเรียบร้อย";
                         }}
                     }}, currentSpeedMs);
                 }}
@@ -576,33 +578,33 @@ if uploaded_file:
                 function pauseAnimation() {{
                     isPlaying = false;
                     if (animTimer) clearInterval(animTimer);
-                    document.getElementById('status-text').innerText = "⏸️ หยุดชั่วคราว";
+                    document.getElementById('status-text').innerText = "⏸️ หยุดการจำลองชั่วคราว";
                 }}
 
                 function resetAnimation() {{
                     pauseAnimation();
                     currentStep = 0;
-                    clearAnimationLayers();
+                    clearCurrentMap();
                     document.getElementById('timeSlider').value = 0;
                     document.getElementById('slider-label').innerText = `จุดที่ 0 / ${{segments.length}}`;
-                    document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
-                    document.getElementById('info-box').innerHTML = '📍 **สถานะพิกัด**: กดปุ่ม "เริ่มเล่น" หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด';
-                    map.setView(warehouse, 13);
+                    document.getElementById('status-text').innerText = "🔄 รีเซ็ตการจำลองแล้ว";
+                    document.getElementById('info-box').innerHTML = "📍 **สถานะพิกัด**: กดปุ่ม 'เริ่มเล่น' หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด";
+                    map.setView([warehouse[0], warehouse[1]], 13);
                 }}
 
                 function onSliderChange(val) {{
                     pauseAnimation();
-                    clearAnimationLayers();
+                    clearCurrentMap();
                     let targetStep = parseInt(val);
                     for (let i = 0; i <= targetStep; i++) {{
                         renderStep(i);
                     }}
                     currentStep = targetStep + 1;
+                    document.getElementById('status-text').innerText = `📍 แสดงเส้นทางถึงจุดที่ ${{targetStep + 1}}`;
                 }}
             </script>
         </body>
         </html>
         """
 
-        import streamlit.components.v1 as components
-        components.html(map_html, height=750)
+        st.components.v1.html(map_html, height=720, scrolling=False)
