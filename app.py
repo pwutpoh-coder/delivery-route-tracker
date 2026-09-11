@@ -17,7 +17,6 @@ st.markdown("ดึงข้อมูลจากเอกสารสรุป�
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
 
-@st.cache_data(show_spinner=False)
 def geocode_location(location_str):
     if not location_str or not location_str.strip():
         return None, None
@@ -125,21 +124,17 @@ def parse_excel_data(excel_file):
 
     raw_df = pd.read_excel(excel_file, header=None)
 
-    # 1. สกัดข้อมูล Header (วันที่ / รถส่ง / พนักงานขับรถ)
     try:
         header_blob = " ".join(raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten())
         
-        # วันที่
         d_match = re.search(r'ประจำวันที่\s*([\d/]+)', header_blob)
         if d_match:
             header_info["date"] = d_match.group(1)
 
-        # รถส่ง
         t_match = re.search(r'รถส่ง\s*([\w\-]+)', header_blob)
         if t_match:
             header_info["truck_no"] = t_match.group(1)
 
-        # พนักงานขับรถ
         drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', header_blob)
         if drv_match:
             driver_text = drv_match.group(1).split("พนักงานยก")[0].strip()
@@ -147,7 +142,6 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 2. สกัดรายการเบิก/คืน (DWS / RES)
     try:
         header_text = " ".join(raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten())
         dw_matches = re.findall(r'DWS\d+/\d+\s+(\d+)', header_text)
@@ -160,7 +154,6 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 3. วนลูปอ่านข้อมูลทุกบรรทัด
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
         
@@ -174,7 +167,6 @@ def parse_excel_data(excel_file):
 
         str_e = str(val_e).strip()
         
-        # ดึงพิกัด GPS (Lat, Lng)
         gps_match = re.search(r'([1-9]\d*\.\d+)\s*,\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?', str_e)
         if not gps_match:
             continue
@@ -184,18 +176,15 @@ def parse_excel_data(excel_file):
         gps_diff_val = float(gps_match.group(3)) if gps_match.group(3) else 0.0
         gps_diff_str = f"{gps_diff_val:.2f}"
 
-        # ดึงรหัสสมาชิก
         cust_id = str(val_a).strip() if pd.notna(val_a) else "N/A"
         if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"]:
             continue
 
-        # ดึงยอดส่งสินค้า (ถัง)
         try:
             qty = int(float(val_c)) if pd.notna(val_c) else 1
         except Exception:
             qty = 1
 
-        # ดึงเวลาส่ง และ สถานะ
         str_f = str(val_f).strip() if pd.notna(val_f) else ""
         time_match = re.search(r'(\d{1,2}:\d{2})', str_f)
         delivery_time = time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
@@ -223,7 +212,6 @@ def parse_excel_data(excel_file):
             "status": status
         })
 
-    # 4. สร้าง DataFrame และคำนวณแบ่งเที่ยวส่ง
     df = pd.DataFrame(records)
     if not df.empty:
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
@@ -306,6 +294,7 @@ if uploaded_file:
             segments_data = []
             grouped = df.groupby('trip', sort=False)
 
+            point_counter = 0
             for trip_name, group in grouped:
                 pts = [warehouse_coord] + list(zip(group['lat'], group['lng'])) + [warehouse_coord]
                 records_list = group.to_dict('records')
@@ -314,14 +303,20 @@ if uploaded_file:
                     p1, p2 = pts[i], pts[i+1]
                     road_path = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
                     
-                    info = records_list[i] if i < len(records_list) else {
-                        "cust_id": "WH-001",
-                        "time": "จบเที่ยววิ่ง", 
-                        "qty": 0, 
-                        "gps_diff": "0.00",
-                        "gps_diff_num": 0.0,
-                        "status": "วิ่งกลับเข้าคลังเรียบร้อย"
-                    }
+                    if i < len(records_list):
+                        info = records_list[i]
+                        info["point_idx"] = point_counter
+                        point_counter += 1
+                    else:
+                        info = {
+                            "cust_id": "WH-001",
+                            "time": "จบเที่ยววิ่ง", 
+                            "qty": 0, 
+                            "gps_diff": "0.00",
+                            "gps_diff_num": 0.0,
+                            "status": "วิ่งกลับเข้าคลังเรียบร้อย",
+                            "point_idx": None
+                        }
                     info["trip"] = trip_name
 
                     segments_data.append({
@@ -331,10 +326,10 @@ if uploaded_file:
                         "info": info
                     })
 
-        # ให้ข้อมูลแต่ละจุดมีสีตามเที่ยวการส่งติดไปด้วย
         df_records = df.to_dict('records')
-        for r in df_records:
+        for idx, r in enumerate(df_records):
             r['color'] = trip_colors.get(r.get('trip'), '#0055FF')
+            r['point_idx'] = idx
 
         points_json = json.dumps(df_records, ensure_ascii=False)
         segments_json = json.dumps(segments_data, ensure_ascii=False)
@@ -361,7 +356,6 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
-                /* หมุดเล็กลง สีทึบ (100% Opacity) พร้อมเอฟเฟกต์ซูมเมื่อวิ่งมาถึง */
                 .number-icon {{
                     color: white;
                     border: 1.5px solid #ffffff;
@@ -374,7 +368,6 @@ if uploaded_file:
                     transition: transform 0.2s ease, box-shadow 0.2s ease;
                 }}
 
-                /* คลาสสำหรับขยายใหญ่ตอนลำดับวิ่งมาถึงจุดส่ง */
                 .number-icon-active {{
                     transform: scale(1.8) !important;
                     z-index: 1000 !important;
@@ -431,7 +424,6 @@ if uploaded_file:
                     attribution: '© OpenStreetMap contributors'
                 }}).addTo(map);
 
-                // คลังสินค้า
                 L.marker(warehouse).addTo(map)
                     .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
@@ -441,7 +433,7 @@ if uploaded_file:
                 let currentStep = 0;
                 let animTimer = null;
                 let isPlaying = false;
-                let activeMarkerIndex = null; // เก็บลำดับหมุดที่กำลังขยายใหญ่อยู่
+                let activeMarkerRef = null;
 
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
@@ -462,7 +454,6 @@ if uploaded_file:
                     `;
                 }}
 
-                // โหมด 1: วาดหมุดทั้งหมดล่วงหน้า ขนาดเล็ก 18px สีทึบตามเที่ยว
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
@@ -478,7 +469,7 @@ if uploaded_file:
                         marker.on('add', function() {{
                             if (marker._icon) {{
                                 marker._icon.style.backgroundColor = pt.color || '#008CBA';
-                                marker._icon.style.opacity = '1.0'; // สีทึบปกติ
+                                marker._icon.style.opacity = '1.0';
                             }}
                         }});
 
@@ -487,22 +478,26 @@ if uploaded_file:
                     }});
                 }}
 
-                function highlightMarker(markerIndex) {{
-                    // ลบคลาสขยายหมุดเก่าออก คืนค่าเป็นหมุดขนาดปกติ
-                    if (activeMarkerIndex !== null) {{
-                        let prevMarker = isMode1 ? allMarkers[activeMarkerIndex] : stepMarkers[activeMarkerIndex];
-                        if (prevMarker && prevMarker._icon) {{
-                            prevMarker._icon.classList.remove('number-icon-active');
-                        }}
+                function highlightMarkerByInfo(info) {{
+                    if (activeMarkerRef && activeMarkerRef._icon) {{
+                        activeMarkerRef._icon.classList.remove('number-icon-active');
+                        activeMarkerRef = null;
                     }}
 
-                    // ใส่คลาสขยายหมุดใหม่เมื่อวิ่งมาถึง
-                    let currentMarker = isMode1 ? allMarkers[markerIndex] : stepMarkers[markerIndex];
-                    if (currentMarker && currentMarker._icon) {{
-                        currentMarker._icon.classList.add('number-icon-active');
-                        activeMarkerIndex = markerIndex;
+                    if (!info) return;
+
+                    let targetMarker = null;
+                    if (isMode1) {{
+                        if (info.point_idx !== null && info.point_idx !== undefined && allMarkers[info.point_idx]) {{
+                            targetMarker = allMarkers[info.point_idx];
+                        }}
                     }} else {{
-                        activeMarkerIndex = null;
+                        targetMarker = stepMarkers[stepMarkers.length - 1];
+                    }}
+
+                    if (targetMarker && targetMarker._icon) {{
+                        targetMarker._icon.classList.add('number-icon-active');
+                        activeMarkerRef = targetMarker;
                     }}
                 }}
 
@@ -516,7 +511,6 @@ if uploaded_file:
                     document.getElementById('timeSlider').value = step;
                     document.getElementById('slider-label').innerText = `จุดที่ ${{seqNumber}} / ${{segments.length}}`;
 
-                    // วาดเส้นทาง
                     const polyline = L.polyline(seg.path, {{
                         color: seg.color,
                         weight: 5,
@@ -524,11 +518,11 @@ if uploaded_file:
                     }}).addTo(map);
                     activePolylines.push(polyline);
 
-                    // โหมด 2: เพิ่มหมุดทีละจุดเมื่อวิ่งถึง
                     if (!isMode1 && info.lat && info.lng) {{
+                        let pointDisplayNum = (info.point_idx !== null && info.point_idx !== undefined) ? (info.point_idx + 1) : seqNumber;
                         let dynamicIcon = L.divIcon({{
                             className: 'number-icon',
-                            html: String(seqNumber),
+                            html: String(pointDisplayNum),
                             iconSize: [18, 18],
                             iconAnchor: [9, 9]
                         }});
@@ -540,19 +534,16 @@ if uploaded_file:
                                 m._icon.style.opacity = '1.0';
                             }}
                         }});
-                        m.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                        m.bindTooltip(createTooltipHtml(info, pointDisplayNum), {{ direction: 'top', opacity: 0.95 }});
                         stepMarkers.push(m);
                     }}
 
-                    // เลื่อนแผนที่และเน้นขนาดหมุดจุดปัจจุบัน
                     if (info.lat && info.lng) {{
                         map.panTo([info.lat, info.lng]);
-                        highlightMarker(step);
-                    }} else {{
-                        highlightMarker(null);
                     }}
+                    
+                    highlightMarkerByInfo(info);
 
-                    // อัปเดตกล่องข้อความสรุป
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
                     
@@ -567,8 +558,7 @@ if uploaded_file:
                 }}
 
                 function clearCurrentMap() {{
-                    // ลบคลาส Highlight หมุดเดิมออกก่อนล้าง
-                    highlightMarker(null);
+                    highlightMarkerByInfo(null);
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
