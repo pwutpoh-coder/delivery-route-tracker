@@ -107,7 +107,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
 
 
-# --- PARSER: Sprinkle Excel Data Extraction System (FIXED LOGIC) ---
+# --- PARSER: Sprinkle Excel Data Extraction System ---
 def parse_excel_data(excel_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     dw_list = []
@@ -116,18 +116,21 @@ def parse_excel_data(excel_file):
 
     raw_df = pd.read_excel(excel_file, header=None)
 
-    # 1. สกัดข้อมูล Header
+    # 1. สกัดข้อมูล Header (วันที่ / รถส่ง / พนักงานขับรถ)
     try:
         header_blob = " ".join(raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten())
         
+        # วันที่
         d_match = re.search(r'ประจำวันที่\s*([\d/]+)', header_blob)
         if d_match:
             header_info["date"] = d_match.group(1)
 
+        # รถส่ง
         t_match = re.search(r'รถส่ง\s*([\w\-]+)', header_blob)
         if t_match:
             header_info["truck_no"] = t_match.group(1)
 
+        # พนักงานขับรถ
         drv_match = re.search(r'พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)', header_blob)
         if drv_match:
             driver_text = drv_match.group(1).split("พนักงานยก")[0].strip()
@@ -148,7 +151,7 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 3. สกัดแถวรายการจัดส่ง
+    # 3. วนลูปอ่านข้อมูลทุกบรรทัด
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
         
@@ -162,6 +165,7 @@ def parse_excel_data(excel_file):
 
         str_e = str(val_e).strip()
         
+        # ดึงพิกัด GPS (Lat, Lng)
         gps_match = re.search(r'([1-9]\d*\.\d+)\s*,\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?', str_e)
         if not gps_match:
             continue
@@ -170,15 +174,18 @@ def parse_excel_data(excel_file):
         lng = float(gps_match.group(2))
         gps_diff = gps_match.group(3) if gps_match.group(3) else "0.00"
 
+        # ดึงรหัสสมาชิก
         cust_id = str(val_a).strip() if pd.notna(val_a) else "N/A"
         if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"]:
             continue
 
+        # ดึงยอดส่งสินค้า (ถัง)
         try:
             qty = int(float(val_c)) if pd.notna(val_c) else 1
         except Exception:
             qty = 1
 
+        # ดึงเวลาส่ง และ สถานะ
         str_f = str(val_f).strip() if pd.notna(val_f) else ""
         time_match = re.search(r'(\d{1,2}:\d{2})', str_f)
         delivery_time = time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
@@ -205,13 +212,11 @@ def parse_excel_data(excel_file):
             "status": status
         })
 
-    # 4. จัดหมวดหมู่เที่ยววิ่ง (Trip Assignment Algorithm ที่แก้ไขแม่นยำขึ้น)
+    # 4. สร้าง DataFrame และคำนวณแบ่งเที่ยวส่ง (Trip Allocation Logic - Fixed)
     df = pd.DataFrame(records)
     if not df.empty:
-        limits = dw_list.copy() if len(dw_list) > 0 else [80, 80, 80, 80]
-        
+        dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
         trips = []
-        trip_ids = []
         acc_qty_list = []
         
         curr_trip_idx = 0
@@ -220,22 +225,21 @@ def parse_excel_data(excel_file):
 
         for idx, row in df.iterrows():
             q = row['qty']
-            current_limit = limits[curr_trip_idx] if curr_trip_idx < len(limits) else 80
+            target_limit = dw_limits[curr_trip_idx] if curr_trip_idx < len(dw_limits) else dw_limits[-1]
 
-            # เงื่อนไขขึ้นเที่ยวใหม่: เมื่อยอดที่จะบวกเพิ่ม เกินโควต้า DWS ของเที่ยวปัจจุบัน
-            if (curr_trip_qty + q > current_limit) and (curr_trip_qty > 0) and (curr_trip_idx + 1 < len(limits)):
-                curr_trip_idx += 1
-                curr_trip_qty = 0
-
+            # รวมยอดปัจจุบันเข้าเที่ยวก่อน
             curr_trip_qty += q
             total_acc += q
             
             trips.append(f"เที่ยวที่ {curr_trip_idx + 1}")
-            trip_ids.append(curr_trip_idx)
             acc_qty_list.append(total_acc)
 
+            # ตรวจสอบว่ายอดส่งสะสมในเที่ยวนี้เต็มหรือเกิน DWS หรือยัง ถ้าเกินแล้วให้ขยับไปเที่ยวถัดไปสำหรับรายการถัดไป
+            if (curr_trip_qty >= target_limit) and (curr_trip_idx + 1 < len(dw_limits)):
+                curr_trip_idx += 1
+                curr_trip_qty = 0
+
         df['trip'] = trips
-        df['trip_id'] = trip_ids
         df['acc_qty'] = acc_qty_list
 
     return df, dw_list, re_list, header_info
@@ -264,27 +268,18 @@ if uploaded_file:
         disp_df.columns = ['เวลาส่ง', 'เที่ยวส่ง', 'รหัสสมาชิก', 'ยอดส่ง (ถัง)', 'ยอดส่งสะสม', 'สถานะการส่ง', 'Latitude', 'Longitude', 'ค่าความต่าง GPS']
         st.dataframe(disp_df, use_container_width=True, height=400)
 
-        # --- แก้ไขส่วนตารางสรุปเที่ยวการส่ง (TRIP SUMMARY) ให้ตรงเป๊ะ ---
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
         summaries = []
-        
-        # จัดกลุ่มด้วย trip_id เพื่อคงลำดับที่ถูกต้อง 100%
-        for trip_id, group in df.groupby('trip_id', sort=True):
-            trip_name = group['trip'].iloc[0]
-            
-            # ดึงค่า DWS ประจำเที่ยวนั้นๆ
-            dw_val = dw_list[trip_id] if trip_id < len(dw_list) else group['qty'].sum()
-            actual_delivered = group['qty'].sum()
-            
+        for idx, (trip_name, group) in enumerate(df.groupby('trip', sort=False)):
+            dw_val = dw_list[idx] if idx < len(dw_list) else group['qty'].sum()
             summaries.append({
                 "เที่ยวการส่ง": trip_name,
                 "จำนวนถังที่เบิก (DWS)": dw_val,
-                "ยอดจัดส่งจริง (ถัง)": actual_delivered,
+                "ยอดจัดส่งจริง (ถัง)": group['qty'].sum(),
                 "จำนวนจุดส่ง (จุด)": len(group),
                 "จัดส่งตรงเวลา (จุด)": len(group[group['status'] == 'จัดส่งตรงเวลา']),
                 "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(group[group['status'] != 'จัดส่งตรงเวลา'])
             })
-            
         st.table(pd.DataFrame(summaries))
 
         st.divider()
@@ -300,10 +295,9 @@ if uploaded_file:
 
         with st.spinner("กำลังคำนวณเส้นทางถนนจริง (OSRM Routing)..."):
             segments_data = []
-            grouped = df.groupby('trip_id', sort=True)
+            grouped = df.groupby('trip', sort=False)
 
-            for trip_id, group in grouped:
-                trip_name = group['trip'].iloc[0]
+            for trip_name, group in grouped:
                 pts = [warehouse_coord] + list(zip(group['lat'], group['lng'])) + [warehouse_coord]
                 records_list = group.to_dict('records')
 
