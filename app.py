@@ -205,7 +205,7 @@ def parse_excel_data(excel_file):
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
 
-        # ป้องกันพิกัดผิดปกติ (Outliers นอกประเทศไทย)
+        # กรองพิกัดเฉพาะในเขตประเทศไทย
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
@@ -257,7 +257,7 @@ def parse_excel_data(excel_file):
 
     df = pd.DataFrame(records)
     if not df.empty:
-        # เรียงลำดับรายการตามเวลาส่งจริง ป้องกันเส้นทาง OSRM วิ่งกระโดดสลับไปมา
+        # เรียงลำดับข้อมูลตามเวลาส่งจริง
         df = df.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
 
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
@@ -362,6 +362,9 @@ if uploaded_file:
                 "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(
                     group[group["status"] != "จัดส่งตรงเวลา"]
                 ),
+                "GPS คลาดเคลื่อน >100m (จุด)": len(
+                    group[group["gps_diff_num"] > 100]
+                ),
             })
         st.table(pd.DataFrame(summaries))
 
@@ -445,16 +448,23 @@ if uploaded_file:
                 .timeline-slider {{ flex-grow: 1; height: 6px; cursor: pointer; }}
                 
                 #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
-                .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; flex-wrap: wrap; }}
+                .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
-                /* แก้ไข CSS สไตล์หมุด ไม่ให้โปร่งใส และใช้สีเต็มแผ่น */
                 .leaflet-div-icon {{
                     background: transparent !important;
                     border: none !important;
                 }}
 
+                /* Container หลักของหมุด */
+                .marker-container {{
+                    position: relative;
+                    width: 26px;
+                    height: 26px;
+                }}
+
+                /* ตัวเลขพิกัดหลัก */
                 .number-icon {{
                     color: #FFFFFF !important;
                     border: 2px solid #FFFFFF !important;
@@ -462,15 +472,16 @@ if uploaded_file:
                     text-align: center !important;
                     font-weight: bold !important;
                     font-size: 11px !important;
-                    line-height: 20px !important;
-                    width: 24px !important;
-                    height: 24px !important;
+                    line-height: 22px !important;
+                    width: 26px !important;
+                    height: 26px !important;
                     box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
                     transition: transform 0.2s ease, box-shadow 0.2s ease !important;
                     opacity: 1.0 !important;
                     display: flex !important;
                     align-items: center !important;
                     justify-content: center !important;
+                    box-sizing: border-box !important;
                 }}
 
                 .number-icon-active {{
@@ -478,6 +489,43 @@ if uploaded_file:
                     z-index: 1000 !important;
                     border: 2px solid #FFFFFF !important;
                     box-shadow: 0 0 14px #FFD700, 0 4px 10px rgba(0,0,0,0.8) !important;
+                }}
+
+                /* Badge สัญลักษณ์เตือนบนตัวหมุด */
+                .marker-badge-late {{
+                    position: absolute;
+                    top: -6px;
+                    right: -6px;
+                    background-color: #D32F2F;
+                    color: white;
+                    border: 1.5px solid white;
+                    border-radius: 50%;
+                    width: 15px;
+                    height: 15px;
+                    font-size: 9px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+                    z-index: 10;
+                }}
+
+                .marker-badge-gps {{
+                    position: absolute;
+                    top: -6px;
+                    left: -6px;
+                    background-color: #FF9800;
+                    color: white;
+                    border: 1.5px solid white;
+                    border-radius: 50%;
+                    width: 15px;
+                    height: 15px;
+                    font-size: 9px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+                    z-index: 10;
                 }}
 
                 .alert-badge {{
@@ -495,10 +543,13 @@ if uploaded_file:
         </head>
         <body>
             <div class="legend">
-                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1 (สีน้ำเงิน)</div>
-                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2 (สีชมพูแดง)</div>
-                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3 (สีเขียว)</div>
-                <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4 (สีม่วง)</div>
+                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1 (น้ำเงิน)</div>
+                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2 (ชมพู)</div>
+                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3 (เขียว)</div>
+                <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4 (ม่วง)</div>
+                <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
+                <div class="legend-item"><span>⏰ = ส่งไม่ตรงเวลา</span></div>
+                <div class="legend-item"><span>📡 = GPS ต่าง >100m</span></div>
             </div>
 
             <div class="controls">
@@ -544,8 +595,8 @@ if uploaded_file:
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
 
-                    let lateBadge = isLate ? `<span class="alert-badge badge-late">⚠️ ส่งไม่ตรงเวลา</span>` : '';
-                    let gpsBadge = isGpsDiff ? `<span class="alert-badge badge-gps">⚠️ GPS ห่าง >100m</span>` : '';
+                    let lateBadge = isLate ? `<span class="alert-badge badge-late">⏰ ส่งไม่ตรงเวลา</span>` : '';
+                    let gpsBadge = isGpsDiff ? `<span class="alert-badge badge-gps">📡 GPS ห่าง >100m</span>` : '';
 
                     return `
                         <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
@@ -559,19 +610,33 @@ if uploaded_file:
                     `;
                 }}
 
-                function createMarkerIcon(seqNum, color) {{
+                function createMarkerIcon(seqNum, color, ptInfo) {{
+                    let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
+                    let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
+
+                    let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="ส่งไม่ตรงเวลา">⏰</div>` : '';
+                    let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">📡</div>` : '';
+
+                    let htmlContent = `
+                        <div class="marker-container">
+                            ${{lateBadgeHtml}}
+                            ${{gpsBadgeHtml}}
+                            <div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div>
+                        </div>
+                    `;
+
                     return L.divIcon({{
                         className: '',
-                        html: `<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div>`,
-                        iconSize: [24, 24],
-                        iconAnchor: [12, 12]
+                        html: htmlContent,
+                        iconSize: [26, 26],
+                        iconAnchor: [13, 13]
                     }});
                 }}
 
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
-                        let customIcon = createMarkerIcon(seqNumber, pt.color);
+                        let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
 
                         marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
@@ -625,7 +690,7 @@ if uploaded_file:
                             let ptInfo = points[pIdx];
                             if (ptInfo && !stepMarkers[pIdx]) {{
                                 let seqNumber = pIdx + 1;
-                                let customIcon = createMarkerIcon(seqNumber, ptInfo.color);
+                                let customIcon = createMarkerIcon(seqNumber, ptInfo.color, ptInfo);
                                 let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(map);
                                 marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                                 stepMarkers[pIdx] = marker;
@@ -638,9 +703,14 @@ if uploaded_file:
                     
                     highlightMarkerByInfo(info);
 
+                    let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
+                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
+                    let lateAlert = isLate ? `<b style="color:#d9534f;"> [⏰ จัดส่งไม่ตรงเวลา]</b>` : '';
+                    let gpsAlert = isGpsDiff ? `<b style="color:#f0ad4e;"> [📡 GPS ต่าง >100m]</b>` : '';
+
                     let infoBox = document.getElementById('info-box');
                     infoBox.innerHTML = `
-                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
+                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b>${{lateAlert}}${{gpsAlert}}<br>
                         <b>🕒 เวลาส่ง:</b> ${{info.time}} | 
                         <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
                         <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
