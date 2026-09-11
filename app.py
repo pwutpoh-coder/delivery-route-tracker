@@ -505,12 +505,12 @@ if uploaded_file:
                 let currentSpeedMs = {anim_speed_ms};
 
                 const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
                     attribution: '© OpenStreetMap contributors'
-                }).addTo(map);
+                }}).addTo(map);
 
                 L.marker(warehouse).addTo(map)
-                    .bindTooltip("🏢 คลังสินค้าหลัก", {permanent: false, direction: 'top'});
+                    .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
                 let allMarkers = [];
                 let activePolylines = [];
@@ -520,7 +520,7 @@ if uploaded_file:
                 let isPlaying = false;
                 let activeMarkerRef = null;
 
-                function createTooltipHtml(info, seqNum) {
+                function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
 
@@ -529,110 +529,109 @@ if uploaded_file:
 
                     return `
                         <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-                            <b>📍 จุดที่ ${seqNum || '-'} (${info.trip || 'ไม่ระบุ'})</b> ${lateBadge}${gpsBadge}<br>
-                            <b>เวลา:</b> ${info.time || '-'}<br>
-                            <b>สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${info.cust_id}</span><br>
-                            <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${info.qty || 0} ถัง</span><br>
-                            <b>สถานะ:</b> ${info.status}<br>
-                            <b>ต่าง GPS:</b> ${info.gps_diff || '0.00'} m
+                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b> ${{lateBadge}}${{gpsBadge}}<br>
+                            <b>เวลา:</b> ${{info.time || '-'}}<br>
+                            <b>สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
+                            <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
+                            <b>สถานะ:</b> ${{info.status}}<br>
+                            <b>ต่าง GPS:</b> ${{info.gps_diff || '0.00'}} m
                         </div>
                     `;
-                }
+                }}
 
-                if (isMode1) {
-                    points.forEach((pt, idx) => {
+                if (isMode1) {{
+                    points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
-                        let customIcon = L.divIcon({
+                        let customIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
                             iconSize: [12, 12],
                             iconAnchor: [6, 6]
-                        });
+                        }});
 
-                        let marker = L.marker([pt.lat, pt.lng], { icon: customIcon }).addTo(map);
+                        let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
                         
-                        // กำหนดสีพื้นหลังหมุดตามรอบส่งตั้งแต่สร้างหมุด
-                        marker.on('add', function() {
-                            if (marker._icon) {
+                        marker.on('add', function() {{
+                            if (marker._icon) {{
                                 marker._icon.style.backgroundColor = pt.color || '#008CBA';
                                 marker._icon.style.opacity = '1.0';
-                            }
-                        });
+                            }}
+                        }});
 
-                        marker.bindTooltip(createTooltipHtml(pt, seqNumber), { direction: 'top', opacity: 0.95 });
+                        marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                         allMarkers.push(marker);
-                    });
-                }
+                    }});
+                }}
 
-                function highlightMarkerByInfo(info) {
-                    if (activeMarkerRef && activeMarkerRef._icon) {
+                function highlightMarkerByInfo(info) {{
+                    if (activeMarkerRef && activeMarkerRef._icon) {{
                         activeMarkerRef._icon.classList.remove('number-icon-active');
-                    }
+                    }}
                     activeMarkerRef = null;
 
                     if (!info || info.point_idx === undefined || info.point_idx === null) return;
 
-                    if (isMode1 && allMarkers[info.point_idx]) {
+                    if (isMode1 && allMarkers[info.point_idx]) {{
                         let target = allMarkers[info.point_idx];
-                        if (target._icon) {
+                        if (target._icon) {{
                             target._icon.classList.add('number-icon-active');
                             activeMarkerRef = target;
-                        }
-                    } else if (!isMode1 && stepMarkers[info.point_idx]) {
+                        }}
+                    }} else if (!isMode1 && stepMarkers[info.point_idx]) {{
                         let target = stepMarkers[info.point_idx];
-                        if (target._icon) {
+                        if (target._icon) {{
                             target._icon.classList.add('number-icon-active');
                             activeMarkerRef = target;
-                        }
-                    }
-                }
+                        }}
+                    }}
+                }}
 
-                function updateStep(stepIndex) {
+                function updateStep(stepIndex) {{
                     if (stepIndex < 0 || stepIndex >= segments.length) return;
 
                     currentStep = stepIndex;
                     document.getElementById('timeSlider').value = currentStep;
-                    document.getElementById('slider-label').innerText = `จุดที่ ${currentStep + 1} / ${segments.length}`;
+                    document.getElementById('slider-label').innerText = `จุดที่ ${{currentStep + 1}} / ${{segments.length}}`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
 
-                    if (!isMode1) {
+                    if (!isMode1) {{
                         stepMarkers.forEach(m => map.removeLayer(m));
                         stepMarkers = [];
-                    }
+                    }}
 
-                    for (let i = 0; i <= currentStep; i++) {
+                    for (let i = 0; i <= currentStep; i++) {{
                         let seg = segments[i];
-                        let polyline = L.polyline(seg.path, {
+                        let polyline = L.polyline(seg.path, {{
                             color: seg.color,
                             weight: 5,
                             opacity: 0.85
-                        }).addTo(map);
+                        }}).addTo(map);
                         activePolylines.push(polyline);
 
-                        if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {
+                        if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
                             let pIdx = seg.info.point_idx;
                             let ptInfo = points[pIdx];
-                            if (ptInfo) {
+                            if (ptInfo) {{
                                 let seqNumber = pIdx + 1;
-                                let customIcon = L.divIcon({
+                                let customIcon = L.divIcon({{
                                     className: 'number-icon',
                                     html: String(seqNumber),
                                     iconSize: [12, 12],
                                     iconAnchor: [6, 6]
-                                });
-                                let marker = L.marker([ptInfo.lat, ptInfo.lng], { icon: customIcon }).addTo(map);
-                                marker.on('add', function() {
-                                    if (marker._icon) {
+                                }});
+                                let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(map);
+                                marker.on('add', function() {{
+                                    if (marker._icon) {{
                                         marker._icon.style.backgroundColor = ptInfo.color || '#008CBA';
-                                    }
-                                });
-                                marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), { direction: 'top', opacity: 0.95 });
+                                    }}
+                                }});
+                                marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                                 stepMarkers[pIdx] = marker;
-                            }
-                        }
-                    }
+                            }}
+                        }}
+                    }}
 
                     let currentSeg = segments[currentStep];
                     let info = currentSeg.info;
@@ -642,66 +641,65 @@ if uploaded_file:
                     let infoBox = document.getElementById('info-box');
                     
                     infoBox.innerHTML = `
-                        <b>🚛 ${currentSeg.trip} | จุดที่ ${currentStep + 1} จาก ${segments.length}</b><br>
-                        <b>🕒 เวลาส่ง:</b> ${info.time} | 
-                        <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${info.cust_id}</span> | 
-                        <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${info.qty} ถัง</span><br>
-                        <b>📌 สถานะ:</b> ${info.status} | 
-                        <b>📏 ระยะห่าง GPS:</b> ${info.gps_diff} เมตร
+                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
+                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | 
+                        <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
+                        <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
+                        <b>📌 สถานะ:</b> ${{info.status}} | 
+                        <b>📏 ระยะห่าง GPS:</b> ${{info.gps_diff}} เมตร
                     `;
 
                     let lastPt = currentSeg.path[currentSeg.path.length - 1];
-                    if (lastPt) {
+                    if (lastPt) {{
                         map.panTo(lastPt);
-                    }
-                }
+                    }}
+                }}
 
-                function nextStep() {
-                    if (currentStep < segments.length - 1) {
+                function nextStep() {{
+                    if (currentStep < segments.length - 1) {{
                         currentStep++;
                         updateStep(currentStep);
-                    } else {
+                    }} else {{
                         pauseAnimation();
                         document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้น!";
-                    }
-                }
+                    }}
+                }}
 
-                function startAnimation() {
+                function startAnimation() {{
                     if (isPlaying) return;
                     isPlaying = true;
                     document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
-                    if (currentStep >= segments.length - 1) {
+                    if (currentStep >= segments.length - 1) {{
                         currentStep = 0;
-                    }
+                    }}
                     updateStep(currentStep);
                     animTimer = setInterval(nextStep, currentSpeedMs);
-                }
+                }}
 
-                function pauseAnimation() {
+                function pauseAnimation() {{
                     isPlaying = false;
-                    if (animTimer) {
+                    if (animTimer) {{
                         clearInterval(animTimer);
                         animTimer = null;
-                    }
+                    }}
                     document.getElementById('status-text').innerText = "⏸️ หยุดพักการจำลอง";
-                }
+                }}
 
-                function resetAnimation() {
+                function resetAnimation() {{
                     pauseAnimation();
                     currentStep = 0;
                     updateStep(0);
                     document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
-                }
+                }}
 
-                function onSliderChange(val) {
+                function onSliderChange(val) {{
                     pauseAnimation();
                     updateStep(parseInt(val));
-                }
+                }}
 
-                // แสดงผลจุดแรกเมื่อเริ่มต้น
-                if (segments.length > 0) {
+                if (segments.length > 0) {{
                     updateStep(0);
-                }
+                }}
             </script>
         </body>
         </html>
