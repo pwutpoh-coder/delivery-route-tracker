@@ -152,7 +152,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: Sprinkle Excel Data Extraction (ตามเงื่อนไขใหม่ คอลัมน์ A, D, E) ---
+# --- PARSER: Sprinkle Excel Data Extraction ---
 def parse_excel_data(excel_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     raw_df = pd.read_excel(excel_file, header=None)
@@ -180,8 +180,8 @@ def parse_excel_data(excel_file):
         pass
 
     # 2. ค้นหาใบเบิก (DW) และใบคืน (RE) จากคอลัมน์ A พร้อมจำนวนจากคอลัมน์ D
-    dw_records = []  # เก็บ (sort_key, qty)
-    re_records = []  # เก็บ (sort_key, qty)
+    dw_records = []
+    re_records = []
 
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
@@ -193,28 +193,22 @@ def parse_excel_data(excel_file):
         except Exception:
             qty_val = 0
 
-        # ตรวจสอบรูปแบบ DW (เช่น DW-----/--XXX หรือขึ้นต้นด้วย DW)
         if "DW" in col_a.upper():
-            # พยายามดึงตัวเลข 3 หลักสุดท้ายหรือตัวเลขท้ายสุดมาเป็นเกณฑ์เรียงลำดับ
             num_match = re.search(r"(\d+)$", col_a)
             sort_key = int(num_match.group(1)) if num_match else idx
             dw_records.append({"sort_key": sort_key, "qty": qty_val, "raw_text": col_a})
 
-        # ตรวจสอบรูปแบบ RE (เช่น RE-----/--XX หรือขึ้นต้นด้วย RE)
         elif "RE" in col_a.upper():
             num_match = re.search(r"(\d+)$", col_a)
             sort_key = int(num_match.group(1)) if num_match else idx
             re_records.append({"sort_key": sort_key, "qty": qty_val, "raw_text": col_a})
 
-    # จัดเรียงตามค่าเลขท้าย (XXX) จากน้อยไปมาก เพื่อกำหนดเป็นเที่ยวที่ 1, 2, 3...
     dw_records = sorted(dw_records, key=lambda x: x["sort_key"])
     re_records = sorted(re_records, key=lambda x: x["sort_key"])
 
-    # สร้างรายการโควตารายเที่ยว (Net Quantity = เบิก - คืน)
     trip_quotas = []
     for i, dw in enumerate(dw_records):
         dw_q = dw["qty"]
-        # ค้นหาใบคืน (RE) ในเที่ยวลำดับเดียวกัน ถ้าไม่มีให้ถือว่าคืน 0
         re_q = re_records[i]["qty"] if i < len(re_records) else 0
         net_qty = max(0, dw_q - re_q)
         trip_quotas.append({
@@ -225,7 +219,6 @@ def parse_excel_data(excel_file):
             "dw_text": dw["raw_text"],
         })
 
-    # หากไม่พบข้อมูล DW ในเอกสารเลย ให้กำหนดค่าสำรองเริ่มต้น 1 เที่ยว
     if not trip_quotas:
         trip_quotas = [{"trip_no": 1, "dws_qty": 80, "res_qty": 0, "net_qty": 80, "dw_text": "DEFAULT"}]
 
@@ -244,29 +237,31 @@ def parse_excel_data(excel_file):
 
         str_e = str(col_e).strip()
 
-        # ตรวจสอบรูปแบบพิกัด GPS ในคอลัมน์ E (รองรับทั้งแบบ Lat, Lng และค่าความต่าง)
+        # รองรับทศนิยม 5 ตำแหน่งขึ้นไป
         gps_match = re.search(
-            r"([1-9]\d*\.\d+)\s*,\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?", str_e
+            r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d\.]+))?", str_e
         )
         if not gps_match:
-            continue
+            # สำรองกรณียืดหยุ่นทศนิยมทั่วไปแต่เน้นเก็บค่าจริง
+            gps_match = re.search(
+                r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?", str_e
+            )
+            if not gps_match:
+                continue
 
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
 
-        # กรองเฉพาะพิกัดในประเทศไทย
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
         gps_diff_val = float(gps_match.group(3)) if gps_match.group(3) else 0.0
         gps_diff_str = f"{gps_diff_val:.2f}"
 
-        # รหัสลูกค้าในคอลัมน์ A (อาจเป็นตัวเลขหรือข้อความ ข้ามหัวเรื่องหรือค่าว่าง)
         cust_id = str(col_a).strip() if pd.notna(col_a) else "N/A"
         if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"] or "DW" in cust_id.upper() or "RE" in cust_id.upper():
             continue
 
-        # จำนวนถังส่งในคอลัมน์ C (หรือถ้าคอลัมน์ C ว่างให้ดูคอลัมน์ D)
         try:
             qty = int(float(col_c)) if pd.notna(col_c) else 1
         except Exception:
@@ -275,7 +270,6 @@ def parse_excel_data(excel_file):
             except Exception:
                 qty = 1
 
-        # เวลาส่งและสถานะจากคอลัมน์ D
         str_d = str(col_d).strip() if pd.notna(col_d) else ""
         time_match = re.search(r"(\d{1,2}:\d{2})", str_d)
         delivery_time = (
@@ -295,12 +289,18 @@ def parse_excel_data(excel_file):
             status_clean = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_d)
             status = status_clean if status_clean else "จัดส่งตรงเวลา"
 
+        # จัดรูปแบบ Latitude / Longitude ให้แสดงทศนิยมอย่างน้อย 5 ตำแหน่ง (หรือมากกว่าตามข้อมูลดิบ)
+        lat_str = f"{lat:.5f}" if len(str(lat).split(".")[1]) < 5 else str(lat)
+        lng_str = f"{lng:.5f}" if len(str(lng).split(".")[1]) < 5 else str(lng)
+
         records.append({
             "excel_idx": idx,
             "cust_id": cust_id,
             "qty": qty,
             "lat": lat,
             "lng": lng,
+            "lat_display": lat_str,
+            "lng_display": lng_str,
             "gps_diff": gps_diff_str,
             "gps_diff_num": gps_diff_val,
             "time": delivery_time,
@@ -310,10 +310,8 @@ def parse_excel_data(excel_file):
 
     df = pd.DataFrame(records)
     if not df.empty:
-        # เรียงลำดับตามเวลาส่งจริง
         df = df.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
 
-        # ตัดรอบตามโควตาสุทธิของแต่ละเที่ยว (Net Quantity)
         trips = []
         acc_qty_list = []
 
@@ -323,7 +321,6 @@ def parse_excel_data(excel_file):
 
         for idx, row in df.iterrows():
             q = row["qty"]
-            # ดึงโควตาเป้าหมายของเที่ยวปัจจุบัน
             target_limit = (
                 trip_quotas[curr_trip_idx]["net_qty"]
                 if curr_trip_idx < len(trip_quotas)
@@ -336,7 +333,6 @@ def parse_excel_data(excel_file):
             trips.append(f"เที่ยวที่ {curr_trip_idx + 1}")
             acc_qty_list.append(total_acc)
 
-            # หากยอดสะสมในเที่ยวปัจจุบันครบโควตา และยังมีเที่ยวถัดไปรองรับ ให้ตัดรอบใหม่
             if (curr_trip_qty >= target_limit) and (
                 curr_trip_idx + 1 < len(trip_quotas)
             ):
@@ -346,11 +342,7 @@ def parse_excel_data(excel_file):
         df["trip"] = trips
         df["acc_qty"] = acc_qty_list
 
-    # แปลงโครงสร้าง trip_quotas ให้เข้ากันกับตัวแปรเดิม (dw_list, re_list)
-    dw_list = [t["dws_qty"] for t in trip_quotas]
-    re_list = [t["res_qty"] for t in trip_quotas]
-
-    return df, dw_list, re_list, header_info, trip_quotas
+    return df, trip_quotas, header_info
 
 
 # --- MAIN APP INTERFACE ---
@@ -360,8 +352,8 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file:
-    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร Excel ตามเงื่อนไขใบเบิก/ใบคืน..."):
-        df, dw_list, re_list, header_info, trip_quotas = parse_excel_data(uploaded_file)
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร Excel..."):
+        df, trip_quotas, header_info = parse_excel_data(uploaded_file)
 
     if df.empty:
         st.error(
@@ -381,7 +373,7 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (เรียงตามลำดับเวลาส่งจริง)")
+        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (พิกัดความละเอียดสูง 5+ ตำแหน่ง)")
         disp_df = df[[
             "time",
             "trip",
@@ -389,8 +381,8 @@ if uploaded_file:
             "qty",
             "acc_qty",
             "status",
-            "lat",
-            "lng",
+            "lat_display",
+            "lng_display",
             "gps_diff",
         ]].copy()
         disp_df.columns = [
@@ -400,8 +392,8 @@ if uploaded_file:
             "ยอดส่ง (ถัง)",
             "ยอดส่งสะสม",
             "สถานะการส่ง",
-            "Latitude",
-            "Longitude",
+            "Latitude (5+ ตำแหน่ง)",
+            "Longitude (5+ ตำแหน่ง)",
             "ค่าความต่าง GPS",
         ]
         st.dataframe(disp_df, use_container_width=True, height=350)
@@ -501,7 +493,6 @@ if uploaded_file:
                 "GPS คลาดเคลื่อน >100m (จุด)": gps_err_count,
             })
 
-        # แถวสรุประดับวันรวมทั้งหมด
         total_dws = sum([t["dws_qty"] for t in trip_quotas])
         total_res = sum([t["res_qty"] for t in trip_quotas])
         total_net = sum([t["net_qty"] for t in trip_quotas])
@@ -664,6 +655,7 @@ if uploaded_file:
                             <b>เวลา:</b> ${{info.time || '-'}}<br>
                             <b>สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
                             <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
+                            <b>พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}}<br>
                             <b>สถานะ:</b> ${{info.status}}<br>
                             <b>ต่าง GPS:</b> ${{info.gps_diff || '0.00'}} m
                         </div>
@@ -754,7 +746,8 @@ if uploaded_file:
                     infoBox.innerHTML = `
                         <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
                         <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
-                        <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสมถึงจุดนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
+                        <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span><br>
+                        <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
                     `;
 
                     let lastPt = currentSeg.path[currentSeg.path.length - 1];
