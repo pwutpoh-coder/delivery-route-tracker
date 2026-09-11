@@ -3,7 +3,6 @@ import pandas as pd
 import re
 import requests
 import json
-import streamlit.components.v1 as components
 
 # --- ตั้งค่าหน้าตาแอปพลิเคชัน ---
 st.set_page_config(
@@ -403,7 +402,7 @@ if uploaded_file:
 
             <div class="timeline-container">
                 <span style="font-weight:bold; font-size:13px;">⏱️ เลื่อนช่วงเวลา:</span>
-                <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{len(segments_data)-1}" value="0" oninput="onSliderChange(this.value)">
+                <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
                 <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:80px; text-align:right;">จุดที่ 0 / {len(segments_data)}</span>
             </div>
 
@@ -428,12 +427,12 @@ if uploaded_file:
 
                 let allMarkers = [];
                 let activePolylines = [];
+                let stepMarkers = [];
                 let currentStep = 0;
                 let animTimer = null;
                 let isPlaying = false;
                 let currentActiveMarker = null;
 
-                // ฟังก์ชันสร้าง Tooltip Content เมื่อชี้เมาส์ที่หมุด
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
@@ -453,7 +452,7 @@ if uploaded_file:
                     `;
                 }}
 
-                // โหมด 1: วาดหมุดทั้งหมดล่วงหน้าพร้อมสีแยกตามเที่ยว
+                // โหมด 1: วาดหมุดทั้งหมดล่วงหน้า
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
@@ -466,7 +465,6 @@ if uploaded_file:
 
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
                         
-                        // ปรับสีหมุดตามเที่ยวส่ง
                         marker.on('add', function() {{
                             if (marker._icon) {{
                                 marker._icon.style.backgroundColor = pt.color || '#008CBA';
@@ -485,7 +483,6 @@ if uploaded_file:
                     const info = seg.info;
                     const seqNumber = step + 1;
 
-                    // อัปเดตแถบ Slider
                     document.getElementById('timeSlider').value = step;
                     document.getElementById('slider-label').innerText = `จุดที่ ${{seqNumber}} / ${{segments.length}}`;
 
@@ -497,80 +494,81 @@ if uploaded_file:
                     }}).addTo(map);
                     activePolylines.push(polyline);
 
-                    // เอาหมุด Highlight ล่าสุดออกเพื่อวาดใหม่
+                    // เอา Highlight เก่าออก
                     if (currentActiveMarker) {{
                         map.removeLayer(currentActiveMarker);
                     }}
 
-                    if (info.lat && info.lng) {{
+                    // โหมด 2: เพิ่มหมุดทีละจุดเมื่อวิ่งถึง
+                    if (!isMode1 && info.lat && info.lng) {{
                         let dynamicIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
-                            iconSize: [32, 32],
-                            iconAnchor: [16, 16]
+                            iconSize: [26, 26],
+                            iconAnchor: [13, 13]
                         }});
+                        let m = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
+                        m.on('add', function() {{
+                            if (m._icon) m._icon.style.backgroundColor = seg.color || '#008CBA';
+                        }});
+                        m.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                        stepMarkers.push(m);
+                    }}
 
-                        currentActiveMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
-                        
-                        if (currentActiveMarker._icon) {{
-                            currentActiveMarker._icon.style.backgroundColor = seg.color;
-                            currentActiveMarker._icon.style.border = "3px solid #FFFF00"; // ขอบเหลืองเด่นสำหรับจุดปัจจุบัน
-                        }}
-
-                        currentActiveMarker.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
-
-                        if (!isMode1) {{
-                            let permanentMarker = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
-                            if (permanentMarker._icon) {{
-                                permanentMarker._icon.style.backgroundColor = seg.color;
-                            }}
-                            permanentMarker.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
-                            allMarkers.push(permanentMarker);
-                        }}
-
+                    // Highlight หมุดปัจจุบัน
+                    if (info.lat && info.lng) {{
+                        currentActiveMarker = L.circleMarker([info.lat, info.lng], {{
+                            radius: 12,
+                            fillColor: '#FFD700',
+                            color: '#FF0000',
+                            weight: 3,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        }}).addTo(map);
                         map.panTo([info.lat, info.lng]);
                     }}
 
-                    // ตรวจสอบ Pop-up แจ้งเตือนพิเศษแบบกะทัดรัด
+                    // อัปเดตกล่องข้อความสรุปด้านล่าง
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
-                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    
-                    let alertNotice = "";
-                    if (isLate || isGpsDiff) {{
-                        alertNotice = `<div style="margin-top:6px; padding:4px 8px; background:rgba(255,235,238,0.9); border:1px solid #ffcdd2; border-radius:4px; font-size:12px; color:#c62828; display:inline-block;">`;
-                        if (isLate) alertNotice += `⚠️ <b>เตือน:</b> จัดส่งไม่ตรงเวลารอบปกติ `;
-                        if (isGpsDiff) alertNotice += `🚨 <b>เตือน:</b> พิกัด GPS ต่างเกิน 100 เมตร (${{info.gps_diff}} m)`;
-                        alertNotice += `</div>`;
-                    }}
-
-                    document.getElementById('status-text').innerText = `กำลังจำลองการวิ่ง: จุดที่ ${{seqNumber}} / ${{segments.length}} (${{seg.trip}})`;
+                    let isGps = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
                     
                     document.getElementById('info-box').innerHTML = `
-                        <div style="color:${{seg.color}}; font-weight:bold; font-size:15px;">🚚 ${{seg.trip}} - จุดส่งลำดับที่ ${{seqNumber}}</div>
-                        <b>เวลาจัดส่ง:</b> ${{info.time || 'ไม่ระบุ'}} | 
-                        <b>รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
-                        <b>ยอดส่งสินค้า:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
-                        <b>ค่าความต่าง GPS:</b> ${{info.gps_diff || '0.00'}} m | 
-                        <b>สถานะการจัดส่ง:</b> ${{info.status}}
-                        ${{alertNotice}}
+                        <b>🚚 สถานะปัจจุบัน [ลำดับที่ ${{seqNumber}} / ${{segments.length}}]:</b> เที่ยวส่ง: <span style="color:${{seg.color}}; font-weight:bold;">${{info.trip}}</span><br>
+                        <b>⏰ เวลา:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> ${{info.cust_id}} | <b>📦 จำนวน:</b> ${{info.qty}} ถัง<br>
+                        <b>📌 สถานะ:</b> ${{info.status}} ${{isLate ? '🚨 (ส่งไม่ตรงเวลา)' : ''}}<br>
+                        <b>📡 ระยะห่างพิกัด GPS:</b> ${{info.gps_diff}} เมตร ${{isGps ? '⚠️ (เกินระยะ 100m)' : ''}}
                     `;
+                }}
+
+                function clearAnimationLayers() {{
+                    activePolylines.forEach(p => map.removeLayer(p));
+                    activePolylines = [];
+                    
+                    stepMarkers.forEach(m => map.removeLayer(m));
+                    stepMarkers = [];
+
+                    if (currentActiveMarker) {{
+                        map.removeLayer(currentActiveMarker);
+                        currentActiveMarker = null;
+                    }}
                 }}
 
                 function startAnimation() {{
                     if (isPlaying) return;
                     isPlaying = true;
-                    runLoop();
-                }}
+                    document.getElementById('status-text').innerText = "▶️ กำลังจำลองเส้นทาง...";
 
-                function runLoop() {{
-                    if (animTimer) clearInterval(animTimer);
+                    if (currentStep >= segments.length) {{
+                        resetAnimation();
+                    }}
+
                     animTimer = setInterval(() => {{
                         if (currentStep < segments.length) {{
                             renderStep(currentStep);
                             currentStep++;
                         }} else {{
                             pauseAnimation();
-                            document.getElementById('status-text').innerText = "✅ จำลองการจัดส่งสินค้าเสร็จสิ้นเรียบร้อยแล้ว!";
+                            document.getElementById('status-text').innerText = "✅ จำลองเส้นทางเสร็จสิ้น!";
                         }}
                     }}, currentSpeedMs);
                 }}
@@ -578,69 +576,33 @@ if uploaded_file:
                 function pauseAnimation() {{
                     isPlaying = false;
                     if (animTimer) clearInterval(animTimer);
-                    document.getElementById('status-text').innerText = "⏸️ หยุดการจำลองชั่วคราว";
+                    document.getElementById('status-text').innerText = "⏸️ หยุดชั่วคราว";
                 }}
 
                 function resetAnimation() {{
                     pauseAnimation();
                     currentStep = 0;
-                    
-                    activePolylines.forEach(p => map.removeLayer(p));
-                    activePolylines = [];
-                    
-                    if (currentActiveMarker) {{
-                        map.removeLayer(currentActiveMarker);
-                        currentActiveMarker = null;
-                    }}
-
-                    if (!isMode1) {{
-                        allMarkers.forEach(m => map.removeLayer(m));
-                        allMarkers = [];
-                    }}
-                    
+                    clearAnimationLayers();
                     document.getElementById('timeSlider').value = 0;
                     document.getElementById('slider-label').innerText = `จุดที่ 0 / ${{segments.length}}`;
-                    map.setView([warehouse[0], warehouse[1]], 13);
-                    document.getElementById('status-text').innerText = "พร้อมสำหรับการจำลองเส้นทาง...";
-                    document.getElementById('info-box').innerHTML = "📍 **สถานะพิกัด**: กดปุ่ม 'เริ่มเล่น' หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด";
+                    document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
+                    document.getElementById('info-box').innerHTML = '📍 **สถานะพิกัด**: กดปุ่ม "เริ่มเล่น" หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด';
+                    map.setView(warehouse, 13);
                 }}
 
-                // ฟังก์ชันเมื่อผู้ใช้ลาก Slider เปลี่ยนจุด
-                function onSliderChange(targetStep) {{
-                    let wasPlaying = isPlaying;
+                function onSliderChange(val) {{
                     pauseAnimation();
-                    
-                    // เคลียร์เส้นทางก่อนหน้าทั้งหมดเพื่อวาดใหม่จนถึง targetStep
-                    activePolylines.forEach(p => map.removeLayer(p));
-                    activePolylines = [];
-
-                    if (!isMode1) {{
-                        allMarkers.forEach(m => map.removeLayer(m));
-                        allMarkers = [];
-                    }}
-
-                    targetStep = parseInt(targetStep);
-                    for (let s = 0; s <= targetStep; s++) {{
-                        renderStep(s);
+                    clearAnimationLayers();
+                    let targetStep = parseInt(val);
+                    for (let i = 0; i <= targetStep; i++) {{
+                        renderStep(i);
                     }}
                     currentStep = targetStep + 1;
-
-                    if (wasPlaying) {{
-                        startAnimation();
-                    }}
-                }}
-
-                // ปรับเปลี่ยนความเร็วการเล่นได้แบบ Real-time
-                function updateSpeed(newSpeed) {{
-                    currentSpeedMs = newSpeed;
-                    if (isPlaying) {{
-                        runLoop(); // เล่นต่อทันทีที่ความเร็วใหม่ ไม่เริ่มนับ 1 ใหม่
-                    }}
                 }}
             </script>
         </body>
         </html>
         """
 
-        # ส่งผ่านค่าความเร็วเข้า iframe
-        components.html(map_html, height=730)
+        import streamlit.components.v1 as components
+        components.html(map_html, height=750)
