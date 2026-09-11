@@ -151,7 +151,7 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 3. วนลูปอ่านข้อมูลทุกบรรทัดตั้งแต่ต้นจนจบไฟล์ (รองรับมากกว่า 400 บรรทัด)
+    # 3. วนลูปอ่านข้อมูลทุกบรรทัดตั้งแต่ต้นจนจบไฟล์
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
         
@@ -212,31 +212,29 @@ def parse_excel_data(excel_file):
             "status": status
         })
 
-    # 4. สร้าง DataFrame และจัดหมวดหมู่เที่ยววิ่ง (Trip)
+    # 4. สร้าง DataFrame และจัดหมวดหมู่เที่ยววิ่ง (Trip) โดยไม่ลบแถวซ้ำ
     df = pd.DataFrame(records)
     if not df.empty:
-        df = df.drop_duplicates(subset=['cust_id', 'time', 'lat', 'lng']).reset_index(drop=True)
-
-        dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 80]
+        dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
         trips = []
         acc_qty_list = []
         
-        curr_trip = 1
+        curr_trip_idx = 0
         curr_trip_qty = 0
-        curr_limit = dw_limits[0] if len(dw_limits) > 0 else 80
         total_acc = 0
 
         for idx, row in df.iterrows():
             q = row['qty']
-            
-            if (curr_trip_qty + q > curr_limit) and (curr_trip < len(dw_limits)):
-                curr_trip += 1
+            target_limit = dw_limits[curr_trip_idx] if curr_trip_idx < len(dw_limits) else 80
+
+            # ตัดขึ้นเที่ยวใหม่เมื่อยอดสะสมเกินโควต้าของเที่ยวปัจจุบัน
+            if (curr_trip_qty + q > target_limit) and (curr_trip_idx + 1 < len(dw_limits)):
+                curr_trip_idx += 1
                 curr_trip_qty = 0
-                curr_limit = dw_limits[curr_trip - 1] if curr_trip <= len(dw_limits) else 80
 
             curr_trip_qty += q
             total_acc += q
-            trips.append(f"เที่ยวที่ {curr_trip}")
+            trips.append(f"เที่ยวที่ {curr_trip_idx + 1}")
             acc_qty_list.append(total_acc)
 
         df['trip'] = trips
