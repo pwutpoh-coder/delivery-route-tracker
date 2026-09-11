@@ -16,7 +16,7 @@ st.title(
 )
 st.markdown(
     "ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (Excel) พร้อมจำลองเส้นทางบนถนนจริงผ่าน"
-    " OSRM"
+    " OSRM และคำนวณระยะทางรวม"
 )
 
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
@@ -122,7 +122,7 @@ anim_speed_ms = st.sidebar.slider(
 )
 
 
-# --- FUNCTION: ดึงเส้นทางถนนจริงจาก OSRM ---
+# --- FUNCTION: ดึงเส้นทางถนนจริงและระยะทางจาก OSRM ---
 @st.cache_data(show_spinner=False)
 def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
@@ -131,11 +131,28 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
         if res.status_code == 200:
             data = res.json()
             if data.get("routes"):
-                coords = data["routes"][0]["geometry"]["coordinates"]
-                return [[pt[1], pt[0]] for pt in coords]
+                route = data["routes"][0]
+                coords = route["geometry"]["coordinates"]
+                distance_km = route["distance"] / 1000.0  # แปลงเมตรเป็นกิโลเมตร
+                return [[pt[1], pt[0]] for pt in coords], distance_km
     except Exception:
         pass
-    return [[p1_lat, p1_lng], [p2_lat, p2_lng]]
+
+    # กรณีดึง OSRM ไม่สำเร็จ ให้ใช้เส้นตรงและระยะทางประเมินคร่าวๆ
+    from math import asin, cos, radians, sin, sqrt
+
+    def haversine(lat1, lon1, lat2, lon2):
+        r = 6371  # รัศมีโลก (กิโลเมตร)
+        dlat = radians(lat2 - lat1)
+        dlon = radians(lon2 - lon1)
+        a = (
+            sin(dlat / 2) ** 2
+            + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+        )
+        return 2 * r * asin(sqrt(a))
+
+    dist = haversine(p1_lat, p1_lng, p2_lat, p2_lng)
+    return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
 # --- PARSER: Sprinkle Excel Data Extraction System ---
@@ -205,7 +222,7 @@ def parse_excel_data(excel_file):
         lat = float(gps_match.group(1))
         lng = float(gps_match.group(2))
 
-        # กรองพิกัดเฉพาะในเขตประเทศไทย
+        # กรองเฉพาะพิกัดในประเทศไทย
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
@@ -257,7 +274,7 @@ def parse_excel_data(excel_file):
 
     df = pd.DataFrame(records)
     if not df.empty:
-        # เรียงลำดับข้อมูลตามเวลาส่งจริง
+        # เรียงลำดับข้อมูลตามเวลาส่งจริง ป้องกันเส้นทาง OSRM วิ่งกระโดดสลับไปมา
         df = df.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
 
         dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
@@ -317,7 +334,7 @@ if uploaded_file:
         )
 
         st.subheader("📌 ข้อมูลสรุปการปฏิบัติงาน")
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
@@ -345,28 +362,7 @@ if uploaded_file:
             "Longitude",
             "ค่าความต่าง GPS",
         ]
-        st.dataframe(disp_df, use_container_width=True, height=400)
-
-        st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
-        summaries = []
-        for idx, (trip_name, group) in enumerate(df.groupby("trip", sort=False)):
-            dw_val = dw_list[idx] if idx < len(dw_list) else group["qty"].sum()
-            summaries.append({
-                "เที่ยวการส่ง": trip_name,
-                "จำนวนถังที่เบิก (DWS)": dw_val,
-                "ยอดจัดส่งจริง (ถัง)": group["qty"].sum(),
-                "จำนวนจุดส่ง (จุด)": len(group),
-                "จัดส่งตรงเวลา (จุด)": len(
-                    group[group["status"] == "จัดส่งตรงเวลา"]
-                ),
-                "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(
-                    group[group["status"] != "จัดส่งตรงเวลา"]
-                ),
-                "GPS คลาดเคลื่อน >100m (จุด)": len(
-                    group[group["gps_diff_num"] > 100]
-                ),
-            })
-        st.table(pd.DataFrame(summaries))
+        st.dataframe(disp_df, use_container_width=True, height=350)
 
         st.divider()
 
@@ -381,11 +377,15 @@ if uploaded_file:
             "เที่ยวที่ 4": "#AA00FF",
         }
 
-        with st.spinner("กำลังคำนวณเส้นทางถนนจริง (OSRM Routing)..."):
+        with st.spinner(
+            "กำลังคำนวณเส้นทางถนนจริงและคำนวณระยะทางรวม (OSRM Routing)..."
+        ):
             segments_data = []
             grouped = df.groupby("trip", sort=False)
 
+            trip_distances = {}  # เก็บระยะทางรวมแต่ละเที่ยว
             point_counter = 0
+
             for trip_name, group in grouped:
                 pts = (
                     [warehouse_coord]
@@ -394,9 +394,14 @@ if uploaded_file:
                 )
                 records_list = group.to_dict("records")
 
+                total_trip_dist = 0.0
+
                 for i in range(len(pts) - 1):
                     p1, p2 = pts[i], pts[i + 1]
-                    road_path = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
+                    road_path, dist_km = get_osrm_route(
+                        p1[0], p1[1], p2[0], p2[1]
+                    )
+                    total_trip_dist += dist_km
 
                     if i < len(records_list):
                         info = records_list[i]
@@ -413,13 +418,62 @@ if uploaded_file:
                             "point_idx": None,
                         }
                     info["trip"] = trip_name
+                    info["seg_dist_km"] = round(dist_km, 2)
 
                     segments_data.append({
                         "trip": trip_name,
                         "color": trip_colors.get(trip_name, "#0055FF"),
                         "path": road_path,
                         "info": info,
+                        "dist_km": round(dist_km, 2),
                     })
+
+                trip_distances[trip_name] = round(total_trip_dist, 2)
+
+            total_day_distance = round(sum(trip_distances.values()), 2)
+
+        # อัปเดตแสดงระยะทางรวมใน Card สรุปปฏิบัติงาน
+        c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
+
+        st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
+        summaries = []
+        for idx, (trip_name, group) in enumerate(df.groupby("trip", sort=False)):
+            dw_val = dw_list[idx] if idx < len(dw_list) else group["qty"].sum()
+            t_dist = trip_distances.get(trip_name, 0.0)
+            summaries.append({
+                "เที่ยวการส่ง": trip_name,
+                "จำนวนถังที่เบิก (DWS)": dw_val,
+                "ยอดจัดส่งจริง (ถัง)": group["qty"].sum(),
+                "จำนวนจุดส่ง (จุด)": len(group),
+                "ระยะทางวิ่งรวม (กม.)": f"{t_dist:.2f}",
+                "จัดส่งตรงเวลา (จุด)": len(
+                    group[group["status"] == "จัดส่งตรงเวลา"]
+                ),
+                "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(
+                    group[group["status"] != "จัดส่งตรงเวลา"]
+                ),
+                "GPS คลาดเคลื่อน >100m (จุด)": len(
+                    group[group["gps_diff_num"] > 100]
+                ),
+            })
+
+        # แถวสรุประดับวัน
+        summaries.append({
+            "เที่ยวการส่ง": "รวมทั้งหมดประจำวัน",
+            "จำนวนถังที่เบิก (DWS)": sum(dw_list)
+            if dw_list
+            else df["qty"].sum(),
+            "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
+            "จำนวนจุดส่ง (จุด)": len(df),
+            "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
+            "จัดส่งตรงเวลา (จุด)": len(df[df["status"] == "จัดส่งตรงเวลา"]),
+            "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(
+                df[df["status"] != "จัดส่งตรงเวลา"]
+            ),
+            "GPS คลาดเคลื่อน >100m (จุด)": len(df[df["gps_diff_num"] > 100]),
+        })
+
+        st.table(pd.DataFrame(summaries))
 
         df_records = df.to_dict("records")
         for idx, r in enumerate(df_records):
@@ -457,14 +511,12 @@ if uploaded_file:
                     border: none !important;
                 }}
 
-                /* Container หลักของหมุด */
                 .marker-container {{
                     position: relative;
                     width: 26px;
                     height: 26px;
                 }}
 
-                /* ตัวเลขพิกัดหลัก */
                 .number-icon {{
                     color: #FFFFFF !important;
                     border: 2px solid #FFFFFF !important;
@@ -491,7 +543,6 @@ if uploaded_file:
                     box-shadow: 0 0 14px #FFD700, 0 4px 10px rgba(0,0,0,0.8) !important;
                 }}
 
-                /* Badge สัญลักษณ์เตือนบนตัวหมุด */
                 .marker-badge-late {{
                     position: absolute;
                     top: -6px;
@@ -550,6 +601,8 @@ if uploaded_file:
                 <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
                 <div class="legend-item"><span>⏰ = ส่งไม่ตรงเวลา</span></div>
                 <div class="legend-item"><span>📡 = GPS ต่าง >100m</span></div>
+                <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
+                <div class="legend-item" style="color:#008CBA;"><span>🏁 ระยะทางรวมทั้งหมด: {total_day_distance:.2f} กม.</span></div>
             </div>
 
             <div class="controls">
@@ -566,7 +619,7 @@ if uploaded_file:
             </div>
 
             <div id="map"></div>
-            <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด</div>
+            <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" หรือลากแถบเพื่อดูรายละเอียดระยะทางและสถานะส่ง</div>
 
             <script>
                 const points = {points_json};
@@ -676,8 +729,12 @@ if uploaded_file:
                         stepMarkers = [];
                     }}
 
+                    let accumulatedDistance = 0.0;
+
                     for (let i = 0; i <= currentStep; i++) {{
                         let seg = segments[i];
+                        accumulatedDistance += (seg.dist_km || 0.0);
+
                         let polyline = L.polyline(seg.path, {{
                             color: seg.color,
                             weight: 5,
@@ -714,8 +771,9 @@ if uploaded_file:
                         <b>🕒 เวลาส่ง:</b> ${{info.time}} | 
                         <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
                         <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
-                        <b>📌 สถานะ:</b> ${{info.status}} | 
-                        <b>📏 ระยะห่าง GPS:</b> ${{info.gps_diff}} เมตร
+                        <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | 
+                        <b>🛣️ ระยะทางสะสมถึงจุดนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | 
+                        <b>📌 สถานะ:</b> ${{info.status}}
                     `;
 
                     let lastPt = currentSeg.path[currentSeg.path.length - 1];
