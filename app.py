@@ -356,23 +356,28 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
+                /* ปรับขนาดหมุดพื้นฐานให้เล็กลง สีทึบชัดเจน */
                 .number-icon {{
                     color: white;
                     border: 1.5px solid #ffffff;
                     border-radius: 50%;
                     text-align: center;
                     font-weight: bold;
-                    font-size: 10px;
-                    line-height: 18px;
-                    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
-                    transition: transform 0.2s ease, box-shadow 0.2s ease;
+                    font-size: 8px;
+                    line-height: 12px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+                    transition: transform 0.25s ease, box-shadow 0.25s ease, font-size 0.25s ease, line-height 0.25s ease;
+                    opacity: 1.0 !important;
                 }}
 
+                /* หมุดเมื่อเส้นทางวิ่งมาถึง (ขยายใหญ่ เด่นชัด) */
                 .number-icon-active {{
-                    transform: scale(1.8) !important;
+                    transform: scale(1.83) !important;
                     z-index: 1000 !important;
-                    border: 2px solid #FFD700 !important;
-                    box-shadow: 0 0 12px #FFD700, 0 3px 8px rgba(0,0,0,0.6) !important;
+                    border: 2px solid #FFFFFF !important;
+                    font-size: 10px !important;
+                    line-height: 18px !important;
+                    box-shadow: 0 0 12px #FFD700, 0 3px 8px rgba(0,0,0,0.8) !important;
                 }}
 
                 .alert-badge {{
@@ -460,8 +465,8 @@ if uploaded_file:
                         let customIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
-                            iconSize: [18, 18],
-                            iconAnchor: [9, 9]
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
                         }});
 
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
@@ -523,8 +528,8 @@ if uploaded_file:
                         let dynamicIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(pointDisplayNum),
-                            iconSize: [18, 18],
-                            iconAnchor: [9, 9]
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
                         }});
 
                         let m = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
