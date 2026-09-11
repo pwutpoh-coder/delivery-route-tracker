@@ -15,8 +15,8 @@ st.title(
     "🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)"
 )
 st.markdown(
-    "ดึงข้อมูลจากเอกสารสรุปการส่งสินค้าประจำวัน (Excel) พร้อมจำลองเส้นทางบนถนนจริงผ่าน"
-    " OSRM และคำนวณระยะทางรวม"
+    "ดึงข้อมูลใบเบิก (DW), ใบคืน (RE) จากคอลัมน์ A และตรวจสอบรายการจัดส่งตามจริง"
+    " พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
 )
 
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
@@ -28,7 +28,6 @@ def geocode_location(location_str):
         return None, None
 
     clean_str = location_str.strip()
-
     coord_match = re.match(r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", clean_str)
     if coord_match:
         lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
@@ -36,7 +35,7 @@ def geocode_location(location_str):
 
     headers = {
         "User-Agent": (
-            "SprinkleDeliveryApp/3.0 (Contact: delivery_admin@sprinkle.co.th)"
+            "SprinkleDeliveryApp/3.1 (Contact: delivery_admin@sprinkle.co.th)"
         ),
         "Accept-Language": "th,en;q=0.9",
     }
@@ -68,7 +67,7 @@ wh_input = st.sidebar.text_input(
     "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):",
     value="",
     placeholder="ตัวอย่าง: คลังสินค้า บางนา, บางนา, หรือ 13.66800, 100.61000",
-    help="สามารถพิมพ์ชื่อสถานที่ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง",
+    help="สามารถพิมพ์ชื่อสถานที่ ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง",
 )
 
 DEFAULT_WAREHOUSE = (13.66800, 100.61000)
@@ -94,7 +93,6 @@ else:
 
 st.sidebar.divider()
 
-# --- SIDEBAR: ปุ่มรีเซ็ตนำเข้าข้อมูลใหม่ ---
 st.sidebar.header("🔄 จัดการข้อมูล")
 if st.sidebar.button(
     "🗑️ ล้างข้อมูล / นำเข้าไฟล์ใหม่", use_container_width=True
@@ -138,11 +136,10 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     except Exception:
         pass
 
-    # กรณีดึง OSRM ไม่สำเร็จ ให้ใช้เส้นตรงและระยะทางประเมินคร่าวๆ
     from math import asin, cos, radians, sin, sqrt
 
     def haversine(lat1, lon1, lat2, lon2):
-        r = 6371  # รัศมีโลก (กิโลเมตร)
+        r = 6371
         dlat = radians(lat2 - lat1)
         dlon = radians(lon2 - lon1)
         a = (
@@ -155,20 +152,16 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: Sprinkle Excel Data Extraction System ---
+# --- PARSER: Sprinkle Excel Data Extraction (ตามเงื่อนไขใหม่ คอลัมน์ A, D, E) ---
 def parse_excel_data(excel_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
-    dw_list = []
-    re_list = []
-    records = []
-
     raw_df = pd.read_excel(excel_file, header=None)
 
+    # 1. ดึงข้อมูลหัวกระดาษ (Header Info)
     try:
         header_blob = " ".join(
             raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten()
         )
-
         d_match = re.search(r"ประจำวันที่\s*([\d/]+)", header_blob)
         if d_match:
             header_info["date"] = d_match.group(1)
@@ -186,33 +179,72 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    try:
-        header_text = " ".join(
-            raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten()
-        )
-        dw_matches = re.findall(r"DWS\d+/\d+\s+(\d+)", header_text)
-        for dw_val in dw_matches:
-            dw_list.append(int(dw_val))
-
-        re_matches = re.findall(r"RES\d+/\d+\s+(\d+)", header_text)
-        for re_val in re_matches:
-            re_list.append(int(re_val))
-    except Exception:
-        pass
+    # 2. ค้นหาใบเบิก (DW) และใบคืน (RE) จากคอลัมน์ A พร้อมจำนวนจากคอลัมน์ D
+    dw_records = []  # เก็บ (sort_key, qty)
+    re_records = []  # เก็บ (sort_key, qty)
 
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
+        col_a = str(row.iloc[0]).strip() if 0 < len(row) and pd.notna(row.iloc[0]) else ""
+        col_d = row.iloc[3] if 3 < len(row) and pd.notna(row.iloc[3]) else 0
 
-        val_a = row.iloc[0] if 0 < len(row) else None
-        val_c = row.iloc[2] if 2 < len(row) else None
-        val_e = row.iloc[4] if 4 < len(row) else None
-        val_f = row.iloc[5] if 5 < len(row) else None
+        try:
+            qty_val = int(float(col_d))
+        except Exception:
+            qty_val = 0
 
-        if pd.isna(val_e):
+        # ตรวจสอบรูปแบบ DW (เช่น DW-----/--XXX หรือขึ้นต้นด้วย DW)
+        if "DW" in col_a.upper():
+            # พยายามดึงตัวเลข 3 หลักสุดท้ายหรือตัวเลขท้ายสุดมาเป็นเกณฑ์เรียงลำดับ
+            num_match = re.search(r"(\d+)$", col_a)
+            sort_key = int(num_match.group(1)) if num_match else idx
+            dw_records.append({"sort_key": sort_key, "qty": qty_val, "raw_text": col_a})
+
+        # ตรวจสอบรูปแบบ RE (เช่น RE-----/--XX หรือขึ้นต้นด้วย RE)
+        elif "RE" in col_a.upper():
+            num_match = re.search(r"(\d+)$", col_a)
+            sort_key = int(num_match.group(1)) if num_match else idx
+            re_records.append({"sort_key": sort_key, "qty": qty_val, "raw_text": col_a})
+
+    # จัดเรียงตามค่าเลขท้าย (XXX) จากน้อยไปมาก เพื่อกำหนดเป็นเที่ยวที่ 1, 2, 3...
+    dw_records = sorted(dw_records, key=lambda x: x["sort_key"])
+    re_records = sorted(re_records, key=lambda x: x["sort_key"])
+
+    # สร้างรายการโควตารายเที่ยว (Net Quantity = เบิก - คืน)
+    trip_quotas = []
+    for i, dw in enumerate(dw_records):
+        dw_q = dw["qty"]
+        # ค้นหาใบคืน (RE) ในเที่ยวลำดับเดียวกัน ถ้าไม่มีให้ถือว่าคืน 0
+        re_q = re_records[i]["qty"] if i < len(re_records) else 0
+        net_qty = max(0, dw_q - re_q)
+        trip_quotas.append({
+            "trip_no": i + 1,
+            "dws_qty": dw_q,
+            "res_qty": re_q,
+            "net_qty": net_qty,
+            "dw_text": dw["raw_text"],
+        })
+
+    # หากไม่พบข้อมูล DW ในเอกสารเลย ให้กำหนดค่าสำรองเริ่มต้น 1 เที่ยว
+    if not trip_quotas:
+        trip_quotas = [{"trip_no": 1, "dws_qty": 80, "res_qty": 0, "net_qty": 80, "dw_text": "DEFAULT"}]
+
+    # 3. แยกแยะข้อมูลลูกค้ารายตัว (ตรวจสอบคอลัมน์ A รหัสลูกค้า, คอลัมน์ E พิกัด GPS, คอลัมน์ D เวลาส่ง)
+    records = []
+    for idx in range(len(raw_df)):
+        row = raw_df.iloc[idx]
+
+        col_a = row.iloc[0] if 0 < len(row) else None
+        col_c = row.iloc[2] if 2 < len(row) else None
+        col_d = row.iloc[3] if 3 < len(row) else None
+        col_e = row.iloc[4] if 4 < len(row) else None
+
+        if pd.isna(col_e):
             continue
 
-        str_e = str(val_e).strip()
+        str_e = str(col_e).strip()
 
+        # ตรวจสอบรูปแบบพิกัด GPS ในคอลัมน์ E (รองรับทั้งแบบ Lat, Lng และค่าความต่าง)
         gps_match = re.search(
             r"([1-9]\d*\.\d+)\s*,\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?", str_e
         )
@@ -226,37 +258,41 @@ def parse_excel_data(excel_file):
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
-        gps_diff_val = (
-            float(gps_match.group(3)) if gps_match.group(3) else 0.0
-        )
+        gps_diff_val = float(gps_match.group(3)) if gps_match.group(3) else 0.0
         gps_diff_str = f"{gps_diff_val:.2f}"
 
-        cust_id = str(val_a).strip() if pd.notna(val_a) else "N/A"
-        if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"]:
+        # รหัสลูกค้าในคอลัมน์ A (อาจเป็นตัวเลขหรือข้อความ ข้ามหัวเรื่องหรือค่าว่าง)
+        cust_id = str(col_a).strip() if pd.notna(col_a) else "N/A"
+        if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"] or "DW" in cust_id.upper() or "RE" in cust_id.upper():
             continue
 
+        # จำนวนถังส่งในคอลัมน์ C (หรือถ้าคอลัมน์ C ว่างให้ดูคอลัมน์ D)
         try:
-            qty = int(float(val_c)) if pd.notna(val_c) else 1
+            qty = int(float(col_c)) if pd.notna(col_c) else 1
         except Exception:
-            qty = 1
+            try:
+                qty = int(float(col_d)) if pd.notna(col_d) else 1
+            except Exception:
+                qty = 1
 
-        str_f = str(val_f).strip() if pd.notna(val_f) else ""
-        time_match = re.search(r"(\d{1,2}:\d{2})", str_f)
+        # เวลาส่งและสถานะจากคอลัมน์ D
+        str_d = str(col_d).strip() if pd.notna(col_d) else ""
+        time_match = re.search(r"(\d{1,2}:\d{2})", str_d)
         delivery_time = (
             time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
         )
         time_sort_key = time_match.group(1) if time_match else f"99:{idx:02d}"
 
-        if "จัดส่งตรงเวลา" in str_f:
+        if "จัดส่งตรงเวลา" in str_d:
             status = "จัดส่งตรงเวลา"
-        elif "ไม่ตรงเวลา" in str_f:
+        elif "ไม่ตรงเวลา" in str_d:
             status = "จัดส่งไม่ตรงเวลา"
-        elif "สมาชิกใหม่" in str_f:
+        elif "สมาชิกใหม่" in str_d:
             status = "สมาชิกใหม่"
-        elif "ย้าย" in str_f:
+        elif "ย้าย" in str_d:
             status = "ย้ายรอบ"
         else:
-            status_clean = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_f)
+            status_clean = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_d)
             status = status_clean if status_clean else "จัดส่งตรงเวลา"
 
         records.append({
@@ -274,10 +310,10 @@ def parse_excel_data(excel_file):
 
     df = pd.DataFrame(records)
     if not df.empty:
-        # เรียงลำดับข้อมูลตามเวลาส่งจริง ป้องกันเส้นทาง OSRM วิ่งกระโดดสลับไปมา
+        # เรียงลำดับตามเวลาส่งจริง
         df = df.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
 
-        dw_limits = dw_list if len(dw_list) > 0 else [80, 80, 72]
+        # ตัดรอบตามโควตาสุทธิของแต่ละเที่ยว (Net Quantity)
         trips = []
         acc_qty_list = []
 
@@ -287,10 +323,11 @@ def parse_excel_data(excel_file):
 
         for idx, row in df.iterrows():
             q = row["qty"]
+            # ดึงโควตาเป้าหมายของเที่ยวปัจจุบัน
             target_limit = (
-                dw_limits[curr_trip_idx]
-                if curr_trip_idx < len(dw_limits)
-                else dw_limits[-1]
+                trip_quotas[curr_trip_idx]["net_qty"]
+                if curr_trip_idx < len(trip_quotas)
+                else trip_quotas[-1]["net_qty"]
             )
 
             curr_trip_qty += q
@@ -299,8 +336,9 @@ def parse_excel_data(excel_file):
             trips.append(f"เที่ยวที่ {curr_trip_idx + 1}")
             acc_qty_list.append(total_acc)
 
+            # หากยอดสะสมในเที่ยวปัจจุบันครบโควตา และยังมีเที่ยวถัดไปรองรับ ให้ตัดรอบใหม่
             if (curr_trip_qty >= target_limit) and (
-                curr_trip_idx + 1 < len(dw_limits)
+                curr_trip_idx + 1 < len(trip_quotas)
             ):
                 curr_trip_idx += 1
                 curr_trip_qty = 0
@@ -308,7 +346,11 @@ def parse_excel_data(excel_file):
         df["trip"] = trips
         df["acc_qty"] = acc_qty_list
 
-    return df, dw_list, re_list, header_info
+    # แปลงโครงสร้าง trip_quotas ให้เข้ากันกับตัวแปรเดิม (dw_list, re_list)
+    dw_list = [t["dws_qty"] for t in trip_quotas]
+    re_list = [t["res_qty"] for t in trip_quotas]
+
+    return df, dw_list, re_list, header_info, trip_quotas
 
 
 # --- MAIN APP INTERFACE ---
@@ -318,19 +360,19 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file:
-    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร Excel..."):
-        df, dw_list, re_list, header_info = parse_excel_data(uploaded_file)
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร Excel ตามเงื่อนไขใบเบิก/ใบคืน..."):
+        df, dw_list, re_list, header_info, trip_quotas = parse_excel_data(uploaded_file)
 
     if df.empty:
         st.error(
             "❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ Excel"
-            " กรุณาตรวจสอบว่าเป็นไฟล์ Sprinkle Excel ที่ถูกต้อง"
+            " กรุณาตรวจสอบรูปแบบคอลัมน์ A, D และ E อีกครั้ง"
         )
     else:
         st.success(
             f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ |"
-            f" ยอดจัดส่งรวม {df['qty'].sum()} ถัง | เที่ยวการส่ง"
-            f" {df['trip'].nunique()} เที่ยว"
+            f" ยอดจัดส่งรวม {df['qty'].sum()} ถัง | จำนวนเที่ยวการส่ง"
+            f" {len(trip_quotas)} เที่ยว"
         )
 
         st.subheader("📌 ข้อมูลสรุปการปฏิบัติงาน")
@@ -366,9 +408,7 @@ if uploaded_file:
 
         st.divider()
 
-        st.subheader(
-            "🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)"
-        )
+        st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
 
         trip_colors = {
             "เที่ยวที่ 1": "#0055FF",
@@ -378,12 +418,12 @@ if uploaded_file:
         }
 
         with st.spinner(
-            "กำลังคำนวณเส้นทางถนนจริงและคำนวณระยะทางรวม (OSRM Routing)..."
+            "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (OSRM Routing)..."
         ):
             segments_data = []
             grouped = df.groupby("trip", sort=False)
 
-            trip_distances = {}  # เก็บระยะทางรวมแต่ละเที่ยว
+            trip_distances = {}
             point_counter = 0
 
             for trip_name, group in grouped:
@@ -432,44 +472,51 @@ if uploaded_file:
 
             total_day_distance = round(sum(trip_distances.values()), 2)
 
-        # อัปเดตแสดงระยะทางรวมใน Card สรุปปฏิบัติงาน
         c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
 
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
         summaries = []
-        for idx, (trip_name, group) in enumerate(df.groupby("trip", sort=False)):
-            dw_val = dw_list[idx] if idx < len(dw_list) else group["qty"].sum()
+        for idx, t_info in enumerate(trip_quotas):
+            trip_name = f"เที่ยวที่ {t_info['trip_no']}"
+            group = df[df["trip"] == trip_name] if trip_name in df["trip"].values else pd.DataFrame()
             t_dist = trip_distances.get(trip_name, 0.0)
+
+            actual_qty = group["qty"].sum() if not group.empty else 0
+            point_count = len(group)
+            ontime_count = len(group[group["status"] == "จัดส่งตรงเวลา"]) if not group.empty else 0
+            late_count = len(group[group["status"] != "จัดส่งตรงเวลา"]) if not group.empty else 0
+            gps_err_count = len(group[group["gps_diff_num"] > 100]) if not group.empty else 0
+
             summaries.append({
                 "เที่ยวการส่ง": trip_name,
-                "จำนวนถังที่เบิก (DWS)": dw_val,
-                "ยอดจัดส่งจริง (ถัง)": group["qty"].sum(),
-                "จำนวนจุดส่ง (จุด)": len(group),
+                "ใบเบิก (DW)": t_info["dw_text"],
+                "ยอดเบิก (ถัง)": t_info["dws_qty"],
+                "ยอดคืน (ถัง)": t_info["res_qty"],
+                "ยอดส่งสุทธิ (เป้าหมาย)": t_info["net_qty"],
+                "ยอดจัดส่งจริง (ถัง)": actual_qty,
+                "จำนวนจุดส่ง (จุด)": point_count,
                 "ระยะทางวิ่งรวม (กม.)": f"{t_dist:.2f}",
-                "จัดส่งตรงเวลา (จุด)": len(
-                    group[group["status"] == "จัดส่งตรงเวลา"]
-                ),
-                "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(
-                    group[group["status"] != "จัดส่งตรงเวลา"]
-                ),
-                "GPS คลาดเคลื่อน >100m (จุด)": len(
-                    group[group["gps_diff_num"] > 100]
-                ),
+                "จัดส่งตรงเวลา (จุด)": ontime_count,
+                "จัดส่งไม่ตรงเวลา (จุด)": late_count,
+                "GPS คลาดเคลื่อน >100m (จุด)": gps_err_count,
             })
 
-        # แถวสรุประดับวัน
+        # แถวสรุประดับวันรวมทั้งหมด
+        total_dws = sum([t["dws_qty"] for t in trip_quotas])
+        total_res = sum([t["res_qty"] for t in trip_quotas])
+        total_net = sum([t["net_qty"] for t in trip_quotas])
+
         summaries.append({
             "เที่ยวการส่ง": "รวมทั้งหมดประจำวัน",
-            "จำนวนถังที่เบิก (DWS)": sum(dw_list)
-            if dw_list
-            else df["qty"].sum(),
+            "ใบเบิก (DW)": "-",
+            "ยอดเบิก (ถัง)": total_dws,
+            "ยอดคืน (ถัง)": total_res,
+            "ยอดส่งสุทธิ (เป้าหมาย)": total_net,
             "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
             "จำนวนจุดส่ง (จุด)": len(df),
             "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
             "จัดส่งตรงเวลา (จุด)": len(df[df["status"] == "จัดส่งตรงเวลา"]),
-            "จัดส่งไม่ตรงเวลา/รอบเสริม (จุด)": len(
-                df[df["status"] != "จัดส่งตรงเวลา"]
-            ),
+            "จัดส่งไม่ตรงเวลา (จุด)": len(df[df["status"] != "จัดส่งตรงเวลา"]),
             "GPS คลาดเคลื่อน >100m (จุด)": len(df[df["gps_diff_num"] > 100]),
         })
 
@@ -506,16 +553,8 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
-                .leaflet-div-icon {{
-                    background: transparent !important;
-                    border: none !important;
-                }}
-
-                .marker-container {{
-                    position: relative;
-                    width: 26px;
-                    height: 26px;
-                }}
+                .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
+                .marker-container {{ position: relative; width: 26px; height: 26px; }}
 
                 .number-icon {{
                     color: #FFFFFF !important;
@@ -529,7 +568,6 @@ if uploaded_file:
                     height: 26px !important;
                     box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
                     transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-                    opacity: 1.0 !important;
                     display: flex !important;
                     align-items: center !important;
                     justify-content: center !important;
@@ -544,60 +582,30 @@ if uploaded_file:
                 }}
 
                 .marker-badge-late {{
-                    position: absolute;
-                    top: -6px;
-                    right: -6px;
-                    background-color: #D32F2F;
-                    color: white;
-                    border: 1.5px solid white;
-                    border-radius: 50%;
-                    width: 15px;
-                    height: 15px;
-                    font-size: 9px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-                    z-index: 10;
+                    position: absolute; top: -6px; right: -6px;
+                    background-color: #D32F2F; color: white; border: 1.5px solid white;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                    display: flex; align-items: center; justify-content: center; z-index: 10;
                 }}
 
                 .marker-badge-gps {{
-                    position: absolute;
-                    top: -6px;
-                    left: -6px;
-                    background-color: #FF9800;
-                    color: white;
-                    border: 1.5px solid white;
-                    border-radius: 50%;
-                    width: 15px;
-                    height: 15px;
-                    font-size: 9px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
-                    z-index: 10;
+                    position: absolute; top: -6px; left: -6px;
+                    background-color: #FF9800; color: white; border: 1.5px solid white;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                    display: flex; align-items: center; justify-content: center; z-index: 10;
                 }}
 
-                .alert-badge {{
-                    display: inline-block;
-                    padding: 2px 6px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                    font-weight: bold;
-                    color: white;
-                    margin-left: 4px;
-                }}
+                .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
                 .badge-late {{ background-color: #d9534f; }}
                 .badge-gps {{ background-color: #f0ad4e; color: #000; }}
             </style>
         </head>
         <body>
             <div class="legend">
-                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1 (น้ำเงิน)</div>
-                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2 (ชมพู)</div>
-                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3 (เขียว)</div>
-                <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4 (ม่วง)</div>
+                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1</div>
+                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2</div>
+                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3</div>
+                <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4</div>
                 <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
                 <div class="legend-item"><span>⏰ = ส่งไม่ตรงเวลา</span></div>
                 <div class="legend-item"><span>📡 = GPS ต่าง >100m</span></div>
@@ -647,7 +655,6 @@ if uploaded_file:
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-
                     let lateBadge = isLate ? `<span class="alert-badge badge-late">⏰ ส่งไม่ตรงเวลา</span>` : '';
                     let gpsBadge = isGpsDiff ? `<span class="alert-badge badge-gps">📡 GPS ห่าง >100m</span>` : '';
 
@@ -666,21 +673,12 @@ if uploaded_file:
                 function createMarkerIcon(seqNum, color, ptInfo) {{
                     let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
-
                     let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="ส่งไม่ตรงเวลา">⏰</div>` : '';
                     let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">📡</div>` : '';
 
-                    let htmlContent = `
-                        <div class="marker-container">
-                            ${{lateBadgeHtml}}
-                            ${{gpsBadgeHtml}}
-                            <div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div>
-                        </div>
-                    `;
-
                     return L.divIcon({{
                         className: '',
-                        html: htmlContent,
+                        html: `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`,
                         iconSize: [26, 26],
                         iconAnchor: [13, 13]
                     }});
@@ -691,7 +689,6 @@ if uploaded_file:
                         let seqNumber = idx + 1;
                         let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
-
                         marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                         allMarkers.push(marker);
                     }});
@@ -705,7 +702,6 @@ if uploaded_file:
                     activeMarkerRef = null;
 
                     if (!info || info.point_idx === undefined || info.point_idx === null) return;
-
                     let target = isMode1 ? allMarkers[info.point_idx] : stepMarkers[info.point_idx];
                     if (target && target._icon) {{
                         let innerDiv = target._icon.querySelector('.number-icon');
@@ -730,16 +726,11 @@ if uploaded_file:
                     }}
 
                     let accumulatedDistance = 0.0;
-
                     for (let i = 0; i <= currentStep; i++) {{
                         let seg = segments[i];
                         accumulatedDistance += (seg.dist_km || 0.0);
 
-                        let polyline = L.polyline(seg.path, {{
-                            color: seg.color,
-                            weight: 5,
-                            opacity: 0.85
-                        }}).addTo(map);
+                        let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
                         activePolylines.push(polyline);
 
                         if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
@@ -757,29 +748,17 @@ if uploaded_file:
 
                     let currentSeg = segments[currentStep];
                     let info = currentSeg.info;
-                    
                     highlightMarkerByInfo(info);
-
-                    let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
-                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    let lateAlert = isLate ? `<b style="color:#d9534f;"> [⏰ จัดส่งไม่ตรงเวลา]</b>` : '';
-                    let gpsAlert = isGpsDiff ? `<b style="color:#f0ad4e;"> [📡 GPS ต่าง >100m]</b>` : '';
 
                     let infoBox = document.getElementById('info-box');
                     infoBox.innerHTML = `
-                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b>${{lateAlert}}${{gpsAlert}}<br>
-                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | 
-                        <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
-                        <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
-                        <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | 
-                        <b>🛣️ ระยะทางสะสมถึงจุดนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | 
-                        <b>📌 สถานะ:</b> ${{info.status}}
+                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
+                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
+                        <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสมถึงจุดนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
                     `;
 
                     let lastPt = currentSeg.path[currentSeg.path.length - 1];
-                    if (lastPt) {{
-                        map.panTo(lastPt);
-                    }}
+                    if (lastPt) {{ map.panTo(lastPt); }}
                 }}
 
                 function nextStep() {{
@@ -796,19 +775,14 @@ if uploaded_file:
                     if (isPlaying) return;
                     isPlaying = true;
                     document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
-                    if (currentStep >= segments.length - 1) {{
-                        currentStep = 0;
-                    }}
+                    if (currentStep >= segments.length - 1) {{ currentStep = 0; }}
                     updateStep(currentStep);
                     animTimer = setInterval(nextStep, currentSpeedMs);
                 }}
 
                 function pauseAnimation() {{
                     isPlaying = false;
-                    if (animTimer) {{
-                        clearInterval(animTimer);
-                        animTimer = null;
-                    }}
+                    if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
                     document.getElementById('status-text').innerText = "⏸️ หยุดพักการจำลอง";
                 }}
 
@@ -824,9 +798,7 @@ if uploaded_file:
                     updateStep(parseInt(val));
                 }}
 
-                if (segments.length > 0) {{
-                    updateStep(0);
-                }}
+                if (segments.length > 0) {{ updateStep(0); }}
             </script>
         </body>
         </html>
