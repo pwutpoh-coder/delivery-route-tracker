@@ -361,15 +361,25 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
+                /* หมุดเล็กลง สีทึบ (100% Opacity) พร้อมเอฟเฟกต์ซูมเมื่อวิ่งมาถึง */
                 .number-icon {{
                     color: white;
-                    border: 2px solid white;
+                    border: 1.5px solid #ffffff;
                     border-radius: 50%;
                     text-align: center;
                     font-weight: bold;
-                    font-size: 12px;
-                    line-height: 24px;
-                    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+                    font-size: 10px;
+                    line-height: 18px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
+                    transition: transform 0.2s ease, box-shadow 0.2s ease;
+                }}
+
+                /* คลาสสำหรับขยายใหญ่ตอนลำดับวิ่งมาถึงจุดส่ง */
+                .number-icon-active {{
+                    transform: scale(1.8) !important;
+                    z-index: 1000 !important;
+                    border: 2px solid #FFD700 !important;
+                    box-shadow: 0 0 12px #FFD700, 0 3px 8px rgba(0,0,0,0.6) !important;
                 }}
 
                 .alert-badge {{
@@ -431,7 +441,7 @@ if uploaded_file:
                 let currentStep = 0;
                 let animTimer = null;
                 let isPlaying = false;
-                let currentActiveMarker = null;
+                let activeMarkerIndex = null; // เก็บลำดับหมุดที่กำลังขยายใหญ่อยู่
 
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
@@ -452,15 +462,15 @@ if uploaded_file:
                     `;
                 }}
 
-                // โหมด 1: วาดหมุดทั้งหมดล่วงหน้า
+                // โหมด 1: วาดหมุดทั้งหมดล่วงหน้า ขนาดเล็ก 18px สีทึบตามเที่ยว
                 if (isMode1) {{
                     points.forEach((pt, idx) => {{
                         let seqNumber = idx + 1;
                         let customIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
-                            iconSize: [26, 26],
-                            iconAnchor: [13, 13]
+                            iconSize: [18, 18],
+                            iconAnchor: [9, 9]
                         }});
 
                         let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
@@ -468,12 +478,32 @@ if uploaded_file:
                         marker.on('add', function() {{
                             if (marker._icon) {{
                                 marker._icon.style.backgroundColor = pt.color || '#008CBA';
+                                marker._icon.style.opacity = '1.0'; // สีทึบปกติ
                             }}
                         }});
 
                         marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                         allMarkers.push(marker);
                     }});
+                }}
+
+                function highlightMarker(markerIndex) {{
+                    // ลบคลาสขยายหมุดเก่าออก คืนค่าเป็นหมุดขนาดปกติ
+                    if (activeMarkerIndex !== null) {{
+                        let prevMarker = isMode1 ? allMarkers[activeMarkerIndex] : stepMarkers[activeMarkerIndex];
+                        if (prevMarker && prevMarker._icon) {{
+                            prevMarker._icon.classList.remove('number-icon-active');
+                        }}
+                    }}
+
+                    // ใส่คลาสขยายหมุดใหม่เมื่อวิ่งมาถึง
+                    let currentMarker = isMode1 ? allMarkers[markerIndex] : stepMarkers[markerIndex];
+                    if (currentMarker && currentMarker._icon) {{
+                        currentMarker._icon.classList.add('number-icon-active');
+                        activeMarkerIndex = markerIndex;
+                    }} else {{
+                        activeMarkerIndex = null;
+                    }}
                 }}
 
                 function renderStep(step) {{
@@ -494,38 +524,32 @@ if uploaded_file:
                     }}).addTo(map);
                     activePolylines.push(polyline);
 
-                    // เอา Highlight เก่าออก
-                    if (currentActiveMarker) {{
-                        map.removeLayer(currentActiveMarker);
-                    }}
-
                     // โหมด 2: เพิ่มหมุดทีละจุดเมื่อวิ่งถึง
                     if (!isMode1 && info.lat && info.lng) {{
                         let dynamicIcon = L.divIcon({{
                             className: 'number-icon',
                             html: String(seqNumber),
-                            iconSize: [26, 26],
-                            iconAnchor: [13, 13]
+                            iconSize: [18, 18],
+                            iconAnchor: [9, 9]
                         }});
 
                         let m = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
                         m.on('add', function() {{
-                            if (m._icon) m._icon.style.backgroundColor = seg.color || '#008CBA';
+                            if (m._icon) {{
+                                m._icon.style.backgroundColor = seg.color || '#008CBA';
+                                m._icon.style.opacity = '1.0';
+                            }}
                         }});
                         m.bindTooltip(createTooltipHtml(info, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                         stepMarkers.push(m);
                     }}
 
-                    // สร้าง วงแหวน Highlight จุดล่าสุด
+                    // เลื่อนแผนที่และเน้นขนาดหมุดจุดปัจจุบัน
                     if (info.lat && info.lng) {{
-                        currentActiveMarker = L.circleMarker([info.lat, info.lng], {{
-                            radius: 12,
-                            color: '#FFD700',
-                            fillColor: '#FFD700',
-                            fillOpacity: 0.6,
-                            weight: 3
-                        }}).addTo(map);
                         map.panTo([info.lat, info.lng]);
+                        highlightMarker(step);
+                    }} else {{
+                        highlightMarker(null);
                     }}
 
                     // อัปเดตกล่องข้อความสรุป
@@ -543,16 +567,14 @@ if uploaded_file:
                 }}
 
                 function clearCurrentMap() {{
+                    // ลบคลาส Highlight หมุดเดิมออกก่อนล้าง
+                    highlightMarker(null);
+
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
 
                     stepMarkers.forEach(m => map.removeLayer(m));
                     stepMarkers = [];
-
-                    if (currentActiveMarker) {{
-                        map.removeLayer(currentActiveMarker);
-                        currentActiveMarker = null;
-                    }}
                 }}
 
                 function startAnimation() {{
