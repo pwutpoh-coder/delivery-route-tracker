@@ -340,15 +340,16 @@ if uploaded_file:
         <!DOCTYPE html>
         <html>
         <head>
+            <meta charset="utf-8" />
             <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <style>
                 #map {{ width: 100%; height: 560px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
-                .controls {{ margin-bottom: 10px; font-family: 'Sarabun', sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+                .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
                 button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
                 button:hover {{ background-color: #005f73; transform: scale(1.02); }}
                 
-                .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; }}
+                .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
                 .timeline-slider {{ flex-grow: 1; height: 6px; cursor: pointer; }}
                 
                 #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
@@ -356,7 +357,6 @@ if uploaded_file:
                 .legend-item {{ display: flex; align-items: center; gap: 5px; }}
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
-                /* ปรับขนาดหมุดพื้นฐานให้เล็กลง สีทึบชัดเจน */
                 .number-icon {{
                     color: white;
                     border: 1.5px solid #ffffff;
@@ -366,11 +366,10 @@ if uploaded_file:
                     font-size: 8px;
                     line-height: 12px;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-                    transition: transform 0.25s ease, box-shadow 0.25s ease, font-size 0.25s ease, line-height 0.25s ease;
+                    transition: transform 0.25s ease, box-shadow 0.25s ease;
                     opacity: 1.0 !important;
                 }}
 
-                /* หมุดเมื่อเส้นทางวิ่งมาถึง (ขยายใหญ่ เด่นชัด) */
                 .number-icon-active {{
                     transform: scale(1.83) !important;
                     z-index: 1000 !important;
@@ -486,142 +485,145 @@ if uploaded_file:
                 function highlightMarkerByInfo(info) {{
                     if (activeMarkerRef && activeMarkerRef._icon) {{
                         activeMarkerRef._icon.classList.remove('number-icon-active');
-                        activeMarkerRef = null;
                     }}
+                    activeMarkerRef = null;
 
-                    if (!info) return;
+                    if (!info || info.point_idx === undefined || info.point_idx === null) return;
 
-                    let targetMarker = null;
-                    if (isMode1) {{
-                        if (info.point_idx !== null && info.point_idx !== undefined && allMarkers[info.point_idx]) {{
-                            targetMarker = allMarkers[info.point_idx];
+                    if (isMode1 && allMarkers[info.point_idx]) {{
+                        let target = allMarkers[info.point_idx];
+                        if (target._icon) {{
+                            target._icon.classList.add('number-icon-active');
+                            activeMarkerRef = target;
                         }}
-                    }} else {{
-                        targetMarker = stepMarkers[stepMarkers.length - 1];
-                    }}
-
-                    if (targetMarker && targetMarker._icon) {{
-                        targetMarker._icon.classList.add('number-icon-active');
-                        activeMarkerRef = targetMarker;
+                    }} else if (!isMode1 && stepMarkers[info.point_idx]) {{
+                        let target = stepMarkers[info.point_idx];
+                        if (target._icon) {{
+                            target._icon.classList.add('number-icon-active');
+                            activeMarkerRef = target;
+                        }}
                     }}
                 }}
 
-                function renderStep(step) {{
-                    if (step >= segments.length) return;
+                function updateStep(stepIndex) {{
+                    if (stepIndex < 0 || stepIndex >= segments.length) return;
 
-                    const seg = segments[step];
-                    const info = seg.info;
-                    const seqNumber = step + 1;
-
-                    document.getElementById('timeSlider').value = step;
-                    document.getElementById('slider-label').innerText = `จุดที่ ${{seqNumber}} / ${{segments.length}}`;
-
-                    const polyline = L.polyline(seg.path, {{
-                        color: seg.color,
-                        weight: 5,
-                        opacity: 0.85
-                    }}).addTo(map);
-                    activePolylines.push(polyline);
-
-                    if (!isMode1 && info.lat && info.lng) {{
-                        let pointDisplayNum = (info.point_idx !== null && info.point_idx !== undefined) ? (info.point_idx + 1) : seqNumber;
-                        let dynamicIcon = L.divIcon({{
-                            className: 'number-icon',
-                            html: String(pointDisplayNum),
-                            iconSize: [12, 12],
-                            iconAnchor: [6, 6]
-                        }});
-
-                        let m = L.marker([info.lat, info.lng], {{ icon: dynamicIcon }}).addTo(map);
-                        m.on('add', function() {{
-                            if (m._icon) {{
-                                m._icon.style.backgroundColor = seg.color || '#008CBA';
-                                m._icon.style.opacity = '1.0';
-                            }}
-                        }});
-                        m.bindTooltip(createTooltipHtml(info, pointDisplayNum), {{ direction: 'top', opacity: 0.95 }});
-                        stepMarkers.push(m);
-                    }}
-
-                    if (info.lat && info.lng) {{
-                        map.panTo([info.lat, info.lng]);
-                    }}
-                    
-                    highlightMarkerByInfo(info);
-
-                    let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
-                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    
-                    let lateStr = isLate ? '<span style="color:red; font-weight:bold;">[⚠️ จัดส่งไม่ตรงเวลา]</span>' : '';
-                    let gpsStr = isGpsDiff ? '<span style="color:orange; font-weight:bold;">[⚠️ พิกัดห่างเกิน 100m]</span>' : '';
-
-                    document.getElementById('info-box').innerHTML = `
-                        <b>🚛 กำลังจัดส่งจุดที่ ${{seqNumber}} (${{info.trip || 'คลังสินค้า'}}):</b> รหัสสมาชิก <b>${{info.cust_id}}</b> | 
-                        เวลา: <b>${{info.time}}</b> | ยอดส่ง: <b>${{info.qty}} ถัง</b> | 
-                        สถานะ: <b>${{info.status}}</b> ${{lateStr}} ${{gpsStr}}
-                    `;
-                }}
-
-                function clearCurrentMap() {{
-                    highlightMarkerByInfo(null);
+                    currentStep = stepIndex;
+                    document.getElementById('timeSlider').value = currentStep;
+                    document.getElementById('slider-label').innerText = `จุดที่ ${{currentStep + 1}} / ${{segments.length}}`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
 
-                    stepMarkers.forEach(m => map.removeLayer(m));
-                    stepMarkers = [];
+                    if (!isMode1) {{
+                        stepMarkers.forEach(m => map.removeLayer(m));
+                        stepMarkers = [];
+                    }}
+
+                    for (let i = 0; i <= currentStep; i++) {{
+                        let seg = segments[i];
+                        let polyline = L.polyline(seg.path, {{
+                            color: seg.color,
+                            weight: 5,
+                            opacity: 0.85
+                        }}).addTo(map);
+                        activePolylines.push(polyline);
+
+                        if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
+                            let pIdx = seg.info.point_idx;
+                            let ptInfo = points[pIdx];
+                            if (ptInfo) {{
+                                let seqNumber = pIdx + 1;
+                                let customIcon = L.divIcon({{
+                                    className: 'number-icon',
+                                    html: String(seqNumber),
+                                    iconSize: [12, 12],
+                                    iconAnchor: [6, 6]
+                                }});
+                                let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(map);
+                                marker.on('add', function() {{
+                                    if (marker._icon) {{
+                                        marker._icon.style.backgroundColor = ptInfo.color || '#008CBA';
+                                    }}
+                                }});
+                                marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                                stepMarkers[pIdx] = marker;
+                            }}
+                        }}
+                    }}
+
+                    let currentSeg = segments[currentStep];
+                    let info = currentSeg.info;
+                    
+                    highlightMarkerByInfo(info);
+
+                    let infoBox = document.getElementById('info-box');
+                    let isWH = info.cust_id === "WH-001";
+                    
+                    infoBox.innerHTML = `
+                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
+                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | 
+                        <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | 
+                        <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
+                        <b>📌 สถานะ:</b> ${{info.status}} | 
+                        <b>📏 ระยะห่าง GPS:</b> ${{info.gps_diff}} เมตร
+                    `;
+
+                    let lastPt = currentSeg.path[currentSeg.path.length - 1];
+                    if (lastPt) {{
+                        map.panTo(lastPt);
+                    }}
+                }}
+
+                function nextStep() {{
+                    if (currentStep < segments.length - 1) {{
+                        currentStep++;
+                        updateStep(currentStep);
+                    }} else {{
+                        pauseAnimation();
+                        document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้น!";
+                    }}
                 }}
 
                 function startAnimation() {{
                     if (isPlaying) return;
                     isPlaying = true;
-                    document.getElementById('status-text').innerText = "▶️ กำลังจำลองเส้นทาง...";
-
-                    if (currentStep >= segments.length) {{
-                        resetAnimation();
+                    document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
+                    if (currentStep >= segments.length - 1) {{
+                        currentStep = 0;
                     }}
-
-                    animTimer = setInterval(() => {{
-                        if (currentStep < segments.length) {{
-                            renderStep(currentStep);
-                            currentStep++;
-                        }} else {{
-                            pauseAnimation();
-                            document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้นเรียบร้อย";
-                        }}
-                    }}, currentSpeedMs);
+                    updateStep(currentStep);
+                    animTimer = setInterval(nextStep, currentSpeedMs);
                 }}
 
                 function pauseAnimation() {{
                     isPlaying = false;
-                    if (animTimer) clearInterval(animTimer);
-                    document.getElementById('status-text').innerText = "⏸️ หยุดการจำลองชั่วคราว";
+                    if (animTimer) {{
+                        clearInterval(animTimer);
+                        animTimer = null;
+                    }}
+                    document.getElementById('status-text').innerText = "⏸️ หยุดพักการจำลอง";
                 }}
 
                 function resetAnimation() {{
                     pauseAnimation();
                     currentStep = 0;
-                    clearCurrentMap();
-                    document.getElementById('timeSlider').value = 0;
-                    document.getElementById('slider-label').innerText = `จุดที่ 0 / ${{segments.length}}`;
-                    document.getElementById('status-text').innerText = "🔄 รีเซ็ตการจำลองแล้ว";
-                    document.getElementById('info-box').innerHTML = "📍 **สถานะพิกัด**: กดปุ่ม 'เริ่มเล่น' หรือลากแถบเพื่อดูรายละเอียดเฉพาะจุด";
-                    map.setView([warehouse[0], warehouse[1]], 13);
+                    updateStep(0);
+                    document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
                 }}
 
                 function onSliderChange(val) {{
                     pauseAnimation();
-                    clearCurrentMap();
-                    let targetStep = parseInt(val);
-                    for (let i = 0; i <= targetStep; i++) {{
-                        renderStep(i);
-                    }}
-                    currentStep = targetStep + 1;
-                    document.getElementById('status-text').innerText = `📍 แสดงเส้นทางถึงจุดที่ ${{targetStep + 1}}`;
+                    updateStep(parseInt(val));
+                }}
+
+                // แสดงผลจุดแรกเมื่อเริ่มต้น
+                if (segments.length > 0) {{
+                    updateStep(0);
                 }}
             </script>
         </body>
         </html>
         """
 
-        st.components.v1.html(map_html, height=720, scrolling=False)
+        st.components.v1.html(map_html, height=750, scrolling=False)
