@@ -714,7 +714,7 @@ if uploaded_file:
             <div class="timeline-container">
                 <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
                 <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:130px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">09:00 (จุด 1)</span>
+                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:145px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">09:00 (จุด 1)</span>
             </div>
 
             <div id="map"></div>
@@ -810,14 +810,13 @@ if uploaded_file:
                     let currentSeg = segments[currentStep];
                     let info = currentSeg.info;
 
-                    // อัปเดตค่าและสีของ Slider ตามรอบการส่ง (Trip)
+                    // ปรับแต่งสีและความกะทัดรัดของป้ายเวลาบนสเกลตามรอบการส่ง (Trip)
                     let slider = document.getElementById('timeSlider');
                     slider.value = currentStep;
                     slider.style.accentColor = currentSeg.color;
 
                     let timeLabel = info.time || '-';
-                    document.getElementById('slider-label.innerText = `${timeLabel} (จุด ${currentStep + 1})`' + ``;
-                    document.getElementById('slider-label').innerHTML = `<span style="color:${currentSeg.color}; font-weight:bold;">${timeLabel}</span> (จุด ${currentStep + 1})`;
+                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> (จุด ${{currentStep + 1}})`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
