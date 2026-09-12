@@ -242,14 +242,14 @@ def parse_excel_data(excel_file):
 
         str_e = str(col_e).strip()
 
-        # ปรับ Regex ให้รองรับการดึงค่าความต่าง GPS หลังพิกัด (คอลัมน์ E) ที่เว้นวรรคต่อท้าย เช่น "13.xxxx, 100.xxxx 15.50"
+        # แก้ไข Regex ให้รองรับเครื่องหมายจุลภาค (Comma) ในค่าความต่าง GPS เช่น "1,250.50"
         gps_match = re.search(
-            r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d\.]+))?",
+            r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d,]+\.?\d*))?",
             str_e,
         )
         if not gps_match:
             gps_match = re.search(
-                r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?",
+                r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d,]+\.?\d*))?",
                 str_e,
             )
             if not gps_match:
@@ -261,9 +261,13 @@ def parse_excel_data(excel_file):
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
-        gps_diff_val = (
-            float(gps_match.group(3)) if gps_match.group(3) else 0.0
-        )
+        # ทำความสะอาดสตริงค่าความต่าง GPS โดยตัดคอมมาออกก่อนแปลงเป็นตัวเลข float
+        raw_diff_str = gps_match.group(3) if gps_match.group(3) else "0.0"
+        try:
+            gps_diff_val = float(raw_diff_str.replace(",", ""))
+        except Exception:
+            gps_diff_val = 0.0
+
         gps_diff_str = f"{gps_diff_val:.2f}"
 
         cust_id = str(col_a).strip() if pd.notna(col_a) else "N/A"
