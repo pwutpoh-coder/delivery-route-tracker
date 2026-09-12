@@ -242,6 +242,7 @@ def parse_excel_data(excel_file):
 
         str_e = str(col_e).strip()
 
+        # ปรับ Regex ให้รองรับการดึงค่าความต่าง GPS หลังพิกัด (คอลัมน์ E) ที่เว้นวรรคต่อท้าย เช่น "13.xxxx, 100.xxxx 15.50"
         gps_match = re.search(
             r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d\.]+))?",
             str_e,
@@ -747,17 +748,17 @@ if uploaded_file:
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
                     let lateBadge = isLate ? `<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>` : `<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`;
-                    let gpsBadge = isGpsDiff ? `<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m</span>` : '';
+                    let gpsBadge = isGpsDiff ? `<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m (${{info.gps_diff}}m)</span>` : `<span style="font-size:11px; color:#666;"> (ต่าง GPS: ${{info.gps_diff}}m)</span>`;
 
                     return `
                         <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b> ${{lateBadge}}${{gpsBadge}}<br>
+                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b> ${{lateBadge}}<br>
                             <b>เวลา:</b> ${{info.time || '-'}}<br>
-                            <b>สมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
+                            <b>รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
                             <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
                             <b>พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}}<br>
                             <b>สถานะ:</b> ${{info.status}}<br>
-                            <b>ต่าง GPS:</b> ${{info.gps_diff || '0.00'}} m
+                            <b>ค่าความต่าง GPS:</b> <b>${{info.gps_diff || '0.00'}} ม.</b> ${{gpsBadge}}
                         </div>
                     `;
                 }}
@@ -817,8 +818,7 @@ if uploaded_file:
                     let timeLabel = info.time || '-';
                     let custIdLabel = info.cust_id || '-';
                     
-                    // อัปเดตข้อความบนป้ายกำกับสเกลช่วงเวลาให้แสดง เวลา, รหัสสมาชิก และจุดที่ส่งอย่างชัดเจน
-                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{currentStep + 1}})`;
+                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">รหัส: ${{custIdLabel}}</span> (จุด ${{currentStep + 1}})`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
@@ -855,8 +855,8 @@ if uploaded_file:
                     infoBox.innerHTML = `
                         <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
                         <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
-                        <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span><br>
-                        <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
+                        <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
+                        <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
                     `;
 
                     let lastPt = currentSeg.path[currentSeg.path.length - 1];
