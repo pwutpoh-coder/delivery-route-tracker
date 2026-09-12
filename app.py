@@ -455,14 +455,16 @@ if uploaded_file:
 
         def get_notification_badge(row):
             notices = []
-            is_special = (
+            has_special_tag = (
                 row.get("is_extra_trip")
-                or row.get("is_cannot_calc")
                 or row.get("is_moved_trip")
+                or row.get("is_cannot_calc")
+                or row.get("is_new_member")
             )
+
             if "ไม่ตรงเวลา" in str(row["status"]):
                 notices.append("จัดส่งไม่ตรงเวลา")
-            elif not is_special:
+            elif not has_special_tag:
                 notices.append("จัดส่งตรงเวลา")
 
             if row["gps_diff_num"] > 100:
@@ -826,7 +828,7 @@ if uploaded_file:
                     
                     let badgesHtml = [];
                     if (isLate) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>`);
-                    else if (!info.is_extra_trip && !info.is_cannot_calc && !info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">จัดส่งตรงเวลา</span>`);
+                    else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`);
 
                     if (isGpsDiff) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m (${{info.gps_diff}}m)</span>`);
                     if (info.is_extra_trip) badgesHtml.push(`<span class="alert-badge" style="background:#8E44AD;">รอบเสริม</span>`);
