@@ -286,7 +286,6 @@ def parse_excel_data(excel_file):
 
         str_f = str(col_f).strip() if pd.notna(col_f) else ""
 
-        # ตรวจสอบเงื่อนไขเพิ่มเติมจากคอลัมน์ F
         is_extra_trip = "รอบเสริม" in str_f
         is_cannot_calc = (
             "ไม่สามารถคำนวณได้" in str_f or "คำนวณไม่ได้" in str_f
@@ -454,6 +453,7 @@ if uploaded_file:
 
         st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน")
 
+
         def get_notification_badge(row):
             notices = []
             if "ไม่ตรงเวลา" in str(row["status"]):
@@ -471,6 +471,7 @@ if uploaded_file:
             if row.get("is_moved_trip"):
                 notices.append("ย้ายรอบ")
             return " | ".join(notices)
+
 
         disp_df = df[[
             "time",
@@ -660,6 +661,10 @@ if uploaded_file:
                 button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
                 button:hover {{ background-color: #005f73; transform: scale(1.02); }}
                 
+                .filter-bar {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
+                .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
+                .filter-btn.active {{ background-color: #2c3e50; color: white; }}
+
                 .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
                 .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
                 
@@ -761,6 +766,14 @@ if uploaded_file:
                 <div class="legend-item"><span style="background:#2980B9; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ย</span> ย้ายรอบ</div>
             </div>
 
+            <div class="filter-bar">
+                <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองการแสดงผลแผนที่:</span>
+                <button class="filter-btn active" id="btn-all" onclick="setTripFilter('ALL')">แสดงทั้งหมด</button>
+                <button class="filter-btn" id="btn-trip1" onclick="setTripFilter('เที่ยวที่ 1')">เที่ยวที่ 1</button>
+                <button class="filter-btn" id="btn-trip2" onclick="setTripFilter('เที่ยวที่ 2')">เที่ยวที่ 2</button>
+                <button class="filter-btn" id="btn-trip3" onclick="setTripFilter('เที่ยวที่ 3')">เที่ยวที่ 3</button>
+            </div>
+
             <div class="controls">
                 <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
                 <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
@@ -783,6 +796,8 @@ if uploaded_file:
                 const warehouse = {wh_json};
                 const isMode1 = {str(is_mode_1).lower()};
                 let currentSpeedMs = {anim_speed_ms};
+
+                let currentFilter = 'ALL';
 
                 const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
@@ -848,14 +863,46 @@ if uploaded_file:
                     }});
                 }}
 
-                if (isMode1) {{
-                    points.forEach((pt, idx) => {{
-                        let seqNumber = idx + 1;
-                        let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
-                        let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
-                        marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
-                        allMarkers.push(marker);
+                function initMarkers() {{
+                    allMarkers.forEach(m => map.removeLayer(m));
+                    allMarkers = [];
+
+                    if (isMode1) {{
+                        points.forEach((pt, idx) => {{
+                            if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
+                                let seqNumber = idx + 1;
+                                let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
+                                let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
+                                marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                                allMarkers[idx] = marker;
+                            }}
+                        }});
+                    }}
+                }}
+
+                initMarkers();
+
+                function setTripFilter(filterName) {{
+                    pauseAnimation();
+                    currentFilter = filterName;
+
+                    ['btn-all', 'btn-trip1', 'btn-trip2', 'btn-trip3'].forEach(id => {{
+                        let el = document.getElementById(id);
+                        if (el) el.classList.remove('active');
                     }});
+
+                    if (filterName === 'ALL') document.getElementById('btn-all').classList.add('active');
+                    else if (filterName === 'เที่ยวที่ 1') document.getElementById('btn-trip1').classList.add('active');
+                    else if (filterName === 'เที่ยวที่ 2') document.getElementById('btn-trip2').classList.add('active');
+                    else if (filterName === 'เที่ยวที่ 3') document.getElementById('btn-trip3').classList.add('active');
+
+                    initMarkers();
+
+                    let firstMatchIdx = segments.findIndex(seg => currentFilter === 'ALL' || seg.trip === currentFilter);
+                    if (firstMatchIdx !== -1) {{
+                        currentStep = firstMatchIdx;
+                        updateStep(currentStep);
+                    }}
                 }}
 
                 function highlightMarkerByInfo(info) {{
@@ -879,6 +926,21 @@ if uploaded_file:
 
                     currentStep = stepIndex;
                     let currentSeg = segments[currentStep];
+
+                    if (currentFilter !== 'ALL' && currentSeg.trip !== currentFilter) {{
+                        let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && (currentFilter === 'ALL' || seg.trip === currentFilter));
+                        if (nextValid !== -1) {{
+                            currentStep = nextValid;
+                            currentSeg = segments[currentStep];
+                        }} else {{
+                            let prevValid = segments.map((s, i) => i).reverse().find(i => currentFilter === 'ALL' || segments[i].trip === currentFilter);
+                            if (prevValid !== undefined) {{
+                                currentStep = prevValid;
+                                currentSeg = segments[currentStep];
+                            }}
+                        }}
+                    }}
+
                     let info = currentSeg.info;
 
                     let slider = document.getElementById('timeSlider');
@@ -901,6 +963,8 @@ if uploaded_file:
                     let accumulatedDistance = 0.0;
                     for (let i = 0; i <= currentStep; i++) {{
                         let seg = segments[i];
+                        if (currentFilter !== 'ALL' && seg.trip !== currentFilter) continue;
+
                         accumulatedDistance += (seg.dist_km || 0.0);
 
                         let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
@@ -934,8 +998,14 @@ if uploaded_file:
                 }}
 
                 function nextStep() {{
-                    if (currentStep < segments.length - 1) {{
-                        currentStep++;
+                    let nextIdx = currentStep + 1;
+                    while (nextIdx < segments.length) {{
+                        if (currentFilter === 'ALL' || segments[nextIdx].trip === currentFilter) break;
+                        nextIdx++;
+                    }}
+
+                    if (nextIdx < segments.length) {{
+                        currentStep = nextIdx;
                         updateStep(currentStep);
                     }} else {{
                         pauseAnimation();
@@ -947,7 +1017,6 @@ if uploaded_file:
                     if (isPlaying) return;
                     isPlaying = true;
                     document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
-                    if (currentStep >= segments.length - 1) {{ currentStep = 0; }}
                     updateStep(currentStep);
                     animTimer = setInterval(nextStep, currentSpeedMs);
                 }}
@@ -960,8 +1029,9 @@ if uploaded_file:
 
                 function resetAnimation() {{
                     pauseAnimation();
-                    currentStep = 0;
-                    updateStep(0);
+                    let firstMatchIdx = segments.findIndex(seg => currentFilter === 'ALL' || seg.trip === currentFilter);
+                    currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
+                    updateStep(currentStep);
                     document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
                 }}
 
@@ -976,4 +1046,4 @@ if uploaded_file:
         </html>
         """
 
-        st.components.v1.html(map_html, height=750, scrolling=False)
+        st.components.v1.html(map_html, height=800, scrolling=False)
