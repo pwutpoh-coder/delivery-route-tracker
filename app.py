@@ -22,74 +22,64 @@ st.markdown(
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
 st.sidebar.header("📍 ตั้งค่าคลังสินค้า (Warehouse)")
 
+warehouse_options = {
+    "สาขาบางพลี": (13.593901, 100.80256),
+    "สาขาสำโรง": (13.660759, 100.593191),
+    "สาขากิ่งแก้ว": (13.614988, 100.700414),
+    "สาขาประเวศ": (13.711951, 100.689231),
+    "สาขาวังน้อย": (14.270937, 100.756769),
+    "สาขาดอนเมือง": (13.949959, 100.612249),
+    "สาขาปทุมธานี": (14.037360, 100.606717),
+    "สาขาปากเกร็ด": (13.937801, 100.507829),
+    "สาขารามอินทรา": (13.832754, 100.714387),
+    "สาขากรุงเทพกรีฑา": (13.743777, 100.673184),
+    "สาขาสุขุมวิท 50": (13.699439, 100.587817),
+    "สาขาพระราม 3": (13.684123, 100.548952),
+    "สาขาบุคคโล": (13.698775, 100.487137),
+    "สาขาราษฎร์บูรณะ": (13.684947, 100.496656),
+    "สาขาพระราม 2": (13.612861, 100.384407),
+    "สาขาพุทธมณฑลสาย1": (13.729497, 100.428533),
+    "สาขาบางบัวทอง": (13.909905, 100.407209),
+    "สาขาประชาชื่น": (13.837436, 100.53875309),
+    "คลังประชาชื่น": (13.837436, 100.538753),
+    "อื่นๆ (ระบุพิกัดเอง)": None,
+}
 
-def geocode_location(location_str):
-    if not location_str or not location_str.strip():
-        return None, None
-
-    clean_str = location_str.strip()
-    coord_match = re.match(r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", clean_str)
-    if coord_match:
-        lat, lng = float(coord_match.group(1)), float(coord_match.group(2))
-        return (lat, lng), f"พิกัดแบบระบุเอง ({lat:.5f}, {lng:.5f})"
-
-    headers = {
-        "User-Agent": (
-            "SprinkleDeliveryApp/3.1 (Contact: delivery_admin@sprinkle.co.th)"
-        ),
-        "Accept-Language": "th,en;q=0.9",
-    }
-
-    search_queries = [
-        clean_str,
-        f"{clean_str} ประเทศไทย",
-        f"{clean_str} Thailand",
-    ]
-
-    for query in search_queries:
-        url = f"https://nominatim.openstreetmap.org/search?q={requests.utils.quote(query)}&format=json&limit=1&countrycodes=th"
-        try:
-            res = requests.get(url, headers=headers, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                if data and len(data) > 0:
-                    lat = float(data[0]["lat"])
-                    lon = float(data[0]["lon"])
-                    display_name = data[0].get("display_name", clean_str)
-                    return (lat, lon), display_name
-        except Exception:
-            continue
-
-    return None, None
-
-
-wh_input = st.sidebar.text_input(
-    "กรอกชื่อสถานที่ หรือ พิกัด (Lat, Lng):",
-    value="",
-    placeholder="ตัวอย่าง: คลังสินค้า บางนา, บางนา, หรือ 13.66800, 100.61000",
-    help="สามารถพิมพ์ชื่อสถานที่ ภาษาไทย ภาษาอังกฤษ หรือพิกัด Lat, Lng ได้โดยตรง",
+selected_wh_name = st.sidebar.selectbox(
+    "เลือกสาขาคลังสินค้า:", list(warehouse_options.keys())
 )
 
-DEFAULT_WAREHOUSE = (13.66800, 100.61000)
-
-if wh_input.strip():
-    warehouse_coord, location_display_name = geocode_location(wh_input)
-    if warehouse_coord:
-        st.sidebar.success(
-            f"📍 พบพิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}"
+if selected_wh_name == "อื่นๆ (ระบุพิกัดเอง)":
+    wh_input = st.sidebar.text_input(
+        "กรอกพิกัด (Lat, Lng) หรือชื่อสถานที่:",
+        value="",
+        placeholder="ตัวอย่าง: 13.66800, 100.61000",
+    )
+    if wh_input.strip():
+        coord_match = re.match(
+            r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", wh_input.strip()
         )
-        if location_display_name:
-            st.sidebar.caption(
-                f"🏢 **สถานที่:** {location_display_name[:60]}..."
+        if coord_match:
+            warehouse_coord = (
+                float(coord_match.group(1)),
+                float(coord_match.group(2)),
+            )
+            st.sidebar.success(
+                f"พบพิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}"
+            )
+        else:
+            warehouse_coord = (13.66800, 100.61000)
+            st.sidebar.info(
+                "ใช้พิกัดเริ่มต้นสำรอง เนื่องจากรูปแบบพิกัดไม่ถูกต้อง"
             )
     else:
-        st.sidebar.warning(
-            "⚠️ ไม่พบพิกัดจากชื่อสถานที่นี้ (ใช้พิกัดเริ่มต้นสำรอง บางนา)"
-        )
-        warehouse_coord = DEFAULT_WAREHOUSE
+        warehouse_coord = (13.66800, 100.61000)
+        st.sidebar.info("ใช้พิกัดเริ่มต้นสำรอง (บางนา)")
 else:
-    st.sidebar.info("ℹ️ ใช้พิกัดคลังสินค้าเริ่มต้น (13.66800, 100.61000)")
-    warehouse_coord = DEFAULT_WAREHOUSE
+    warehouse_coord = warehouse_options[selected_wh_name]
+    st.sidebar.success(
+        f"เลือก {selected_wh_name} (พิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f})"
+    )
 
 st.sidebar.divider()
 
@@ -131,7 +121,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
             if data.get("routes"):
                 route = data["routes"][0]
                 coords = route["geometry"]["coordinates"]
-                distance_km = route["distance"] / 1000.0  # แปลงเมตรเป็นกิโลเมตร
+                distance_km = route["distance"] / 1000.0
                 return [[pt[1], pt[0]] for pt in coords], distance_km
     except Exception:
         pass
@@ -157,7 +147,6 @@ def parse_excel_data(excel_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
     raw_df = pd.read_excel(excel_file, header=None)
 
-    # 1. ดึงข้อมูลหัวกระดาษ (Header Info)
     try:
         header_blob = " ".join(
             raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten()
@@ -179,13 +168,16 @@ def parse_excel_data(excel_file):
     except Exception:
         pass
 
-    # 2. ค้นหาใบเบิก (DW) และใบคืน (RE) จากคอลัมน์ A พร้อมจำนวนจากคอลัมน์ D
     dw_records = []
     re_records = []
 
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
-        col_a = str(row.iloc[0]).strip() if 0 < len(row) and pd.notna(row.iloc[0]) else ""
+        col_a = (
+            str(row.iloc[0]).strip()
+            if 0 < len(row) and pd.notna(row.iloc[0])
+            else ""
+        )
         col_d = row.iloc[3] if 3 < len(row) and pd.notna(row.iloc[3]) else 0
 
         try:
@@ -196,12 +188,16 @@ def parse_excel_data(excel_file):
         if "DW" in col_a.upper():
             num_match = re.search(r"(\d+)$", col_a)
             sort_key = int(num_match.group(1)) if num_match else idx
-            dw_records.append({"sort_key": sort_key, "qty": qty_val, "raw_text": col_a})
+            dw_records.append(
+                {"sort_key": sort_key, "qty": qty_val, "raw_text": col_a}
+            )
 
         elif "RE" in col_a.upper():
             num_match = re.search(r"(\d+)$", col_a)
             sort_key = int(num_match.group(1)) if num_match else idx
-            re_records.append({"sort_key": sort_key, "qty": qty_val, "raw_text": col_a})
+            re_records.append(
+                {"sort_key": sort_key, "qty": qty_val, "raw_text": col_a}
+            )
 
     dw_records = sorted(dw_records, key=lambda x: x["sort_key"])
     re_records = sorted(re_records, key=lambda x: x["sort_key"])
@@ -211,18 +207,27 @@ def parse_excel_data(excel_file):
         dw_q = dw["qty"]
         re_q = re_records[i]["qty"] if i < len(re_records) else 0
         net_qty = max(0, dw_q - re_q)
-        trip_quotas.append({
-            "trip_no": i + 1,
-            "dws_qty": dw_q,
-            "res_qty": re_q,
-            "net_qty": net_qty,
-            "dw_text": dw["raw_text"],
-        })
+        trip_quotas.append(
+            {
+                "trip_no": i + 1,
+                "dws_qty": dw_q,
+                "res_qty": re_q,
+                "net_qty": net_qty,
+                "dw_text": dw["raw_text"],
+            }
+        )
 
     if not trip_quotas:
-        trip_quotas = [{"trip_no": 1, "dws_qty": 80, "res_qty": 0, "net_qty": 80, "dw_text": "DEFAULT"}]
+        trip_quotas = [
+            {
+                "trip_no": 1,
+                "dws_qty": 80,
+                "res_qty": 0,
+                "net_qty": 80,
+                "dw_text": "DEFAULT",
+            }
+        ]
 
-    # 3. แยกแยะข้อมูลลูกค้ารายตัว (คอลัมน์ A รหัสลูกค้า, คอลัมน์ C จำนวน, คอลัมน์ E พิกัด GPS, คอลัมน์ F เวลาและสถานะ)
     records = []
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
@@ -230,7 +235,7 @@ def parse_excel_data(excel_file):
         col_a = row.iloc[0] if 0 < len(row) else None
         col_c = row.iloc[2] if 2 < len(row) else None
         col_e = row.iloc[4] if 4 < len(row) else None
-        col_f = row.iloc[5] if 5 < len(row) else None  # ข้อมูลเวลาและสถานะอยู่คอลัมน์ F
+        col_f = row.iloc[5] if 5 < len(row) else None
 
         if pd.isna(col_e):
             continue
@@ -238,11 +243,13 @@ def parse_excel_data(excel_file):
         str_e = str(col_e).strip()
 
         gps_match = re.search(
-            r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d\.]+))?", str_e
+            r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d\.]+))?",
+            str_e,
         )
         if not gps_match:
             gps_match = re.search(
-                r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?", str_e
+                r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?",
+                str_e,
             )
             if not gps_match:
                 continue
@@ -253,14 +260,19 @@ def parse_excel_data(excel_file):
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
-        gps_diff_val = float(gps_match.group(3)) if gps_match.group(3) else 0.0
+        gps_diff_val = (
+            float(gps_match.group(3)) if gps_match.group(3) else 0.0
+        )
         gps_diff_str = f"{gps_diff_val:.2f}"
 
         cust_id = str(col_a).strip() if pd.notna(col_a) else "N/A"
-        if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"] or "DW" in cust_id.upper() or "RE" in cust_id.upper():
+        if (
+            cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"]
+            or "DW" in cust_id.upper()
+            or "RE" in cust_id.upper()
+        ):
             continue
 
-        # ดึงจำนวนจากคอลัมน์ C (รองรับกรณีค่าว่าง เป็น 0 ถังได้)
         try:
             if pd.notna(col_c) and str(col_c).strip() != "":
                 qty = int(float(col_c))
@@ -269,47 +281,58 @@ def parse_excel_data(excel_file):
         except Exception:
             qty = 0
 
-        # ดึงเวลาและสถานะจากคอลัมน์ F ตามแพทเทิร์น เช่น "09:30 น." และข้อความสถานะด้านหลัง
         str_f = str(col_f).strip() if pd.notna(col_f) else ""
         time_match = re.search(r"(\d{1,2}:\d{2}\s*น\.)", str_f)
         if not time_match:
             time_match = re.search(r"(\d{1,2}:\d{2})", str_f)
-            delivery_time = time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
+            delivery_time = (
+                time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
+            )
         else:
             delivery_time = time_match.group(1)
 
-        time_sort_key = time_match.group(1) if time_match else f"99:{idx:02d}"
+        time_sort_key = (
+            time_match.group(1) if time_match else f"99:{idx:02d}"
+        )
 
-        # ดึงข้อความสถานะที่อยู่หลังจากเวลาในคอลัมน์ F
-        status_part = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_f).strip()
+        status_part = re.sub(
+            r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_f
+        ).strip()
         if not status_part:
             status_part = "จัดส่งตรงเวลา"
-        
+
         status = status_part
 
-        lat_str = f"{lat:.5f}" if len(str(lat).split(".")[1]) < 5 else str(lat)
-        lng_str = f"{lng:.5f}" if len(str(lng).split(".")[1]) < 5 else str(lng)
+        lat_str = (
+            f"{lat:.5f}" if len(str(lat).split(".")[1]) < 5 else str(lat)
+        )
+        lng_str = (
+            f"{lng:.5f}" if len(str(lng).split(".")[1]) < 5 else str(lng)
+        )
 
-        records.append({
-            "excel_idx": idx,
-            "cust_id": cust_id,
-            "qty": qty,
-            "lat": lat,
-            "lng": lng,
-            "lat_display": lat_str,
-            "lng_display": lng_str,
-            "gps_diff": gps_diff_str,
-            "gps_diff_num": gps_diff_val,
-            "time": delivery_time,
-            "time_key": time_sort_key,
-            "status": status,
-        })
+        records.append(
+            {
+                "excel_idx": idx,
+                "cust_id": cust_id,
+                "qty": qty,
+                "lat": lat,
+                "lng": lng,
+                "lat_display": lat_str,
+                "lng_display": lng_str,
+                "gps_diff": gps_diff_str,
+                "gps_diff_num": gps_diff_val,
+                "time": delivery_time,
+                "time_key": time_sort_key,
+                "status": status,
+            }
+        )
 
     df_raw = pd.DataFrame(records)
     if not df_raw.empty:
-        df_raw = df_raw.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
+        df_raw = df_raw.sort_values(
+            by=["time_key", "excel_idx"]
+        ).reset_index(drop=True)
 
-        # ตัดยอดและจัดสรรตามยอดส่งสุทธิ (เป้าหมาย) ของแต่ละเที่ยวอย่างแม่นยำ
         assigned_records = []
         curr_trip_idx = 0
         curr_trip_sum = 0
@@ -322,7 +345,11 @@ def parse_excel_data(excel_file):
             target_net = trip_quotas[curr_trip_idx]["net_qty"]
 
             remaining_needed = target_net - curr_trip_sum
-            if r["qty"] > remaining_needed and curr_trip_idx + 1 < len(trip_quotas) and remaining_needed > 0:
+            if (
+                r["qty"] > remaining_needed
+                and curr_trip_idx + 1 < len(trip_quotas)
+                and remaining_needed > 0
+            ):
                 r1 = r.copy()
                 r1["qty"] = remaining_needed
                 r1["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
@@ -337,7 +364,10 @@ def parse_excel_data(excel_file):
 
                 while remainder_qty > 0 and curr_trip_idx < len(trip_quotas):
                     next_target = trip_quotas[curr_trip_idx]["net_qty"]
-                    if remainder_qty > next_target and curr_trip_idx + 1 < len(trip_quotas):
+                    if (
+                        remainder_qty > next_target
+                        and curr_trip_idx + 1 < len(trip_quotas)
+                    ):
                         r2 = r.copy()
                         r2["qty"] = next_target
                         r2["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
@@ -364,7 +394,10 @@ def parse_excel_data(excel_file):
                 r["acc_qty"] = total_acc
                 assigned_records.append(r)
 
-                if curr_trip_sum >= target_net and curr_trip_idx + 1 < len(trip_quotas):
+                if (
+                    curr_trip_sum >= target_net
+                    and curr_trip_idx + 1 < len(trip_quotas)
+                ):
                     curr_trip_idx += 1
                     curr_trip_sum = 0
 
@@ -403,16 +436,16 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (ข้อมูลจากคอลัมน์ F)")
-        
+        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน")
+
         def get_notification_badge(row):
             notices = []
             if "ไม่ตรงเวลา" in str(row["status"]):
-                notices.append("⚠️ จัดส่งไม่ตรงเวลา")
+                notices.append("จัดส่งไม่ตรงเวลา")
             else:
-                notices.append("✅ จัดส่งตรงเวลา")
+                notices.append("จัดส่งตรงเวลา")
             if row["gps_diff_num"] > 100:
-                notices.append(f"📡 GPS ห่าง {row['gps_diff']}m")
+                notices.append(f"GPS ห่าง {row['gps_diff']}m")
             return " | ".join(notices)
 
         disp_df = df[[
@@ -426,16 +459,16 @@ if uploaded_file:
             "lng_display",
             "gps_diff",
         ]].copy()
-        
+
         disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
 
         disp_df.columns = [
-            "เวลาส่ง (คอลัมน์ F)",
+            "เวลาส่ง",
             "เที่ยวส่ง",
             "รหัสสมาชิก",
             "ยอดส่ง (ถัง)",
             "ยอดส่งสะสม",
-            "สถานะการส่ง (คอลัมน์ F)",
+            "สถานะการส่ง",
             "Latitude",
             "Longitude",
             "ค่าความต่าง GPS",
@@ -454,9 +487,7 @@ if uploaded_file:
             "เที่ยวที่ 4": "#AA00FF",
         }
 
-        with st.spinner(
-            "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (OSRM Routing)..."
-        ):
+        with st.spinner("กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม..."):
             segments_data = []
             grouped = df.groupby("trip", sort=False)
 
@@ -511,18 +542,38 @@ if uploaded_file:
 
         c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
 
-        st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง (Trip Summary)")
+        st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง")
         summaries = []
         for idx, t_info in enumerate(trip_quotas):
             trip_name = f"เที่ยวที่ {t_info['trip_no']}"
-            group = df[df["trip"] == trip_name] if trip_name in df["trip"].values else pd.DataFrame()
+            group = (
+                df[df["trip"] == trip_name]
+                if trip_name in df["trip"].values
+                else pd.DataFrame()
+            )
             t_dist = trip_distances.get(trip_name, 0.0)
 
             actual_qty = group["qty"].sum() if not group.empty else 0
             point_count = len(group)
-            ontime_count = len(group[~group["status"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
-            late_count = len(group[group["status"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
-            gps_err_count = len(group[group["gps_diff_num"] > 100]) if not group.empty else 0
+            ontime_count = (
+                len(
+                    group[
+                        ~group["status"].str.contains("ไม่ตรงเวลา", na=False)
+                    ]
+                )
+                if not group.empty
+                else 0
+            )
+            late_count = (
+                len(group[group["status"].str.contains("ไม่ตรงเวลา", na=False)])
+                if not group.empty
+                else 0
+            )
+            gps_err_count = (
+                len(group[group["gps_diff_num"] > 100])
+                if not group.empty
+                else 0
+            )
 
             summaries.append({
                 "เที่ยวการส่ง": trip_name,
@@ -551,8 +602,12 @@ if uploaded_file:
             "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
             "จำนวนจุดส่ง (จุด)": len(df),
             "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
-            "จัดส่งตรงเวลา (จุด)": len(df[~df["status"].str.contains("ไม่ตรงเวลา", na=False)]),
-            "จัดส่งไม่ตรงเวลา (จุด)": len(df[df["status"].str.contains("ไม่ตรงเวลา", na=False)]),
+            "จัดส่งตรงเวลา (จุด)": len(
+                df[~df["status"].str.contains("ไม่ตรงเวลา", na=False)]
+            ),
+            "จัดส่งไม่ตรงเวลา (จุด)": len(
+                df[df["status"].str.contains("ไม่ตรงเวลา", na=False)]
+            ),
             "GPS คลาดเคลื่อน >100m (จุด)": len(df[df["gps_diff_num"] > 100]),
         })
 
@@ -634,8 +689,6 @@ if uploaded_file:
                 }}
 
                 .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
-                .badge-late {{ background-color: #d9534f; }}
-                .badge-gps {{ background-color: #f0ad4e; color: #000; }}
             </style>
         </head>
         <body>
@@ -645,10 +698,10 @@ if uploaded_file:
                 <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3</div>
                 <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4</div>
                 <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
-                <div class="legend-item"><span>⏰ = ส่งไม่ตรงเวลา</span></div>
-                <div class="legend-item"><span>📡 = GPS ต่าง >100m</span></div>
+                <div class="legend-item"><span>ส่งไม่ตรงเวลา</span></div>
+                <div class="legend-item"><span>GPS ต่าง >100m</span></div>
                 <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
-                <div class="legend-item" style="color:#008CBA;"><span>🏁 ระยะทางรวมทั้งหมด: {total_day_distance:.2f} กม.</span></div>
+                <div class="legend-item" style="color:#008CBA;"><span>ระยะทางรวมทั้งหมด: {total_day_distance:.2f} กม.</span></div>
             </div>
 
             <div class="controls">
@@ -693,8 +746,8 @@ if uploaded_file:
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    let lateBadge = isLate ? `<span class="alert-badge badge-late">⏰ ${{info.status}}</span>` : `<span class="alert-badge" style="background:#4CAF50;">✅ ${{info.status}}</span>`;
-                    let gpsBadge = isGpsDiff ? `<span class="alert-badge badge-gps">📡 GPS ห่าง >100m</span>` : '';
+                    let lateBadge = isLate ? `<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>` : `<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`;
+                    let gpsBadge = isGpsDiff ? `<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m</span>` : '';
 
                     return `
                         <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
@@ -713,8 +766,8 @@ if uploaded_file:
                     let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
                     
-                    let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="จัดส่งไม่ตรงเวลา">⏰</div>` : '';
-                    let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">📡</div>` : '';
+                    let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="จัดส่งไม่ตรงเวลา">!</div>` : '';
+                    let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">S</div>` : '';
 
                     return L.divIcon({{
                         className: '',
