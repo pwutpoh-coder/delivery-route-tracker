@@ -714,7 +714,7 @@ if uploaded_file:
             <div class="timeline-container">
                 <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
                 <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:145px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">09:00 (จุด 1)</span>
+                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:280px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">09:00 - รหัส (จุด 1)</span>
             </div>
 
             <div id="map"></div>
@@ -810,13 +810,15 @@ if uploaded_file:
                     let currentSeg = segments[currentStep];
                     let info = currentSeg.info;
 
-                    // ปรับแต่งสีและความกะทัดรัดของป้ายเวลาบนสเกลตามรอบการส่ง (Trip)
                     let slider = document.getElementById('timeSlider');
                     slider.value = currentStep;
                     slider.style.accentColor = currentSeg.color;
 
                     let timeLabel = info.time || '-';
-                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> (จุด ${{currentStep + 1}})`;
+                    let custIdLabel = info.cust_id || '-';
+                    
+                    // อัปเดตข้อความบนป้ายกำกับสเกลช่วงเวลาให้แสดง เวลา, รหัสสมาชิก และจุดที่ส่งอย่างชัดเจน
+                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{currentStep + 1}})`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
@@ -852,7 +854,7 @@ if uploaded_file:
                     let infoBox = document.getElementById('info-box');
                     infoBox.innerHTML = `
                         <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
-                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
+                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
                         <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span><br>
                         <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
                     `;
