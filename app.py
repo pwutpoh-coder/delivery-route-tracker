@@ -494,7 +494,11 @@ if uploaded_file:
 
         disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
 
+        # แทรกคอลัมน์ "ลำดับ" ให้เริ่มต้นที่ 1
+        disp_df.insert(0, "ลำดับ", range(1, len(disp_df) + 1))
+
         disp_df.columns = [
+            "ลำดับ",
             "เวลาส่ง",
             "เที่ยวส่ง",
             "รหัสสมาชิก",
