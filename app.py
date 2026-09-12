@@ -510,7 +510,9 @@ if uploaded_file:
             "ค่าความต่าง GPS",
             "สรุปการแจ้งเตือน",
         ]
-        st.dataframe(disp_df, use_container_width=True, height=350)
+        
+        # เพิ่ม hide_index=True เพื่อซ่อน Index อัตโนมัติ (0, 1, 2...) ของ Pandas
+        st.dataframe(disp_df, use_container_width=True, height=350, hide_index=True)
 
         st.divider()
 
