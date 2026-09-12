@@ -637,7 +637,7 @@ if uploaded_file:
                 button:hover {{ background-color: #005f73; transform: scale(1.02); }}
                 
                 .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
-                .timeline-slider {{ flex-grow: 1; height: 6px; cursor: pointer; }}
+                .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
                 
                 #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
                 .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
@@ -712,9 +712,9 @@ if uploaded_file:
             </div>
 
             <div class="timeline-container">
-                <span style="font-weight:bold; font-size:13px;">⏱️ เลื่อนช่วงเวลา:</span>
+                <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
                 <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:80px; text-align:right;">จุดที่ 0 / {len(segments_data)}</span>
+                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:130px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">09:00 (จุด 1)</span>
             </div>
 
             <div id="map"></div>
@@ -807,8 +807,17 @@ if uploaded_file:
                     if (stepIndex < 0 || stepIndex >= segments.length) return;
 
                     currentStep = stepIndex;
-                    document.getElementById('timeSlider').value = currentStep;
-                    document.getElementById('slider-label').innerText = `จุดที่ ${{currentStep + 1}} / ${{segments.length}}`;
+                    let currentSeg = segments[currentStep];
+                    let info = currentSeg.info;
+
+                    // อัปเดตค่าและสีของ Slider ตามรอบการส่ง (Trip)
+                    let slider = document.getElementById('timeSlider');
+                    slider.value = currentStep;
+                    slider.style.accentColor = currentSeg.color;
+
+                    let timeLabel = info.time || '-';
+                    document.getElementById('slider-label.innerText = `${timeLabel} (จุด ${currentStep + 1})`' + ``;
+                    document.getElementById('slider-label').innerHTML = `<span style="color:${currentSeg.color}; font-weight:bold;">${timeLabel}</span> (จุด ${currentStep + 1})`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
@@ -839,8 +848,6 @@ if uploaded_file:
                         }}
                     }}
 
-                    let currentSeg = segments[currentStep];
-                    let info = currentSeg.info;
                     highlightMarkerByInfo(info);
 
                     let infoBox = document.getElementById('info-box');
