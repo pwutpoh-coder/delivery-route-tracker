@@ -260,11 +260,14 @@ def parse_excel_data(excel_file):
         if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"] or "DW" in cust_id.upper() or "RE" in cust_id.upper():
             continue
 
-        # ดึงจำนวนจากคอลัมน์ C
+        # ดึงจำนวนจากคอลัมน์ C (รองรับกรณีค่าว่าง เป็น 0 ถังได้)
         try:
-            qty = int(float(col_c)) if pd.notna(col_c) else 1
+            if pd.notna(col_c) and str(col_c).strip() != "":
+                qty = int(float(col_c))
+            else:
+                qty = 0
         except Exception:
-            qty = 1
+            qty = 0
 
         # ดึงเวลาและสถานะจากคอลัมน์ F ตามแพทเทิร์น เช่น "09:30 น." และข้อความสถานะด้านหลัง
         str_f = str(col_f).strip() if pd.notna(col_f) else ""
