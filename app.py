@@ -222,7 +222,7 @@ def parse_excel_data(excel_file):
     if not trip_quotas:
         trip_quotas = [{"trip_no": 1, "dws_qty": 80, "res_qty": 0, "net_qty": 80, "dw_text": "DEFAULT"}]
 
-    # 3. แยกแยะข้อมูลลูกค้ารายตัว (ตรวจสอบคอลัมน์ A รหัสลูกค้า, คอลัมน์ E พิกัด GPS, คอลัมน์ D เวลาส่ง)
+    # 3. แยกแยะข้อมูลลูกค้ารายตัว (คอลัมน์ A รหัสลูกค้า, คอลัมน์ C จำนวน, คอลัมน์ D เวลา/สถานะ, คอลัมน์ E พิกัด GPS)
     records = []
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
@@ -237,12 +237,10 @@ def parse_excel_data(excel_file):
 
         str_e = str(col_e).strip()
 
-        # รองรับทศนิยม 5 ตำแหน่งขึ้นไป
         gps_match = re.search(
             r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d\.]+))?", str_e
         )
         if not gps_match:
-            # สำรองกรณียืดหยุ่นทศนิยมทั่วไปแต่เน้นเก็บค่าจริง
             gps_match = re.search(
                 r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d\.]+))?", str_e
             )
@@ -262,19 +260,16 @@ def parse_excel_data(excel_file):
         if cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"] or "DW" in cust_id.upper() or "RE" in cust_id.upper():
             continue
 
+        # ดึงจำนวนจากคอลัมน์ C
         try:
             qty = int(float(col_c)) if pd.notna(col_c) else 1
         except Exception:
-            try:
-                qty = int(float(col_d)) if pd.notna(col_d) else 1
-            except Exception:
-                qty = 1
+            qty = 1
 
+        # ดึงเวลาและสถานะจากคอลัมน์ D ให้ถูกต้อง
         str_d = str(col_d).strip() if pd.notna(col_d) else ""
         time_match = re.search(r"(\d{1,2}:\d{2})", str_d)
-        delivery_time = (
-            time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
-        )
+        delivery_time = time_match.group(1) + " น." if time_match else (str_d if str_d else "ไม่ระบุเวลา")
         time_sort_key = time_match.group(1) if time_match else f"99:{idx:02d}"
 
         if "จัดส่งตรงเวลา" in str_d:
@@ -289,7 +284,6 @@ def parse_excel_data(excel_file):
             status_clean = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_d)
             status = status_clean if status_clean else "จัดส่งตรงเวลา"
 
-        # จัดรูปแบบ Latitude / Longitude ให้แสดงทศนิยมอย่างน้อย 5 ตำแหน่ง (หรือมากกว่าตามข้อมูลดิบ)
         lat_str = f"{lat:.5f}" if len(str(lat).split(".")[1]) < 5 else str(lat)
         lng_str = f"{lng:.5f}" if len(str(lng).split(".")[1]) < 5 else str(lng)
 
@@ -308,39 +302,73 @@ def parse_excel_data(excel_file):
             "status": status,
         })
 
-    df = pd.DataFrame(records)
-    if not df.empty:
-        df = df.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
+    df_raw = pd.DataFrame(records)
+    if not df_raw.empty:
+        df_raw = df_raw.sort_values(by=["time_key", "excel_idx"]).reset_index(drop=True)
 
-        trips = []
-        acc_qty_list = []
-
+        # ตัดยอดและจัดสรรตามยอดส่งสุทธิ (เป้าหมาย) ของแต่ละเที่ยวอย่างแม่นยำ
+        assigned_records = []
         curr_trip_idx = 0
-        curr_trip_qty = 0
+        curr_trip_sum = 0
         total_acc = 0
 
-        for idx, row in df.iterrows():
-            q = row["qty"]
-            target_limit = (
-                trip_quotas[curr_trip_idx]["net_qty"]
-                if curr_trip_idx < len(trip_quotas)
-                else trip_quotas[-1]["net_qty"]
-            )
+        for r in df_raw.to_dict("records"):
+            if curr_trip_idx >= len(trip_quotas):
+                curr_trip_idx = len(trip_quotas) - 1
 
-            curr_trip_qty += q
-            total_acc += q
+            target_net = trip_quotas[curr_trip_idx]["net_qty"]
 
-            trips.append(f"เที่ยวที่ {curr_trip_idx + 1}")
-            acc_qty_list.append(total_acc)
+            # หากยอดรวมเกินเป้าหมายของเที่ยวนี้ และยังมีเที่ยวถัดไป ให้ทำการตัดยอดแยกส่วน (Split) ลงตัวพอดีรอบ
+            remaining_needed = target_net - curr_trip_sum
+            if r["qty"] > remaining_needed and curr_trip_idx + 1 < len(trip_quotas) and remaining_needed > 0:
+                r1 = r.copy()
+                r1["qty"] = remaining_needed
+                r1["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
+                curr_trip_sum += remaining_needed
+                total_acc += remaining_needed
+                r1["acc_qty"] = total_acc
+                assigned_records.append(r1)
 
-            if (curr_trip_qty >= target_limit) and (
-                curr_trip_idx + 1 < len(trip_quotas)
-            ):
+                remainder_qty = r["qty"] - remaining_needed
                 curr_trip_idx += 1
-                curr_trip_qty = 0
+                curr_trip_sum = 0
 
-        df["trip"] = trips
-        df["acc_qty"] = acc_qty_list
+                while remainder_qty > 0 and curr_trip_idx < len(trip_quotas):
+                    next_target = trip_quotas[curr_trip_idx]["net_qty"]
+                    if remainder_qty > next_target and curr_trip_idx + 1 < len(trip_quotas):
+                        r2 = r.copy()
+                        r2["qty"] = next_target
+                        r2["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
+                        curr_trip_sum += next_target
+                        total_acc += next_target
+                        r2["acc_qty"] = total_acc
+                        assigned_records.append(r2)
+                        remainder_qty -= next_target
+                        curr_trip_idx += 1
+                        curr_trip_sum = 0
+                    else:
+                        r2 = r.copy()
+                        r2["qty"] = remainder_qty
+                        r2["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
+                        curr_trip_sum += remainder_qty
+                        total_acc += remainder_qty
+                        r2["acc_qty"] = total_acc
+                        assigned_records.append(r2)
+                        remainder_qty = 0
+            else:
+                r["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
+                curr_trip_sum += r["qty"]
+                total_acc += r["qty"]
+                r["acc_qty"] = total_acc
+                assigned_records.append(r)
+
+                if curr_trip_sum >= target_net and curr_trip_idx + 1 < len(trip_quotas):
+                    curr_trip_idx += 1
+                    curr_trip_sum = 0
+
+        df = pd.DataFrame(assigned_records)
+    else:
+        df = df_raw
 
     return df, trip_quotas, header_info
 
@@ -358,7 +386,7 @@ if uploaded_file:
     if df.empty:
         st.error(
             "❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ Excel"
-            " กรุณาตรวจสอบรูปแบบคอลัมน์ A, D และ E อีกครั้ง"
+            " กรุณาตรวจสอบรูปแบบคอลัมน์ A, C, D และ E อีกครั้ง"
         )
     else:
         st.success(
@@ -373,7 +401,19 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (พิกัดความละเอียดสูง 5+ ตำแหน่ง)")
+        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (พร้อมเวลาและแจ้งเตือนสถานะ)")
+        
+        # เพิ่มคอลัมน์การแจ้งเตือนสถานะที่ชัดเจน
+        def get_notification_badge(row):
+            notices = []
+            if "ไม่ตรงเวลา" in str(row["status"]):
+                notices.append("⚠️ จัดส่งไม่ตรงเวลา")
+            else:
+                notices.append("✅ จัดส่งตรงเวลา")
+            if row["gps_diff_num"] > 100:
+                notices.append(f"📡 GPS ห่าง {row['gps_diff']}m")
+            return " | ".join(notices)
+
         disp_df = df[[
             "time",
             "trip",
@@ -385,6 +425,9 @@ if uploaded_file:
             "lng_display",
             "gps_diff",
         ]].copy()
+        
+        disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
+
         disp_df.columns = [
             "เวลาส่ง",
             "เที่ยวส่ง",
@@ -392,9 +435,10 @@ if uploaded_file:
             "ยอดส่ง (ถัง)",
             "ยอดส่งสะสม",
             "สถานะการส่ง",
-            "Latitude (5+ ตำแหน่ง)",
-            "Longitude (5+ ตำแหน่ง)",
+            "Latitude",
+            "Longitude",
             "ค่าความต่าง GPS",
+            "การแจ้งเตือนสถานะ",
         ]
         st.dataframe(disp_df, use_container_width=True, height=350)
 
