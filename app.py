@@ -242,7 +242,6 @@ def parse_excel_data(excel_file):
 
         str_e = str(col_e).strip()
 
-        # แก้ไข Regex ให้รองรับเครื่องหมายจุลภาค (Comma) ในค่าความต่าง GPS เช่น "1,250.50"
         gps_match = re.search(
             r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d,]+\.?\d*))?",
             str_e,
@@ -261,7 +260,6 @@ def parse_excel_data(excel_file):
         if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
             continue
 
-        # ทำความสะอาดสตริงค่าความต่าง GPS โดยตัดคอมมาออกก่อนแปลงเป็นตัวเลข float
         raw_diff_str = gps_match.group(3) if gps_match.group(3) else "0.0"
         try:
             gps_diff_val = float(raw_diff_str.replace(",", ""))
@@ -287,6 +285,15 @@ def parse_excel_data(excel_file):
             qty = 0
 
         str_f = str(col_f).strip() if pd.notna(col_f) else ""
+
+        # ตรวจสอบเงื่อนไขเพิ่มเติมจากคอลัมน์ F
+        is_extra_trip = "รอบเสริม" in str_f
+        is_cannot_calc = (
+            "ไม่สามารถคำนวณได้" in str_f or "คำนวณไม่ได้" in str_f
+        )
+        is_new_member = "สมาชิกใหม่" in str_f
+        is_moved_trip = "ย้ายรอบ" in str_f
+
         time_match = re.search(r"(\d{1,2}:\d{2}\s*น\.)", str_f)
         if not time_match:
             time_match = re.search(r"(\d{1,2}:\d{2})", str_f)
@@ -329,6 +336,10 @@ def parse_excel_data(excel_file):
                 "time": delivery_time,
                 "time_key": time_sort_key,
                 "status": status,
+                "is_extra_trip": is_extra_trip,
+                "is_cannot_calc": is_cannot_calc,
+                "is_new_member": is_new_member,
+                "is_moved_trip": is_moved_trip,
             }
         )
 
@@ -451,6 +462,14 @@ if uploaded_file:
                 notices.append("จัดส่งตรงเวลา")
             if row["gps_diff_num"] > 100:
                 notices.append(f"GPS ห่าง {row['gps_diff']}m")
+            if row.get("is_extra_trip"):
+                notices.append("รอบเสริม")
+            if row.get("is_cannot_calc"):
+                notices.append("ไม่สามารถคำนวณได้")
+            if row.get("is_new_member"):
+                notices.append("สมาชิกใหม่")
+            if row.get("is_moved_trip"):
+                notices.append("ย้ายรอบ")
             return " | ".join(notices)
 
         disp_df = df[[
@@ -645,9 +664,9 @@ if uploaded_file:
                 .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
                 
                 #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
-                .legend {{ display: flex; gap: 15px; margin-bottom: 8px; font-family: sans-serif; font-size: 13px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
-                .legend-item {{ display: flex; align-items: center; gap: 5px; }}
-                .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
+                .legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
+                .legend-item {{ display: flex; align-items: center; gap: 4px; }}
+                .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
                 
                 .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
                 .marker-container {{ position: relative; width: 28px; height: 28px; }}
@@ -680,7 +699,7 @@ if uploaded_file:
                 .marker-badge-late {{
                     position: absolute; top: -6px; right: -8px;
                     background-color: #D32F2F; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 16px; height: 16px; font-size: 10px;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                     display: flex; align-items: center; justify-content: center; z-index: 20;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.5);
                 }}
@@ -688,7 +707,39 @@ if uploaded_file:
                 .marker-badge-gps {{
                     position: absolute; top: -6px; left: -8px;
                     background-color: #FF9800; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 16px; height: 16px; font-size: 10px;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                    display: flex; align-items: center; justify-content: center; z-index: 20;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+                }}
+
+                .marker-badge-extra {{
+                    position: absolute; bottom: -6px; left: -8px;
+                    background-color: #8E44AD; color: white; border: 1.5px solid white;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                    display: flex; align-items: center; justify-content: center; z-index: 20;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+                }}
+
+                .marker-badge-calc {{
+                    position: absolute; bottom: -6px; right: -8px;
+                    background-color: #34495E; color: white; border: 1.5px solid white;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                    display: flex; align-items: center; justify-content: center; z-index: 20;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+                }}
+
+                .marker-badge-new {{
+                    position: absolute; top: 50%; left: -10px; transform: translateY(-50%);
+                    background-color: #27AE60; color: white; border: 1.5px solid white;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                    display: flex; align-items: center; justify-content: center; z-index: 20;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+                }}
+
+                .marker-badge-moved {{
+                    position: absolute; top: 50%; right: -10px; transform: translateY(-50%);
+                    background-color: #2980B9; color: white; border: 1.5px solid white;
+                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                     display: flex; align-items: center; justify-content: center; z-index: 20;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.5);
                 }}
@@ -698,15 +749,16 @@ if uploaded_file:
         </head>
         <body>
             <div class="legend">
-                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยวที่ 1</div>
-                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยวที่ 2</div>
-                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยวที่ 3</div>
-                <div class="legend-item"><span class="color-box" style="background:#AA00FF;"></span> เที่ยวที่ 4</div>
-                <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
-                <div class="legend-item"><span>ส่งไม่ตรงเวลา</span></div>
-                <div class="legend-item"><span>GPS ต่าง >100m</span></div>
-                <div style="border-left:2px solid #ccc; height:16px; margin:0 5px;"></div>
-                <div class="legend-item" style="color:#008CBA;"><span>ระยะทางรวมทั้งหมด: {total_day_distance:.2f} กม.</span></div>
+                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
+                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
+                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
+                <div style="border-left:2px solid #ccc; height:14px; margin:0 2px;"></div>
+                <div class="legend-item"><span style="background:#D32F2F; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">!</span> ไม่ตรงเวลา</div>
+                <div class="legend-item"><span style="background:#FF9800; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">G</span> GPS>100m</div>
+                <div class="legend-item"><span style="background:#8E44AD; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ร</span> รอบเสริม</div>
+                <div class="legend-item"><span style="background:#34495E; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">X</span> คำนวณไม่ได้</div>
+                <div class="legend-item"><span style="background:#27AE60; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">N</span> สมาชิกใหม่</div>
+                <div class="legend-item"><span style="background:#2980B9; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ย</span> ย้ายรอบ</div>
             </div>
 
             <div class="controls">
@@ -751,18 +803,26 @@ if uploaded_file:
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    let lateBadge = isLate ? `<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>` : `<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`;
-                    let gpsBadge = isGpsDiff ? `<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m (${{info.gps_diff}}m)</span>` : `<span style="font-size:11px; color:#666;"> (ต่าง GPS: ${{info.gps_diff}}m)</span>`;
+                    
+                    let badgesHtml = [];
+                    if (isLate) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>`);
+                    else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`);
+
+                    if (isGpsDiff) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m (${{info.gps_diff}}m)</span>`);
+                    if (info.is_extra_trip) badgesHtml.push(`<span class="alert-badge" style="background:#8E44AD;">รอบเสริม</span>`);
+                    if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#34495E;">ไม่สามารถคำนวณได้</span>`);
+                    if (info.is_new_member) badgesHtml.push(`<span class="alert-badge" style="background:#27AE60;">สมาชิกใหม่</span>`);
+                    if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#2980B9;">ย้ายรอบ</span>`);
 
                     return `
                         <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b> ${{lateBadge}}<br>
+                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b><br>
+                            ${{badgesHtml.join(' ')}}<br>
                             <b>เวลา:</b> ${{info.time || '-'}}<br>
                             <b>รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
                             <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
                             <b>พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}}<br>
-                            <b>สถานะ:</b> ${{info.status}}<br>
-                            <b>ค่าความต่าง GPS:</b> <b>${{info.gps_diff || '0.00'}} ม.</b> ${{gpsBadge}}
+                            <b>ค่าความต่าง GPS:</b> <b>${{info.gps_diff || '0.00'}} ม.</b>
                         </div>
                     `;
                 }}
@@ -772,11 +832,17 @@ if uploaded_file:
                     let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
                     
                     let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="จัดส่งไม่ตรงเวลา">!</div>` : '';
-                    let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">S</div>` : '';
+                    let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">G</div>` : '';
+                    let extraBadgeHtml = ptInfo && ptInfo.is_extra_trip ? `<div class="marker-badge-extra" title="รอบเสริม">ร</div>` : '';
+                    let calcBadgeHtml = ptInfo && ptInfo.is_cannot_calc ? `<div class="marker-badge-calc" title="ไม่สามารถคำนวณได้">X</div>` : '';
+                    let newBadgeHtml = ptInfo && ptInfo.is_new_member ? `<div class="marker-badge-new" title="สมาชิกใหม่">N</div>` : '';
+                    let movedBadgeHtml = ptInfo && ptInfo.is_moved_trip ? `<div class="marker-badge-moved" title="ย้ายรอบ">ย</div>` : '';
+
+                    let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{extraBadgeHtml}}${{calcBadgeHtml}}${{newBadgeHtml}}${{movedBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
 
                     return L.divIcon({{
                         className: '',
-                        html: `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`,
+                        html: innerHtml,
                         iconSize: [28, 28],
                         iconAnchor: [14, 14]
                     }});
