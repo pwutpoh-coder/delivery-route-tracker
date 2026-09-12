@@ -222,15 +222,15 @@ def parse_excel_data(excel_file):
     if not trip_quotas:
         trip_quotas = [{"trip_no": 1, "dws_qty": 80, "res_qty": 0, "net_qty": 80, "dw_text": "DEFAULT"}]
 
-    # 3. แยกแยะข้อมูลลูกค้ารายตัว (คอลัมน์ A รหัสลูกค้า, คอลัมน์ C จำนวน, คอลัมน์ D เวลา/สถานะ, คอลัมน์ E พิกัด GPS)
+    # 3. แยกแยะข้อมูลลูกค้ารายตัว (คอลัมน์ A รหัสลูกค้า, คอลัมน์ C จำนวน, คอลัมน์ E พิกัด GPS, คอลัมน์ F เวลาและสถานะ)
     records = []
     for idx in range(len(raw_df)):
         row = raw_df.iloc[idx]
 
         col_a = row.iloc[0] if 0 < len(row) else None
         col_c = row.iloc[2] if 2 < len(row) else None
-        col_d = row.iloc[3] if 3 < len(row) else None
         col_e = row.iloc[4] if 4 < len(row) else None
+        col_f = row.iloc[5] if 5 < len(row) else None  # ข้อมูลเวลาและสถานะอยู่คอลัมน์ F
 
         if pd.isna(col_e):
             continue
@@ -266,23 +266,23 @@ def parse_excel_data(excel_file):
         except Exception:
             qty = 1
 
-        # ดึงเวลาและสถานะจากคอลัมน์ D ให้ถูกต้อง
-        str_d = str(col_d).strip() if pd.notna(col_d) else ""
-        time_match = re.search(r"(\d{1,2}:\d{2})", str_d)
-        delivery_time = time_match.group(1) + " น." if time_match else (str_d if str_d else "ไม่ระบุเวลา")
+        # ดึงเวลาและสถานะจากคอลัมน์ F ตามแพทเทิร์น เช่น "09:30 น." และข้อความสถานะด้านหลัง
+        str_f = str(col_f).strip() if pd.notna(col_f) else ""
+        time_match = re.search(r"(\d{1,2}:\d{2}\s*น\.)", str_f)
+        if not time_match:
+            time_match = re.search(r"(\d{1,2}:\d{2})", str_f)
+            delivery_time = time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
+        else:
+            delivery_time = time_match.group(1)
+
         time_sort_key = time_match.group(1) if time_match else f"99:{idx:02d}"
 
-        if "จัดส่งตรงเวลา" in str_d:
-            status = "จัดส่งตรงเวลา"
-        elif "ไม่ตรงเวลา" in str_d:
-            status = "จัดส่งไม่ตรงเวลา"
-        elif "สมาชิกใหม่" in str_d:
-            status = "สมาชิกใหม่"
-        elif "ย้าย" in str_d:
-            status = "ย้ายรอบ"
-        else:
-            status_clean = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_d)
-            status = status_clean if status_clean else "จัดส่งตรงเวลา"
+        # ดึงข้อความสถานะที่อยู่หลังจากเวลาในคอลัมน์ F
+        status_part = re.sub(r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_f).strip()
+        if not status_part:
+            status_part = "จัดส่งตรงเวลา"
+        
+        status = status_part
 
         lat_str = f"{lat:.5f}" if len(str(lat).split(".")[1]) < 5 else str(lat)
         lng_str = f"{lng:.5f}" if len(str(lng).split(".")[1]) < 5 else str(lng)
@@ -318,7 +318,6 @@ def parse_excel_data(excel_file):
 
             target_net = trip_quotas[curr_trip_idx]["net_qty"]
 
-            # หากยอดรวมเกินเป้าหมายของเที่ยวนี้ และยังมีเที่ยวถัดไป ให้ทำการตัดยอดแยกส่วน (Split) ลงตัวพอดีรอบ
             remaining_needed = target_net - curr_trip_sum
             if r["qty"] > remaining_needed and curr_trip_idx + 1 < len(trip_quotas) and remaining_needed > 0:
                 r1 = r.copy()
@@ -386,7 +385,7 @@ if uploaded_file:
     if df.empty:
         st.error(
             "❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ Excel"
-            " กรุณาตรวจสอบรูปแบบคอลัมน์ A, C, D และ E อีกครั้ง"
+            " กรุณาตรวจสอบรูปแบบคอลัมน์ A, C, E และ F อีกครั้ง"
         )
     else:
         st.success(
@@ -401,9 +400,8 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (พร้อมเวลาและแจ้งเตือนสถานะ)")
+        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน (ข้อมูลจากคอลัมน์ F)")
         
-        # เพิ่มคอลัมน์การแจ้งเตือนสถานะที่ชัดเจน
         def get_notification_badge(row):
             notices = []
             if "ไม่ตรงเวลา" in str(row["status"]):
@@ -429,16 +427,16 @@ if uploaded_file:
         disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
 
         disp_df.columns = [
-            "เวลาส่ง",
+            "เวลาส่ง (คอลัมน์ F)",
             "เที่ยวส่ง",
             "รหัสสมาชิก",
             "ยอดส่ง (ถัง)",
             "ยอดส่งสะสม",
-            "สถานะการส่ง",
+            "สถานะการส่ง (คอลัมน์ F)",
             "Latitude",
             "Longitude",
             "ค่าความต่าง GPS",
-            "การแจ้งเตือนสถานะ",
+            "สรุปการแจ้งเตือน",
         ]
         st.dataframe(disp_df, use_container_width=True, height=350)
 
@@ -519,8 +517,8 @@ if uploaded_file:
 
             actual_qty = group["qty"].sum() if not group.empty else 0
             point_count = len(group)
-            ontime_count = len(group[group["status"] == "จัดส่งตรงเวลา"]) if not group.empty else 0
-            late_count = len(group[group["status"] != "จัดส่งตรงเวลา"]) if not group.empty else 0
+            ontime_count = len(group[~group["status"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
+            late_count = len(group[group["status"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
             gps_err_count = len(group[group["gps_diff_num"] > 100]) if not group.empty else 0
 
             summaries.append({
@@ -550,8 +548,8 @@ if uploaded_file:
             "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
             "จำนวนจุดส่ง (จุด)": len(df),
             "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
-            "จัดส่งตรงเวลา (จุด)": len(df[df["status"] == "จัดส่งตรงเวลา"]),
-            "จัดส่งไม่ตรงเวลา (จุด)": len(df[df["status"] != "จัดส่งตรงเวลา"]),
+            "จัดส่งตรงเวลา (จุด)": len(df[~df["status"].str.contains("ไม่ตรงเวลา", na=False)]),
+            "จัดส่งไม่ตรงเวลา (จุด)": len(df[df["status"].str.contains("ไม่ตรงเวลา", na=False)]),
             "GPS คลาดเคลื่อน >100m (จุด)": len(df[df["gps_diff_num"] > 100]),
         })
 
@@ -589,7 +587,7 @@ if uploaded_file:
                 .color-box {{ width: 14px; height: 14px; border-radius: 3px; display: inline-block; }}
                 
                 .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
-                .marker-container {{ position: relative; width: 26px; height: 26px; }}
+                .marker-container {{ position: relative; width: 28px; height: 28px; }}
 
                 .number-icon {{
                     color: #FFFFFF !important;
@@ -617,17 +615,19 @@ if uploaded_file:
                 }}
 
                 .marker-badge-late {{
-                    position: absolute; top: -6px; right: -6px;
+                    position: absolute; top: -6px; right: -8px;
                     background-color: #D32F2F; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 10;
+                    border-radius: 50%; width: 16px; height: 16px; font-size: 10px;
+                    display: flex; align-items: center; justify-content: center; z-index: 20;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
                 }}
 
                 .marker-badge-gps {{
-                    position: absolute; top: -6px; left: -6px;
+                    position: absolute; top: -6px; left: -8px;
                     background-color: #FF9800; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 10;
+                    border-radius: 50%; width: 16px; height: 16px; font-size: 10px;
+                    display: flex; align-items: center; justify-content: center; z-index: 20;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
                 }}
 
                 .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
@@ -690,7 +690,7 @@ if uploaded_file:
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    let lateBadge = isLate ? `<span class="alert-badge badge-late">⏰ ส่งไม่ตรงเวลา</span>` : '';
+                    let lateBadge = isLate ? `<span class="alert-badge badge-late">⏰ ${{info.status}}</span>` : `<span class="alert-badge" style="background:#4CAF50;">✅ ${{info.status}}</span>`;
                     let gpsBadge = isGpsDiff ? `<span class="alert-badge badge-gps">📡 GPS ห่าง >100m</span>` : '';
 
                     return `
@@ -709,14 +709,15 @@ if uploaded_file:
                 function createMarkerIcon(seqNum, color, ptInfo) {{
                     let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
                     let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
-                    let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="ส่งไม่ตรงเวลา">⏰</div>` : '';
+                    
+                    let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="จัดส่งไม่ตรงเวลา">⏰</div>` : '';
                     let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">📡</div>` : '';
 
                     return L.divIcon({{
                         className: '',
                         html: `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`,
-                        iconSize: [26, 26],
-                        iconAnchor: [13, 13]
+                        iconSize: [28, 28],
+                        iconAnchor: [14, 14]
                     }});
                 }}
 
