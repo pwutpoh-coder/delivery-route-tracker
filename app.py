@@ -451,6 +451,7 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
+        # --- คำนวณเส้นทางและระยะทางล่วงหน้า ---
         trip_colors = {
             "เที่ยวที่ 1": "#0055FF",
             "เที่ยวที่ 2": "#FF0055",
@@ -732,43 +733,20 @@ if uploaded_file:
                 button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
                 button:hover {{ background-color: #005f73; transform: scale(1.02); }}
                 
-                .filter-bar {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
+                .filter-bar {{ margin-bottom: 8px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
                 .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
                 .filter-btn.active {{ background-color: #2c3e50; color: white; }}
 
-                .legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
-                .legend-item {{ display: flex; align-items: center; gap: 4px; }}
-                .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
-                
-                /* ปรับแต่งปุ่มคลิกกรองที่แถบสัญลักษณ์ */
-                .badge-filter-btn {{
-                    cursor: pointer;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    font-size: 9px;
-                    border-radius: 50%;
-                    width: 16px;
-                    height: 16px;
-                    color: #fff;
-                    font-weight: bold;
-                    border: 1.5px solid transparent;
-                    transition: all 0.2s ease;
-                }}
-                .badge-filter-btn:hover {{
-                    transform: scale(1.2);
-                    box-shadow: 0 0 6px rgba(0,0,0,0.4);
-                }}
-                .badge-filter-btn.active-badge-filter {{
-                    border: 2px solid #000 !important;
-                    transform: scale(1.3);
-                    box-shadow: 0 0 8px #FFD700;
-                }}
+                .status-filter-btn {{ padding: 4px 10px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 4px; }}
+                .status-filter-btn.active {{ background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }}
 
                 .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
                 .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
                 
                 #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
+                .legend {{ display: flex; gap: 12px; margin-bottom: 6px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
+                .legend-item {{ display: flex; align-items: center; gap: 4px; }}
+                .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
                 
                 .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
                 .marker-container {{ position: relative; width: 28px; height: 28px; }}
@@ -854,21 +832,24 @@ if uploaded_file:
                 <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
                 <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
                 <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
-                <div style="border-left:2px solid #ccc; height:14px; margin:0 2px;"></div>
-                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-late" style="background:#D32F2F;" onclick="toggleBadgeFilter('late')">!</span> ไม่ตรงเวลา</div>
-                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-gps" style="background:#FF9800;" onclick="toggleBadgeFilter('gps')">G</span> GPS>100m</div>
-                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-extra" style="background:#8E44AD;" onclick="toggleBadgeFilter('extra')">ร</span> รอบเสริม</div>
-                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-calc" style="background:#34495E;" onclick="toggleBadgeFilter('calc')">X</span> คำนวณไม่ได้</div>
-                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-new" style="background:#27AE60;" onclick="toggleBadgeFilter('new')">N</span> สมาชิกใหม่</div>
-                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-moved" style="background:#2980B9;" onclick="toggleBadgeFilter('moved')">ย</span> ย้ายรอบ</div>
             </div>
 
             <div class="filter-bar">
-                <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองการแสดงผลแผนที่:</span>
+                <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองเที่ยว:</span>
                 <button class="filter-btn active" id="btn-all" onclick="setTripFilter('ALL')">แสดงทั้งหมด</button>
                 <button class="filter-btn" id="btn-trip1" onclick="setTripFilter('เที่ยวที่ 1')">เที่ยวที่ 1</button>
                 <button class="filter-btn" id="btn-trip2" onclick="setTripFilter('เที่ยวที่ 2')">เที่ยวที่ 2</button>
                 <button class="filter-btn" id="btn-trip3" onclick="setTripFilter('เที่ยวที่ 3')">เที่ยวที่ 3</button>
+            </div>
+
+            <div class="filter-bar" style="background: #faf2f2;">
+                <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะ (คลิกเพื่อเลือก/ยกเลิก):</span>
+                <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')"><span style="background:#D32F2F; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">!</span> ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
+                <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')"><span style="background:#FF9800; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">G</span> GPS>100m (<span id="count-gps">0</span>)</button>
+                <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')"><span style="background:#8E44AD; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ร</span> รอบเสริม (<span id="count-extra">0</span>)</button>
+                <button class="status-filter-btn" id="status-btn-calc" onclick="setStatusFilter('calc')"><span style="background:#34495E; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">X</span> คำนวณไม่ได้ (<span id="count-calc">0</span>)</button>
+                <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')"><span style="background:#27AE60; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">N</span> สมาชิกใหม่ (<span id="count-new">0</span>)</button>
+                <button class="status-filter-btn" id="status-btn-moved" onclick="setStatusFilter('moved')"><span style="background:#2980B9; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ย</span> ย้ายรอบ (<span id="count-moved">0</span>)</button>
             </div>
 
             <div class="controls">
@@ -885,7 +866,7 @@ if uploaded_file:
             </div>
 
             <div id="map"></div>
-            <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" หรือลากแถบเพื่อดูรายละเอียดระยะทางและสถานะส่ง</div>
+            <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" หรือคลิกปุ่มกรองสถานะเพื่อดูพิกัดเฉพาะกลุ่ม</div>
 
             <script>
                 const points = {points_json};
@@ -895,7 +876,7 @@ if uploaded_file:
                 let currentSpeedMs = {anim_speed_ms};
 
                 let currentFilter = 'ALL';
-                let currentBadgeFilter = null; // เก็บเงื่อนไขป้ายที่เลือกกรองอยู่ปัจจุบัน (เช่น 'late', 'gps', etc.)
+                let currentStatusFilter = null;
 
                 const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
@@ -913,50 +894,45 @@ if uploaded_file:
                 let isPlaying = false;
                 let activeMarkerRef = null;
 
-                function checkBadgeCondition(pt, badgeType) {{
-                    let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
-                    let isGpsDiff = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
+                function pointMatchesFilter(pt) {{
+                    if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
                     
-                    if (badgeType === 'late') return isLate;
-                    if (badgeType === 'gps') return isGpsDiff;
-                    if (badgeType === 'extra') return pt.is_extra_trip;
-                    if (badgeType === 'calc') return pt.is_cannot_calc;
-                    if (badgeType === 'new') return pt.is_new_member;
-                    if (badgeType === 'moved') return pt.is_moved_trip;
+                    if (currentStatusFilter !== null) {{
+                        let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
+                        let isGps = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
+                        let isExtra = pt.is_extra_trip;
+                        let isCalc = pt.is_cannot_calc;
+                        let isNew = pt.is_new_member;
+                        let isMoved = pt.is_moved_trip;
+
+                        if (currentStatusFilter === 'late' && !isLate) return false;
+                        if (currentStatusFilter === 'gps' && !isGps) return false;
+                        if (currentStatusFilter === 'extra' && !isExtra) return false;
+                        if (currentStatusFilter === 'calc' && !isCalc) return false;
+                        if (currentStatusFilter === 'new' && !isNew) return false;
+                        if (currentStatusFilter === 'moved' && !isMoved) return false;
+                    }}
                     return true;
                 }}
 
-                function toggleBadgeFilter(badgeType) {{
-                    pauseAnimation();
-                    if (currentBadgeFilter === badgeType) {{
-                        // ถ้าคลิกซ้ำตัวเดิม ให้ยกเลิกตัวกรอง (แสดงปกติ)
-                        currentBadgeFilter = null;
-                    }} else {{
-                        currentBadgeFilter = badgeType;
-                    }}
-
-                    // อัปเดต CSS คลาส active ที่ปุ่มไอคอน
-                    ['late', 'gps', 'extra', 'calc', 'new', 'moved'].forEach(b => {{
-                        let el = document.getElementById('filter-badge-' + b);
-                        if (el) {{
-                            if (currentBadgeFilter === b) el.classList.add('active-badge-filter');
-                            else el.classList.remove('active-badge-filter');
+                function updateStatusCounts() {{
+                    let counts = {{ late: 0, gps: 0, extra: 0, calc: 0, new: 0, moved: 0 }};
+                    points.forEach(pt => {{
+                        if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
+                            if (pt.status && pt.status.includes("ไม่ตรงเวลา")) counts.late++;
+                            if ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100) counts.gps++;
+                            if (pt.is_extra_trip) counts.extra++;
+                            if (pt.is_cannot_calc) counts.calc++;
+                            if (pt.is_new_member) counts.new++;
+                            if (pt.is_moved_trip) counts.moved++;
                         }}
                     }});
-
-                    initMarkers();
-
-                    // ขยับไปจุดแรกที่ตรงกับเงื่อนไข
-                    let firstMatchIdx = segments.findIndex(seg => {{
-                        let matchesTrip = (currentFilter === 'ALL' || seg.trip === currentFilter);
-                        let matchesBadge = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
-                        return matchesTrip && matchesBadge;
-                    }});
-
-                    if (firstMatchIdx !== -1) {{
-                        currentStep = firstMatchIdx;
-                        updateStep(currentStep);
-                    }}
+                    document.getElementById('count-late').innerText = counts.late;
+                    document.getElementById('count-gps').innerText = counts.gps;
+                    document.getElementById('count-extra').innerText = counts.extra;
+                    document.getElementById('count-calc').innerText = counts.calc;
+                    document.getElementById('count-new').innerText = counts.new;
+                    document.getElementById('count-moved').innerText = counts.moved;
                 }}
 
                 function createTooltipHtml(info, seqNum) {{
@@ -1013,10 +989,7 @@ if uploaded_file:
 
                     if (isMode1) {{
                         points.forEach((pt, idx) => {{
-                            let matchesTrip = (currentFilter === 'ALL' || pt.trip === currentFilter);
-                            let matchesBadge = (currentBadgeFilter === null || checkBadgeCondition(pt, currentBadgeFilter));
-
-                            if (matchesTrip && matchesBadge) {{
+                            if (pointMatchesFilter(pt)) {{
                                 let seqNumber = idx + 1;
                                 let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
                                 let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
@@ -1025,6 +998,7 @@ if uploaded_file:
                             }}
                         }});
                     }}
+                    updateStatusCounts();
                 }}
 
                 initMarkers();
@@ -1045,11 +1019,32 @@ if uploaded_file:
 
                     initMarkers();
 
-                    let firstMatchIdx = segments.findIndex(seg => {{
-                        let matchesTrip = (currentFilter === 'ALL' || seg.trip === currentFilter);
-                        let matchesBadge = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
-                        return matchesTrip && matchesBadge;
+                    let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                    if (firstMatchIdx !== -1) {{
+                        currentStep = firstMatchIdx;
+                        updateStep(currentStep);
+                    }}
+                }}
+
+                function setStatusFilter(statusKey) {{
+                    pauseAnimation();
+                    if (currentStatusFilter === statusKey) {{
+                        currentStatusFilter = null;
+                    }} else {{
+                        currentStatusFilter = statusKey;
+                    }}
+
+                    ['late', 'gps', 'extra', 'calc', 'new', 'moved'].forEach(k => {{
+                        let btn = document.getElementById('status-btn-' + k);
+                        if (btn) {{
+                            if (k === currentStatusFilter) btn.classList.add('active');
+                            else btn.classList.remove('active');
+                        }}
                     }});
+
+                    initMarkers();
+
+                    let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
                     if (firstMatchIdx !== -1) {{
                         currentStep = firstMatchIdx;
                         updateStep(currentStep);
@@ -1078,25 +1073,13 @@ if uploaded_file:
                     currentStep = stepIndex;
                     let currentSeg = segments[currentStep];
 
-                    // ข้ามสเต็ปที่ไม่ตรงกับเงื่อนไขตัวกรองทั้งเที่ยวและป้ายสถานะ
-                    let matchesTrip = (currentFilter === 'ALL' || currentSeg.trip === currentFilter);
-                    let matchesBadge = (currentBadgeFilter === null || (currentSeg.info && checkBadgeCondition(currentSeg.info, currentBadgeFilter)));
-
-                    if (!matchesTrip || !matchesBadge) {{
-                        let nextValid = segments.findIndex((seg, idx) => {{
-                            let mt = (currentFilter === 'ALL' || seg.trip === currentFilter);
-                            let mb = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
-                            return idx >= currentStep && mt && mb;
-                        }});
+                    if (!pointMatchesFilter(currentSeg.info)) {{
+                        let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && pointMatchesFilter(seg.info));
                         if (nextValid !== -1) {{
                             currentStep = nextValid;
                             currentSeg = segments[currentStep];
                         }} else {{
-                            let prevValid = segments.map((s, i) => i).reverse().find(i => {{
-                                let mt = (currentFilter === 'ALL' || segments[i].trip === currentFilter);
-                                let mb = (currentBadgeFilter === null || (segments[i].info && checkBadgeCondition(segments[i].info, currentBadgeFilter)));
-                                return mt && mb;
-                            }});
+                            let prevValid = segments.map((s, i) => i).reverse().find(i => pointMatchesFilter(segments[i].info));
                             if (prevValid !== undefined) {{
                                 currentStep = prevValid;
                                 currentSeg = segments[currentStep];
@@ -1126,9 +1109,7 @@ if uploaded_file:
                     let accumulatedDistance = 0.0;
                     for (let i = 0; i <= currentStep; i++) {{
                         let seg = segments[i];
-                        let mt = (currentFilter === 'ALL' || seg.trip === currentFilter);
-                        let mb = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
-                        if (!mt || !mb) continue;
+                        if (!pointMatchesFilter(seg.info)) continue;
 
                         accumulatedDistance += (seg.dist_km || 0.0);
 
@@ -1165,9 +1146,7 @@ if uploaded_file:
                 function nextStep() {{
                     let nextIdx = currentStep + 1;
                     while (nextIdx < segments.length) {{
-                        let mt = (currentFilter === 'ALL' || segments[nextIdx].trip === currentFilter);
-                        let mb = (currentBadgeFilter === null || (segments[nextIdx].info && checkBadgeCondition(segments[nextIdx].info, currentBadgeFilter)));
-                        if (mt && mb) break;
+                        if (pointMatchesFilter(segments[nextIdx].info)) break;
                         nextIdx++;
                     }}
 
@@ -1196,11 +1175,7 @@ if uploaded_file:
 
                 function resetAnimation() {{
                     pauseAnimation();
-                    let firstMatchIdx = segments.findIndex(seg => {{
-                        let mt = (currentFilter === 'ALL' || seg.trip === currentFilter);
-                        let mb = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
-                        return mt && mb;
-                    }});
+                    let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
                     currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
                     updateStep(currentStep);
                     document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
