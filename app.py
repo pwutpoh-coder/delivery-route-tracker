@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime, timedelta
 import pandas as pd
 import requests
 import streamlit as st
@@ -450,8 +451,129 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน")
+        # --- คำนวณเส้นทางและระยะทางล่วงหน้าเพื่อให้ข้อมูลพร้อมแสดงในตาราง ---
+        trip_colors = {
+            "เที่ยวที่ 1": "#0055FF",
+            "เที่ยวที่ 2": "#FF0055",
+            "เที่ยวที่ 3": "#00AA44",
+            "เที่ยวที่ 4": "#AA00FF",
+        }
 
+        with st.spinner("กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม..."):
+            segments_data = []
+            grouped = df.groupby("trip", sort=False)
+
+            trip_distances = {}
+            trip_time_ranges = {}
+            point_counter = 0
+
+            # สำหรับเก็บข้อมูลระยะทาง/เวลาเทียบจุดก่อนหน้าใส่ DataFrame หลัก
+            row_incremental_distances = []
+            row_incremental_time_diffs = []
+
+            last_lat, last_lng = warehouse_coord
+            last_time_dt = None
+
+            for trip_name, group in grouped:
+                pts = (
+                    [warehouse_coord]
+                    + list(zip(group["lat"], group["lng"]))
+                    + [warehouse_coord]
+                )
+                records_list = group.to_dict("records")
+
+                total_trip_dist = 0.0
+                trip_times = []
+
+                for i in range(len(pts) - 1):
+                    p1, p2 = pts[i], pts[i + 1]
+                    road_path, dist_km = get_osrm_route(
+                        p1[0], p1[1], p2[0], p2[1]
+                    )
+                    total_trip_dist += dist_km
+
+                    if i < len(records_list):
+                        info = records_list[i]
+                        info["point_idx"] = point_counter
+                        point_counter += 1
+
+                        # เก็บระยะทางช่วงนี้ (จากจุดก่อนหน้ามาจุดนี้)
+                        row_incremental_distances.append(round(dist_km, 2))
+
+                        # แปลงเวลาเพื่อคำนวณเวลาที่ใช้หักลบกับจุดก่อนหน้า
+                        t_str = re.sub(
+                            r"[^\d:]", "", str(info.get("time", ""))
+                        )
+                        time_diff_str = "-"
+                        if t_str:
+                            try:
+                                parts = t_str.split(":")
+                                curr_dt = datetime.strptime(
+                                    f"{parts[0].zfill(2)}:{parts[1].zfill(2)}",
+                                    "%H:%M",
+                                )
+                                if last_time_dt is not None:
+                                    diff = curr_dt - last_time_dt
+                                    total_seconds = int(diff.total_seconds())
+                                    if total_seconds < 0:
+                                        total_seconds += (
+                                            24 * 3600
+                                        )  # ข้ามวัน
+                                    mins = total_seconds // 60
+                                    time_diff_str = f"{mins} นาที"
+                                    if mins >= 60:
+                                        hrs = mins // 60
+                                        rmins = mins % 60
+                                        time_diff_str = (
+                                            f"{hrs} ชม. {rmins} นาที"
+                                        )
+                                last_time_dt = curr_dt
+                            except Exception:
+                                pass
+                        row_incremental_time_diffs.append(time_diff_str)
+
+                        if info.get("time") and "ไม่ระบุ" not in str(
+                            info.get("time")
+                        ):
+                            trip_times.append(str(info.get("time")))
+                    else:
+                        info = {
+                            "cust_id": "WH-001",
+                            "time": "จบเที่ยววิ่ง",
+                            "qty": 0,
+                            "gps_diff": "0.00",
+                            "gps_diff_num": 0.0,
+                            "status": "วิ่งกลับเข้าคลังเรียบร้อย",
+                            "point_idx": None,
+                        }
+                    info["trip"] = trip_name
+                    info["seg_dist_km"] = round(dist_km, 2)
+
+                    segments_data.append({
+                        "trip": trip_name,
+                        "color": trip_colors.get(trip_name, "#0055FF"),
+                        "path": road_path,
+                        "info": info,
+                        "dist_km": round(dist_km, 2),
+                    })
+
+                trip_distances[trip_name] = round(total_trip_dist, 2)
+                if trip_times:
+                    trip_time_ranges[trip_name] = (
+                        f"{trip_times[0]} - {trip_times[-1]}"
+                    )
+                else:
+                    trip_time_ranges[trip_name] = "-"
+
+            total_day_distance = round(sum(trip_distances.values()), 2)
+
+        c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
+
+        # เพิ่มข้อมูลคอลัมน์ใหม่ลงใน DataFrame หลัก
+        df["inc_dist"] = row_incremental_distances
+        df["inc_time"] = row_incremental_time_diffs
+
+        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน")
 
         def get_notification_badge(row):
             notices = []
@@ -479,13 +601,14 @@ if uploaded_file:
                 notices.append("ย้ายรอบ")
             return " | ".join(notices)
 
-
         disp_df = df[[
             "time",
+            "inc_time",
             "trip",
             "cust_id",
             "qty",
             "acc_qty",
+            "inc_dist",
             "status",
             "lat_display",
             "lng_display",
@@ -500,85 +623,26 @@ if uploaded_file:
         disp_df.columns = [
             "ลำดับ",
             "เวลาส่ง",
+            "เวลาจากจุดก่อนหน้า",
             "เที่ยวส่ง",
             "รหัสสมาชิก",
             "ยอดส่ง (ถัง)",
             "ยอดส่งสะสม",
+            "ระยะทางจากจุดก่อนหน้า (กม.)",
             "สถานะการส่ง",
             "Latitude",
             "Longitude",
             "ค่าความต่าง GPS",
             "สรุปการแจ้งเตือน",
         ]
-        
-        # เพิ่ม hide_index=True เพื่อซ่อน Index อัตโนมัติ (0, 1, 2...) ของ Pandas
-        st.dataframe(disp_df, use_container_width=True, height=350, hide_index=True)
+
+        st.dataframe(
+            disp_df, use_container_width=True, height=350, hide_index=True
+        )
 
         st.divider()
 
         st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
-
-        trip_colors = {
-            "เที่ยวที่ 1": "#0055FF",
-            "เที่ยวที่ 2": "#FF0055",
-            "เที่ยวที่ 3": "#00AA44",
-            "เที่ยวที่ 4": "#AA00FF",
-        }
-
-        with st.spinner("กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม..."):
-            segments_data = []
-            grouped = df.groupby("trip", sort=False)
-
-            trip_distances = {}
-            point_counter = 0
-
-            for trip_name, group in grouped:
-                pts = (
-                    [warehouse_coord]
-                    + list(zip(group["lat"], group["lng"]))
-                    + [warehouse_coord]
-                )
-                records_list = group.to_dict("records")
-
-                total_trip_dist = 0.0
-
-                for i in range(len(pts) - 1):
-                    p1, p2 = pts[i], pts[i + 1]
-                    road_path, dist_km = get_osrm_route(
-                        p1[0], p1[1], p2[0], p2[1]
-                    )
-                    total_trip_dist += dist_km
-
-                    if i < len(records_list):
-                        info = records_list[i]
-                        info["point_idx"] = point_counter
-                        point_counter += 1
-                    else:
-                        info = {
-                            "cust_id": "WH-001",
-                            "time": "จบเที่ยววิ่ง",
-                            "qty": 0,
-                            "gps_diff": "0.00",
-                            "gps_diff_num": 0.0,
-                            "status": "วิ่งกลับเข้าคลังเรียบร้อย",
-                            "point_idx": None,
-                        }
-                    info["trip"] = trip_name
-                    info["seg_dist_km"] = round(dist_km, 2)
-
-                    segments_data.append({
-                        "trip": trip_name,
-                        "color": trip_colors.get(trip_name, "#0055FF"),
-                        "path": road_path,
-                        "info": info,
-                        "dist_km": round(dist_km, 2),
-                    })
-
-                trip_distances[trip_name] = round(total_trip_dist, 2)
-
-            total_day_distance = round(sum(trip_distances.values()), 2)
-
-        c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
 
         st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง")
         summaries = []
@@ -590,6 +654,7 @@ if uploaded_file:
                 else pd.DataFrame()
             )
             t_dist = trip_distances.get(trip_name, 0.0)
+            t_time_range = trip_time_ranges.get(trip_name, "-")
 
             actual_qty = group["qty"].sum() if not group.empty else 0
             point_count = len(group)
@@ -615,6 +680,7 @@ if uploaded_file:
 
             summaries.append({
                 "เที่ยวการส่ง": trip_name,
+                "เวลาจัดส่งแต่ละเที่ยว": t_time_range,
                 "ใบเบิก (DW)": t_info["dw_text"],
                 "ยอดเบิก (ถัง)": t_info["dws_qty"],
                 "ยอดคืน (ถัง)": t_info["res_qty"],
@@ -633,6 +699,7 @@ if uploaded_file:
 
         summaries.append({
             "เที่ยวการส่ง": "รวมทั้งหมดประจำวัน",
+            "เวลาจัดส่งแต่ละเที่ยว": "-",
             "ใบเบิก (DW)": "-",
             "ยอดเบิก (ถัง)": total_dws,
             "ยอดคืน (ถัง)": total_res,
