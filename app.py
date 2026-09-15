@@ -866,7 +866,7 @@ if uploaded_file:
             <div class="timeline-container">
                 <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
                 <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                <span id="slider-label" style="font-weight:bold; font-size:13px; min-width:280px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">09:00 - รหัส (จุด 1)</span>
+                <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:380px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - รหัส (จุด 1 | ยอด 0 ถัง | เที่ยวที่ 1)</span>
             </div>
 
             <div id="map"></div>
@@ -1099,8 +1099,11 @@ if uploaded_file:
 
                     let timeLabel = info.time || '-';
                     let custIdLabel = info.cust_id || '-';
-                    
-                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">รหัส: ${{custIdLabel}}</span> (จุด ${{currentStep + 1}})`;
+                    let qtyLabel = info.qty !== undefined ? info.qty : 0;
+                    let tripLabel = info.trip || currentSeg.trip || '-';
+                    let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
+
+                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - รหัส: <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}} | ยอด <span style="color:#D32F2F;">${{qtyLabel}} ถัง</span> | ${{tripLabel}})`;
 
                     activePolylines.forEach(p => map.removeLayer(p));
                     activePolylines = [];
@@ -1137,7 +1140,7 @@ if uploaded_file:
 
                     let infoBox = document.getElementById('info-box');
                     infoBox.innerHTML = `
-                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{currentStep + 1}} จาก ${{segments.length}}</b><br>
+                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
                         <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
                         <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
                         <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
