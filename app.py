@@ -451,7 +451,6 @@ if uploaded_file:
         c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
         c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        # --- คำนวณเส้นทางและระยะทางล่วงหน้าเพื่อให้ข้อมูลพร้อมแสดงในตาราง ---
         trip_colors = {
             "เที่ยวที่ 1": "#0055FF",
             "เที่ยวที่ 2": "#FF0055",
@@ -467,7 +466,6 @@ if uploaded_file:
             trip_time_ranges = {}
             point_counter = 0
 
-            # สำหรับเก็บข้อมูลระยะทาง/เวลาเทียบจุดก่อนหน้าใส่ DataFrame หลัก
             row_incremental_distances = []
             row_incremental_time_diffs = []
 
@@ -497,10 +495,8 @@ if uploaded_file:
                         info["point_idx"] = point_counter
                         point_counter += 1
 
-                        # เก็บระยะทางช่วงนี้ (จากจุดก่อนหน้ามาจุดนี้)
                         row_incremental_distances.append(round(dist_km, 2))
 
-                        # แปลงเวลาเพื่อคำนวณเวลาที่ใช้หักลบกับจุดก่อนหน้า
                         t_str = re.sub(
                             r"[^\d:]", "", str(info.get("time", ""))
                         )
@@ -516,9 +512,7 @@ if uploaded_file:
                                     diff = curr_dt - last_time_dt
                                     total_seconds = int(diff.total_seconds())
                                     if total_seconds < 0:
-                                        total_seconds += (
-                                            24 * 3600
-                                        )  # ข้ามวัน
+                                        total_seconds += 24 * 3600
                                     mins = total_seconds // 60
                                     time_diff_str = f"{mins} นาที"
                                     if mins >= 60:
@@ -569,7 +563,6 @@ if uploaded_file:
 
         c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
 
-        # เพิ่มข้อมูลคอลัมน์ใหม่ลงใน DataFrame หลัก
         df["inc_dist"] = row_incremental_distances
         df["inc_time"] = row_incremental_time_diffs
 
@@ -616,8 +609,6 @@ if uploaded_file:
         ]].copy()
 
         disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
-
-        # แทรกคอลัมน์ "ลำดับ" ให้เริ่มต้นที่ 1
         disp_df.insert(0, "ลำดับ", range(1, len(disp_df) + 1))
 
         disp_df.columns = [
@@ -745,13 +736,39 @@ if uploaded_file:
                 .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
                 .filter-btn.active {{ background-color: #2c3e50; color: white; }}
 
+                .legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
+                .legend-item {{ display: flex; align-items: center; gap: 4px; }}
+                .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                
+                /* ปรับแต่งปุ่มคลิกกรองที่แถบสัญลักษณ์ */
+                .badge-filter-btn {{
+                    cursor: pointer;
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 9px;
+                    border-radius: 50%;
+                    width: 16px;
+                    height: 16px;
+                    color: #fff;
+                    font-weight: bold;
+                    border: 1.5px solid transparent;
+                    transition: all 0.2s ease;
+                }}
+                .badge-filter-btn:hover {{
+                    transform: scale(1.2);
+                    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+                }}
+                .badge-filter-btn.active-badge-filter {{
+                    border: 2px solid #000 !important;
+                    transform: scale(1.3);
+                    box-shadow: 0 0 8px #FFD700;
+                }}
+
                 .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
                 .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
                 
                 #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
-                .legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
-                .legend-item {{ display: flex; align-items: center; gap: 4px; }}
-                .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
                 
                 .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
                 .marker-container {{ position: relative; width: 28px; height: 28px; }}
@@ -838,12 +855,12 @@ if uploaded_file:
                 <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
                 <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
                 <div style="border-left:2px solid #ccc; height:14px; margin:0 2px;"></div>
-                <div class="legend-item"><span style="background:#D32F2F; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">!</span> ไม่ตรงเวลา</div>
-                <div class="legend-item"><span style="background:#FF9800; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">G</span> GPS>100m</div>
-                <div class="legend-item"><span style="background:#8E44AD; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ร</span> รอบเสริม</div>
-                <div class="legend-item"><span style="background:#34495E; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">X</span> คำนวณไม่ได้</div>
-                <div class="legend-item"><span style="background:#27AE60; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">N</span> สมาชิกใหม่</div>
-                <div class="legend-item"><span style="background:#2980B9; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ย</span> ย้ายรอบ</div>
+                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-late" style="background:#D32F2F;" onclick="toggleBadgeFilter('late')">!</span> ไม่ตรงเวลา</div>
+                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-gps" style="background:#FF9800;" onclick="toggleBadgeFilter('gps')">G</span> GPS>100m</div>
+                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-extra" style="background:#8E44AD;" onclick="toggleBadgeFilter('extra')">ร</span> รอบเสริม</div>
+                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-calc" style="background:#34495E;" onclick="toggleBadgeFilter('calc')">X</span> คำนวณไม่ได้</div>
+                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-new" style="background:#27AE60;" onclick="toggleBadgeFilter('new')">N</span> สมาชิกใหม่</div>
+                <div class="legend-item"><span class="badge-filter-btn" id="filter-badge-moved" style="background:#2980B9;" onclick="toggleBadgeFilter('moved')">ย</span> ย้ายรอบ</div>
             </div>
 
             <div class="filter-bar">
@@ -878,6 +895,7 @@ if uploaded_file:
                 let currentSpeedMs = {anim_speed_ms};
 
                 let currentFilter = 'ALL';
+                let currentBadgeFilter = null; // เก็บเงื่อนไขป้ายที่เลือกกรองอยู่ปัจจุบัน (เช่น 'late', 'gps', etc.)
 
                 const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
                 L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
@@ -894,6 +912,52 @@ if uploaded_file:
                 let animTimer = null;
                 let isPlaying = false;
                 let activeMarkerRef = null;
+
+                function checkBadgeCondition(pt, badgeType) {{
+                    let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
+                    let isGpsDiff = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
+                    
+                    if (badgeType === 'late') return isLate;
+                    if (badgeType === 'gps') return isGpsDiff;
+                    if (badgeType === 'extra') return pt.is_extra_trip;
+                    if (badgeType === 'calc') return pt.is_cannot_calc;
+                    if (badgeType === 'new') return pt.is_new_member;
+                    if (badgeType === 'moved') return pt.is_moved_trip;
+                    return true;
+                }}
+
+                function toggleBadgeFilter(badgeType) {{
+                    pauseAnimation();
+                    if (currentBadgeFilter === badgeType) {{
+                        // ถ้าคลิกซ้ำตัวเดิม ให้ยกเลิกตัวกรอง (แสดงปกติ)
+                        currentBadgeFilter = null;
+                    }} else {{
+                        currentBadgeFilter = badgeType;
+                    }}
+
+                    // อัปเดต CSS คลาส active ที่ปุ่มไอคอน
+                    ['late', 'gps', 'extra', 'calc', 'new', 'moved'].forEach(b => {{
+                        let el = document.getElementById('filter-badge-' + b);
+                        if (el) {{
+                            if (currentBadgeFilter === b) el.classList.add('active-badge-filter');
+                            else el.classList.remove('active-badge-filter');
+                        }}
+                    }});
+
+                    initMarkers();
+
+                    // ขยับไปจุดแรกที่ตรงกับเงื่อนไข
+                    let firstMatchIdx = segments.findIndex(seg => {{
+                        let matchesTrip = (currentFilter === 'ALL' || seg.trip === currentFilter);
+                        let matchesBadge = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
+                        return matchesTrip && matchesBadge;
+                    }});
+
+                    if (firstMatchIdx !== -1) {{
+                        currentStep = firstMatchIdx;
+                        updateStep(currentStep);
+                    }}
+                }}
 
                 function createTooltipHtml(info, seqNum) {{
                     let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
@@ -949,7 +1013,10 @@ if uploaded_file:
 
                     if (isMode1) {{
                         points.forEach((pt, idx) => {{
-                            if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
+                            let matchesTrip = (currentFilter === 'ALL' || pt.trip === currentFilter);
+                            let matchesBadge = (currentBadgeFilter === null || checkBadgeCondition(pt, currentBadgeFilter));
+
+                            if (matchesTrip && matchesBadge) {{
                                 let seqNumber = idx + 1;
                                 let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
                                 let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
@@ -978,7 +1045,11 @@ if uploaded_file:
 
                     initMarkers();
 
-                    let firstMatchIdx = segments.findIndex(seg => currentFilter === 'ALL' || seg.trip === currentFilter);
+                    let firstMatchIdx = segments.findIndex(seg => {{
+                        let matchesTrip = (currentFilter === 'ALL' || seg.trip === currentFilter);
+                        let matchesBadge = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
+                        return matchesTrip && matchesBadge;
+                    }});
                     if (firstMatchIdx !== -1) {{
                         currentStep = firstMatchIdx;
                         updateStep(currentStep);
@@ -1007,13 +1078,25 @@ if uploaded_file:
                     currentStep = stepIndex;
                     let currentSeg = segments[currentStep];
 
-                    if (currentFilter !== 'ALL' && currentSeg.trip !== currentFilter) {{
-                        let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && (currentFilter === 'ALL' || seg.trip === currentFilter));
+                    // ข้ามสเต็ปที่ไม่ตรงกับเงื่อนไขตัวกรองทั้งเที่ยวและป้ายสถานะ
+                    let matchesTrip = (currentFilter === 'ALL' || currentSeg.trip === currentFilter);
+                    let matchesBadge = (currentBadgeFilter === null || (currentSeg.info && checkBadgeCondition(currentSeg.info, currentBadgeFilter)));
+
+                    if (!matchesTrip || !matchesBadge) {{
+                        let nextValid = segments.findIndex((seg, idx) => {{
+                            let mt = (currentFilter === 'ALL' || seg.trip === currentFilter);
+                            let mb = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
+                            return idx >= currentStep && mt && mb;
+                        }});
                         if (nextValid !== -1) {{
                             currentStep = nextValid;
                             currentSeg = segments[currentStep];
                         }} else {{
-                            let prevValid = segments.map((s, i) => i).reverse().find(i => currentFilter === 'ALL' || segments[i].trip === currentFilter);
+                            let prevValid = segments.map((s, i) => i).reverse().find(i => {{
+                                let mt = (currentFilter === 'ALL' || segments[i].trip === currentFilter);
+                                let mb = (currentBadgeFilter === null || (segments[i].info && checkBadgeCondition(segments[i].info, currentBadgeFilter)));
+                                return mt && mb;
+                            }});
                             if (prevValid !== undefined) {{
                                 currentStep = prevValid;
                                 currentSeg = segments[currentStep];
@@ -1043,7 +1126,9 @@ if uploaded_file:
                     let accumulatedDistance = 0.0;
                     for (let i = 0; i <= currentStep; i++) {{
                         let seg = segments[i];
-                        if (currentFilter !== 'ALL' && seg.trip !== currentFilter) continue;
+                        let mt = (currentFilter === 'ALL' || seg.trip === currentFilter);
+                        let mb = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
+                        if (!mt || !mb) continue;
 
                         accumulatedDistance += (seg.dist_km || 0.0);
 
@@ -1080,7 +1165,9 @@ if uploaded_file:
                 function nextStep() {{
                     let nextIdx = currentStep + 1;
                     while (nextIdx < segments.length) {{
-                        if (currentFilter === 'ALL' || segments[nextIdx].trip === currentFilter) break;
+                        let mt = (currentFilter === 'ALL' || segments[nextIdx].trip === currentFilter);
+                        let mb = (currentBadgeFilter === null || (segments[nextIdx].info && checkBadgeCondition(segments[nextIdx].info, currentBadgeFilter)));
+                        if (mt && mb) break;
                         nextIdx++;
                     }}
 
@@ -1109,7 +1196,11 @@ if uploaded_file:
 
                 function resetAnimation() {{
                     pauseAnimation();
-                    let firstMatchIdx = segments.findIndex(seg => currentFilter === 'ALL' || seg.trip === currentFilter);
+                    let firstMatchIdx = segments.findIndex(seg => {{
+                        let mt = (currentFilter === 'ALL' || seg.trip === currentFilter);
+                        let mb = (currentBadgeFilter === null || (seg.info && checkBadgeCondition(seg.info, currentBadgeFilter)));
+                        return mt && mb;
+                    }});
                     currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
                     updateStep(currentStep);
                     document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
