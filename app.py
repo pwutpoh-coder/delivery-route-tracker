@@ -735,10 +735,14 @@ if uploaded_file:
                 
                 .filter-bar {{ margin-bottom: 8px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
                 .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
+                .filter-btn:hover {{ background-color: #cfd8dc; }}
                 .filter-btn.active {{ background-color: #2c3e50; color: white; }}
+                .filter-btn.active:hover {{ background-color: #1a252f; }}
 
                 .status-filter-btn {{ padding: 4px 10px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 4px; }}
+                .status-filter-btn:hover {{ background-color: #d5dbdb; opacity: 0.9; }}
                 .status-filter-btn.active {{ background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }}
+                .status-filter-btn.active:hover {{ background-color: #c9302c; }}
 
                 .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
                 .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
