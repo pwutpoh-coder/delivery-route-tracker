@@ -1613,14 +1613,6 @@ if uploaded_file:
                     function initOptMarkers() {{
                         optAllMarkers.forEach(m => optMap.removeLayer(m));
                         optAllMarkers = [];
-                        optPoints.forEach((pt, idx) => {{
-                            if (optPointMatchesFilter(pt)) {{
-                                let customIcon = createOptMarkerIcon(pt.opt_seq, pt.orig_seq, pt.color, pt);
-                                let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(optMap);
-                                marker.bindTooltip(createOptTooltipHtml(pt), {{ direction: 'top', opacity: 0.95 }});
-                                optAllMarkers[idx] = marker;
-                            }}
-                        }});
                         updateOptStatusCounts();
                     }}
 
@@ -1665,7 +1657,7 @@ if uploaded_file:
                         }}
                         optActiveMarkerRef = null;
                         if (!info || info.point_idx === undefined || info.point_idx === null) return;
-                        let target = optAllMarkers[info.point_idx];
+                        let target = optStepMarkers[info.point_idx];
                         if (target && target._icon) {{
                             let innerDiv = target._icon.querySelector('.opt-number-icon');
                             if (innerDiv) innerDiv.classList.add('opt-number-icon-active');
@@ -1702,6 +1694,8 @@ if uploaded_file:
 
                         optActivePolylines.forEach(p => optMap.removeLayer(p));
                         optActivePolylines = [];
+                        optStepMarkers.forEach(m => {{ if (m) optMap.removeLayer(m); }});
+                        optStepMarkers = [];
 
                         let accumulatedDistance = 0.0;
                         for (let i = 0; i <= optCurrentStep; i++) {{
@@ -1710,6 +1704,17 @@ if uploaded_file:
                             accumulatedDistance += (seg.dist_km || 0.0);
                             let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
                             optActivePolylines.push(polyline);
+
+                            if (seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
+                                let pIdx = seg.info.point_idx;
+                                let ptInfo = optPoints[pIdx];
+                                if (ptInfo && !optStepMarkers[pIdx]) {{
+                                    let customIcon = createOptMarkerIcon(ptInfo.opt_seq, ptInfo.orig_seq, ptInfo.color, ptInfo);
+                                    let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(optMap);
+                                    marker.bindTooltip(createOptTooltipHtml(ptInfo), {{ direction: 'top', opacity: 0.95 }});
+                                    optStepMarkers[pIdx] = marker;
+                                }}
+                            }}
                         }}
 
                         highlightOptMarkerByInfo(info);
@@ -1774,7 +1779,3 @@ if uploaded_file:
             """
 
             st.components.v1.html(opt_map_html, height=820, scrolling=False)
-
-            st.info(
-                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** และป้ายสีดำมุมขวาบนของหมุดแสดงเฉพาะ **เลขลำดับเดิม** เพื่อให้การเปรียบเทียบตำแหน่งมีความชัดเจนและเป็นระเบียบ"
-            )
