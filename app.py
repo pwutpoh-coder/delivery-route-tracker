@@ -1068,7 +1068,7 @@ if uploaded_file:
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
-                        // อัปเดตแบนเนอร์ด้านบนสุดให้แสดงพิกัดที่กำลังมาถึง
+                        # อัปเดตแบนเนอร์ด้านบนสุดให้แสดงพิกัดที่กำลังมาถึง
                         document.getElementById('top-banner-content').innerHTML = `
                             จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | รหัสลูกค้า: <span style="color:#64ffda;">${{custIdLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | พิกัด: ${{info.lat_display}}, ${{info.lng_display}} | สถานะ: ${{info.status}}
                         `;
@@ -1286,7 +1286,7 @@ if uploaded_file:
                 "ระยะทางหลังปรับปรุง",
                 f"{total_opt_dist_all:.2f} กม.",
                 delta=f"-{total_dist_diff:.2f} กม.",
-                delta_value="inverse",
+                delta_color="inverse",  # แก้ไขจาก delta_value เป็น delta_color แล้ว[cite: 2]
             )
             col_a3.metric("ประสิทธิภาพการประหยัด", f"{total_pct_saving:.2f}%")
             col_a4.metric(
