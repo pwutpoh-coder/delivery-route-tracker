@@ -446,6 +446,7 @@ if uploaded_file:
             f" {len(trip_quotas)} เที่ยว"
         )
 
+        # สร้างแท็บสำหรับ 2 หน้าแสดงผลหลักตามข้อกำหนด
         tab1, tab2 = st.tabs([
             "📊 1. แผนที่และเส้นทางตามลำดับเวลาจริง",
             "🚀 2. แผนที่และเส้นทางเหมาะสมที่สุด (ไม่เรียงเวลา)",
@@ -458,6 +459,7 @@ if uploaded_file:
             c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
             c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
+            # --- คำนวณเส้นทางและระยะทางล่วงหน้า ---
             trip_colors = {
                 "เที่ยวที่ 1": "#0055FF",
                 "เที่ยวที่ 2": "#FF0055",
@@ -1175,6 +1177,7 @@ if uploaded_file:
             total_swapped_points = 0
             total_points_count = 0
 
+            # สร้าง map โยงรหัสลูกค้ากับลำดับเดิมในแผนที่ที่ 1
             original_order_map = {}
             for orig_idx_val, r_item in enumerate(df.to_dict("records")):
                 original_order_map[r_item["cust_id"]] = orig_idx_val + 1
@@ -1277,6 +1280,7 @@ if uploaded_file:
                     "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
                 })
 
+                # สร้างเส้นทางและส่งข้อมูลลำดับใหม่ + ลำดับเดิมไปแสดงผลบนแผนที่ที่ 2
                 opt_full_pts = [warehouse_coord] + [
                     (pt["lat"], pt["lng"]) for pt in opt_records
                 ] + [warehouse_coord]
@@ -1296,6 +1300,7 @@ if uploaded_file:
                         }
                     )
                     info["trip"] = trip_name
+                    # กำหนดลำดับใหม่ (Optimized Index) และลำดับเดิม
                     opt_seq_num = i + 1 if i < len(opt_records) else ""
                     orig_seq_num = (
                         original_order_map.get(info["cust_id"], "-")
@@ -1320,6 +1325,7 @@ if uploaded_file:
                 else 0.0
             )
 
+            # --- 3. ส่วนสรุปเปรียบเทียบระยะทางและลำดับ ---
             st.markdown("### 📊 3. สรุปเปรียบเทียบระยะทางและลำดับ (แบบที่ 1 vs แบบที่ 2)")
             col_a1, col_a2, col_a3, col_a4 = st.columns(4)
             col_a1.metric(
@@ -1351,6 +1357,7 @@ if uploaded_file:
                 hide_index=True,
             )
 
+            # เรนเดอร์แผนที่ตัวที่ 2 (Optimized Route Map) พร้อมแสดงลำดับแนะนำใหม่ + ป้ายแจ้งลำดับเดิม
             st.markdown("### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map)")
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
 
