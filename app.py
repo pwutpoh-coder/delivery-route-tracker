@@ -1,6 +1,7 @@
 import json
 import re
 from datetime import datetime, timedelta
+from math import asin, cos, radians, sin, sqrt
 import pandas as pd
 import requests
 import streamlit as st
@@ -110,6 +111,18 @@ anim_speed_ms = st.sidebar.slider(
 )
 
 
+# --- FUNCTION: Haversine Distance ---
+def haversine(lat1, lon1, lat2, lon2):
+    r = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    )
+    return 2 * r * asin(sqrt(a))
+
+
 # --- FUNCTION: ดึงเส้นทางถนนจริงและระยะทางจาก OSRM ---
 @st.cache_data(show_spinner=False)
 def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
@@ -125,18 +138,6 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
                 return [[pt[1], pt[0]] for pt in coords], distance_km
     except Exception:
         pass
-
-    from math import asin, cos, radians, sin, sqrt
-
-    def haversine(lat1, lon1, lat2, lon2):
-        r = 6371
-        dlat = radians(lat2 - lat1)
-        dlon = radians(lon2 - lon1)
-        a = (
-            sin(dlat / 2) ** 2
-            + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
-        )
-        return 2 * r * asin(sqrt(a))
 
     dist = haversine(p1_lat, p1_lng, p2_lat, p2_lng)
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
@@ -445,758 +446,861 @@ if uploaded_file:
             f" {len(trip_quotas)} เที่ยว"
         )
 
-        st.subheader("📌 ข้อมูลสรุปการปฏิบัติงาน")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
-        c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
-        c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
+        # สร้างแท็บสำหรับ 2 หน้าแสดงผล
+        tab1, tab2 = st.tabs([
+            "📊 ระบบติดตามและวิเคราะห์เส้นทางหลัก",
+            "🚀 เปรียบเทียบเส้นทางที่เหมาะสมที่สุด (ไม่เรียงตามเวลา)",
+        ])
 
-        # --- คำนวณเส้นทางและระยะทางล่วงหน้า ---
-        trip_colors = {
-            "เที่ยวที่ 1": "#0055FF",
-            "เที่ยวที่ 2": "#FF0055",
-            "เที่ยวที่ 3": "#00AA44",
-            "เที่ยวที่ 4": "#AA00FF",
-        }
+        with tab1:
+            st.subheader("📌 ข้อมูลสรุปการปฏิบัติงาน")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
+            c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
+            c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
-        with st.spinner("กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม..."):
-            segments_data = []
-            grouped = df.groupby("trip", sort=False)
+            # --- คำนวณเส้นทางและระยะทางล่วงหน้า ---
+            trip_colors = {
+                "เที่ยวที่ 1": "#0055FF",
+                "เที่ยวที่ 2": "#FF0055",
+                "เที่ยวที่ 3": "#00AA44",
+                "เที่ยวที่ 4": "#AA00FF",
+            }
 
-            trip_distances = {}
-            trip_time_ranges = {}
-            point_counter = 0
+            with st.spinner("กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม..."):
+                segments_data = []
+                grouped = df.groupby("trip", sort=False)
 
-            row_incremental_distances = []
-            row_incremental_time_diffs = []
+                trip_distances = {}
+                trip_time_ranges = {}
+                point_counter = 0
 
-            last_lat, last_lng = warehouse_coord
-            last_time_dt = None
+                row_incremental_distances = []
+                row_incremental_time_diffs = []
 
-            for trip_name, group in grouped:
-                pts = (
+                last_lat, last_lng = warehouse_coord
+                last_time_dt = None
+
+                for trip_name, group in grouped:
+                    pts = (
+                        [warehouse_coord]
+                        + list(zip(group["lat"], group["lng"]))
+                        + [warehouse_coord]
+                    )
+                    records_list = group.to_dict("records")
+
+                    total_trip_dist = 0.0
+                    trip_times = []
+
+                    for i in range(len(pts) - 1):
+                        p1, p2 = pts[i], pts[i + 1]
+                        road_path, dist_km = get_osrm_route(
+                            p1[0], p1[1], p2[0], p2[1]
+                        )
+                        total_trip_dist += dist_km
+
+                        if i < len(records_list):
+                            info = records_list[i]
+                            info["point_idx"] = point_counter
+                            point_counter += 1
+
+                            row_incremental_distances.append(round(dist_km, 2))
+
+                            t_str = re.sub(
+                                r"[^\d:]", "", str(info.get("time", ""))
+                            )
+                            time_diff_str = "-"
+                            if t_str:
+                                try:
+                                    parts = t_str.split(":")
+                                    curr_dt = datetime.strptime(
+                                        f"{parts[0].zfill(2)}:{parts[1].zfill(2)}",
+                                        "%H:%M",
+                                    )
+                                    if last_time_dt is not None:
+                                        diff = curr_dt - last_time_dt
+                                        total_seconds = int(diff.total_seconds())
+                                        if total_seconds < 0:
+                                            total_seconds += 24 * 3600
+                                        mins = total_seconds // 60
+                                        time_diff_str = f"{mins} นาที"
+                                        if mins >= 60:
+                                            hrs = mins // 60
+                                            rmins = mins % 60
+                                            time_diff_str = (
+                                                f"{hrs} ชม. {rmins} นาที"
+                                            )
+                                    last_time_dt = curr_dt
+                                except Exception:
+                                    pass
+                            row_incremental_time_diffs.append(time_diff_str)
+
+                            if info.get("time") and "ไม่ระบุ" not in str(
+                                info.get("time")
+                            ):
+                                trip_times.append(str(info.get("time")))
+                        else:
+                            info = {
+                                "cust_id": "WH-001",
+                                "time": "จบเที่ยววิ่ง",
+                                "qty": 0,
+                                "gps_diff": "0.00",
+                                "gps_diff_num": 0.0,
+                                "status": "วิ่งกลับเข้าคลังเรียบร้อย",
+                                "point_idx": None,
+                            }
+                        info["trip"] = trip_name
+                        info["seg_dist_km"] = round(dist_km, 2)
+
+                        segments_data.append({
+                            "trip": trip_name,
+                            "color": trip_colors.get(trip_name, "#0055FF"),
+                            "path": road_path,
+                            "info": info,
+                            "dist_km": round(dist_km, 2),
+                        })
+
+                    trip_distances[trip_name] = round(total_trip_dist, 2)
+                    if trip_times:
+                        trip_time_ranges[trip_name] = (
+                            f"{trip_times[0]} - {trip_times[-1]}"
+                        )
+                    else:
+                        trip_time_ranges[trip_name] = "-"
+
+                total_day_distance = round(sum(trip_distances.values()), 2)
+
+            c4.success(
+                f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม."
+            )
+
+            df["inc_dist"] = row_incremental_distances
+            df["inc_time"] = row_incremental_time_diffs
+
+            st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน")
+
+            def get_notification_badge(row):
+                notices = []
+                has_special_tag = (
+                    row.get("is_extra_trip")
+                    or row.get("is_moved_trip")
+                    or row.get("is_cannot_calc")
+                    or row.get("is_new_member")
+                )
+
+                if "ไม่ตรงเวลา" in str(row["status"]):
+                    notices.append("จัดส่งไม่ตรงเวลา")
+                elif not has_special_tag:
+                    notices.append("จัดส่งตรงเวลา")
+
+                if row["gps_diff_num"] > 100:
+                    notices.append(f"GPS ห่าง {row['gps_diff']}m")
+                if row.get("is_extra_trip"):
+                    notices.append("รอบเสริม")
+                if row.get("is_cannot_calc"):
+                    notices.append("ไม่สามารถคำนวณได้")
+                if row.get("is_new_member"):
+                    notices.append("สมาชิกใหม่")
+                if row.get("is_moved_trip"):
+                    notices.append("ย้ายรอบ")
+                return " | ".join(notices)
+
+            disp_df = df[[
+                "time",
+                "inc_time",
+                "trip",
+                "cust_id",
+                "qty",
+                "acc_qty",
+                "inc_dist",
+                "status",
+                "lat_display",
+                "lng_display",
+                "gps_diff",
+            ]].copy()
+
+            disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
+            disp_df.insert(0, "ลำดับ", range(1, len(disp_df) + 1))
+
+            disp_df.columns = [
+                "ลำดับ",
+                "เวลาส่ง",
+                "เวลาจากจุดก่อนหน้า",
+                "เที่ยวส่ง",
+                "รหัสสมาชิก",
+                "ยอดส่ง (ถัง)",
+                "ยอดส่งสะสม",
+                "ระยะทางจากจุดก่อนหน้า (กม.)",
+                "สถานะการส่ง",
+                "Latitude",
+                "Longitude",
+                "ค่าความต่าง GPS",
+                "สรุปการแจ้งเตือน",
+            ]
+
+            st.dataframe(
+                disp_df, use_container_width=True, height=350, hide_index=True
+            )
+
+            st.divider()
+
+            st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
+
+            st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง")
+            summaries = []
+            for idx, t_info in enumerate(trip_quotas):
+                trip_name = f"เที่ยวที่ {t_info['trip_no']}"
+                group = (
+                    df[df["trip"] == trip_name]
+                    if trip_name in df["trip"].values
+                    else pd.DataFrame()
+                )
+                t_dist = trip_distances.get(trip_name, 0.0)
+                t_time_range = trip_time_ranges.get(trip_name, "-")
+
+                actual_qty = group["qty"].sum() if not group.empty else 0
+                point_count = len(group)
+                ontime_count = (
+                    len(
+                        group[
+                            ~group["status"].str.contains(
+                                "ไม่ตรงเวลา", na=False
+                            )
+                        ]
+                    )
+                    if not group.empty
+                    else 0
+                )
+                late_count = (
+                    len(
+                        group[
+                            group["status"].str.contains(
+                                "ไม่ตรงเวลา", na=False
+                            )
+                        ]
+                    )
+                    if not group.empty
+                    else 0
+                )
+                gps_err_count = (
+                    len(group[group["gps_diff_num"] > 100])
+                    if not group.empty
+                    else 0
+                )
+
+                summaries.append({
+                    "เที่ยวการส่ง": trip_name,
+                    "เวลาจัดส่งแต่ละเที่ยว": t_time_range,
+                    "ใบเบิก (DW)": t_info["dw_text"],
+                    "ยอดเบิก (ถัง)": t_info["dws_qty"],
+                    "ยอดคืน (ถัง)": t_info["res_qty"],
+                    "ยอดส่งสุทธิ (เป้าหมาย)": t_info["net_qty"],
+                    "ยอดจัดส่งจริง (ถัง)": actual_qty,
+                    "จำนวนจุดส่ง (จุด)": point_count,
+                    "ระยะทางวิ่งรวม (กม.)": f"{t_dist:.2f}",
+                    "จัดส่งตรงเวลา (จุด)": ontime_count,
+                    "จัดส่งไม่ตรงเวลา (จุด)": late_count,
+                    "GPS คลาดเคลื่อน >100m (จุด)": gps_err_count,
+                })
+
+            total_dws = sum([t["dws_qty"] for t in trip_quotas])
+            total_res = sum([t["res_qty"] for t in trip_quotas])
+            total_net = sum([t["net_qty"] for t in trip_quotas])
+
+            summaries.append({
+                "เที่ยวการส่ง": "รวมทั้งหมดประจำวัน",
+                "เวลาจัดส่งแต่ละเที่ยว": "-",
+                "ใบเบิก (DW)": "-",
+                "ยอดเบิก (ถัง)": total_dws,
+                "ยอดคืน (ถัง)": total_res,
+                "ยอดส่งสุทธิ (เป้าหมาย)": total_net,
+                "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
+                "จำนวนจุดส่ง (จุด)": len(df),
+                "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
+                "จัดส่งตรงเวลา (จุด)": len(
+                    df[~df["status"].str.contains("ไม่ตรงเวลา", na=False)]
+                ),
+                "จัดส่งไม่ตรงเวลา (จุด)": len(
+                    df[df["status"].str.contains("ไม่ตรงเวลา", na=False)]
+                ),
+                "GPS คลาดเคลื่อน >100m (จุด)": len(
+                    df[df["gps_diff_num"] > 100]
+                ),
+            })
+
+            st.table(pd.DataFrame(summaries))
+
+            df_records = df.to_dict("records")
+            for idx, r in enumerate(df_records):
+                r["color"] = trip_colors.get(r.get("trip"), "#0055FF")
+                r["point_idx"] = idx
+
+            points_json = json.dumps(df_records, ensure_ascii=False)
+            segments_json = json.dumps(segments_data, ensure_ascii=False)
+            wh_json = json.dumps(warehouse_coord)
+            is_mode_1 = "แบบที่ 1" in play_mode
+
+            map_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8" />
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                <style>
+                    #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                    
+                    /* แบนเนอร์แสดงพิกัดปัจจุบันด้านบนสุดเสมอ */
+                    #top-active-banner {{
+                        background: linear-gradient(135deg, #1e3d59, #17b978);
+                        color: white;
+                        padding: 12px 18px;
+                        border-radius: 8px;
+                        margin-bottom: 12px;
+                        font-family: sans-serif;
+                        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+                        border-left: 6px solid #ff6e40;
+                    }}
+                    
+                    .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+                    button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
+                    button:hover {{ background-color: #005f73; transform: scale(1.02); }}
+                    
+                    .filter-bar {{ margin-bottom: 8px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
+                    .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
+                    .filter-btn:hover {{ background-color: #cfd8dc; }}
+                    .filter-btn.active {{ background-color: #2c3e50; color: white; }}
+
+                    .status-filter-btn {{ padding: 4px 10px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 4px; }}
+                    .status-filter-btn:hover {{ background-color: #d5dbdb; opacity: 0.9; }}
+                    .status-filter-btn.active {{ background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }}
+
+                    .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
+                    .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; }}
+                    
+                    #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
+                    .legend {{ display: flex; gap: 12px; margin-bottom: 6px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
+                    .legend-item {{ display: flex; align-items: center; gap: 4px; }}
+                    .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                    
+                    .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
+                    .marker-container {{ position: relative; width: 28px; height: 28px; }}
+
+                    .number-icon {{
+                        color: #FFFFFF !important;
+                        border: 2px solid #FFFFFF !important;
+                        border-radius: 50% !important;
+                        text-align: center !important;
+                        font-weight: bold !important;
+                        font-size: 11px !important;
+                        line-height: 22px !important;
+                        width: 26px !important;
+                        height: 26px !important;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        box-sizing: border-box !important;
+                    }}
+
+                    .number-icon-active {{
+                        transform: scale(1.6) !important;
+                        z-index: 1000 !important;
+                        border: 2px solid #FFFFFF !important;
+                        box-shadow: 0 0 14px #FFD700, 0 4px 10px rgba(0,0,0,0.8) !important;
+                    }}
+
+                    .marker-badge-late {{
+                        position: absolute; top: -6px; right: -8px;
+                        background-color: #D32F2F; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
+                    .marker-badge-gps {{
+                        position: absolute; top: -6px; left: -8px;
+                        background-color: #FF9800; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
+                    .marker-badge-extra {{
+                        position: absolute; bottom: -6px; left: -8px;
+                        background-color: #8E44AD; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
+                    .marker-badge-calc {{
+                        position: absolute; bottom: -6px; right: -8px;
+                        background-color: #34495E; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
+                    .marker-badge-new {{
+                        position: absolute; top: 50%; left: -10px; transform: translateY(-50%);
+                        background-color: #27AE60; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
+                    .marker-badge-moved {{
+                        position: absolute; top: 50%; right: -10px; transform: translateY(-50%);
+                        background-color: #2980B9; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
+                    .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
+                </style>
+            </head>
+            <body>
+                <!-- แบนเนอร์แสดงพิกัดที่กำลังมาถึงด้านบนสุดเสมอ -->
+                <div id="top-active-banner">
+                    <div style="font-size: 12px; color: #ffeb3b; font-weight: bold; margin-bottom: 3px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง (แสดงด้านบนสุดตลอดเวลา):</div>
+                    <div id="top-banner-content" style="font-size: 14px; font-weight: bold;">กำลังโหลดข้อมูล...</div>
+                </div>
+
+                <div class="legend">
+                    <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
+                    <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
+                    <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
+                </div>
+
+                <div class="filter-bar">
+                    <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองเที่ยว:</span>
+                    <button class="filter-btn active" id="btn-all" onclick="setTripFilter('ALL')">แสดงทั้งหมด</button>
+                    <button class="filter-btn" id="btn-trip1" onclick="setTripFilter('เที่ยวที่ 1')">เที่ยวที่ 1</button>
+                    <button class="filter-btn" id="btn-trip2" onclick="setTripFilter('เที่ยวที่ 2')">เที่ยวที่ 2</button>
+                    <button class="filter-btn" id="btn-trip3" onclick="setTripFilter('เที่ยวที่ 3')">เที่ยวที่ 3</button>
+                </div>
+
+                <div class="filter-bar" style="background: #faf2f2;">
+                    <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะ:</span>
+                    <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')">GPS>100m (<span id="count-gps">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')">รอบเสริม (<span id="count-extra">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-calc" onclick="setStatusFilter('calc')">คำนวณไม่ได้ (<span id="count-calc">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')">สมาชิกใหม่ (<span id="count-new">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-moved" onclick="setStatusFilter('moved')">ย้ายรอบ (<span id="count-moved">0</span>)</button>
+                </div>
+
+                <div class="controls">
+                    <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
+                    <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
+                    <button onclick="resetAnimation()">🔄 รีเซ็ต (Reset)</button>
+                    <span id="status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50;">พร้อมสำหรับการจำลองเส้นทาง...</span>
+                </div>
+
+                <div class="timeline-container">
+                    <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
+                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
+                    <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:350px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
+                </div>
+
+                <div id="map"></div>
+                <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" เพื่อดูรายละเอียดแบบเรียลไทม์</div>
+
+                <script>
+                    const points = {points_json};
+                    const segments = {segments_json};
+                    const warehouse = {wh_json};
+                    const isMode1 = {str(is_mode_1).lower()};
+                    let currentSpeedMs = {anim_speed_ms};
+
+                    let currentFilter = 'ALL';
+                    let currentStatusFilter = null;
+
+                    const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        attribution: '© OpenStreetMap contributors'
+                    }}).addTo(map);
+
+                    L.marker(warehouse).addTo(map)
+                        .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
+
+                    let allMarkers = [];
+                    let activePolylines = [];
+                    let stepMarkers = [];
+                    let currentStep = 0;
+                    let animTimer = null;
+                    let isPlaying = false;
+                    let activeMarkerRef = null;
+
+                    function pointMatchesFilter(pt) {{
+                        if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
+                        if (currentStatusFilter !== null) {{
+                            let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
+                            let isGps = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
+                            let isExtra = pt.is_extra_trip;
+                            let isCalc = pt.is_cannot_calc;
+                            let isNew = pt.is_new_member;
+                            let isMoved = pt.is_moved_trip;
+
+                            if (currentStatusFilter === 'late' && !isLate) return false;
+                            if (currentStatusFilter === 'gps' && !isGps) return false;
+                            if (currentStatusFilter === 'extra' && !isExtra) return false;
+                            if (currentStatusFilter === 'calc' && !isCalc) return false;
+                            if (currentStatusFilter === 'new' && !isNew) return false;
+                            if (currentStatusFilter === 'moved' && !isMoved) return false;
+                        }}
+                        return true;
+                    }}
+
+                    function updateStatusCounts() {{
+                        let counts = {{ late: 0, gps: 0, extra: 0, calc: 0, new: 0, moved: 0 }};
+                        points.forEach(pt => {{
+                            if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
+                                if (pt.status && pt.status.includes("ไม่ตรงเวลา")) counts.late++;
+                                if ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100) counts.gps++;
+                                if (pt.is_extra_trip) counts.extra++;
+                                if (pt.is_cannot_calc) counts.calc++;
+                                if (pt.is_new_member) counts.new++;
+                                if (pt.is_moved_trip) counts.moved++;
+                            }}
+                        }});
+                        document.getElementById('count-late').innerText = counts.late;
+                        document.getElementById('count-gps').innerText = counts.gps;
+                        document.getElementById('count-extra').innerText = counts.extra;
+                        document.getElementById('count-calc').innerText = counts.calc;
+                        document.getElementById('count-new').innerText = counts.new;
+                        document.getElementById('count-moved').innerText = counts.moved;
+                    }}
+
+                    function createTooltipHtml(info, seqNum) {{
+                        let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
+                        let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
+                        let badgesHtml = [];
+                        if (isLate) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>`);
+                        else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`);
+                        if (isGpsDiff) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
+                        return `<div style="font-family:sans-serif; font-size:12px;"><b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>${{badgesHtml.join(' ')}}<br><b>เวลา:</b> ${{info.time}}<br><b>รหัส:</b> ${{info.cust_id}}<br><b>ยอดส่ง:</b> ${{info.qty}} ถัง</div>`;
+                    }}
+
+                    function createMarkerIcon(seqNum, color, ptInfo) {{
+                        let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
+                        let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
+                        let lateBadgeHtml = isLate ? `<div class="marker-badge-late">!</div>` : '';
+                        let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps">G</div>` : '';
+                        let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
+                        return L.divIcon({{ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
+                    }}
+
+                    function initMarkers() {{
+                        allMarkers.forEach(m => map.removeLayer(m));
+                        allMarkers = [];
+                        if (isMode1) {{
+                            points.forEach((pt, idx) => {{
+                                if (pointMatchesFilter(pt)) {{
+                                    let seqNumber = idx + 1;
+                                    let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
+                                    let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
+                                    marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                                    allMarkers[idx] = marker;
+                                }}
+                            }});
+                        }}
+                        updateStatusCounts();
+                    }}
+
+                    initMarkers();
+
+                    function setTripFilter(filterName) {{
+                        pauseAnimation();
+                        currentFilter = filterName;
+                        ['btn-all', 'btn-trip1', 'btn-trip2', 'btn-trip3'].forEach(id => {{
+                            let el = document.getElementById(id);
+                            if (el) el.classList.remove('active');
+                        }});
+                        if (filterName === 'ALL') document.getElementById('btn-all').classList.add('active');
+                        else if (filterName === 'เที่ยวที่ 1') document.getElementById('btn-trip1').classList.add('active');
+                        else if (filterName === 'เที่ยวที่ 2') document.getElementById('btn-trip2').classList.add('active');
+                        else if (filterName === 'เที่ยวที่ 3') document.getElementById('btn-trip3').classList.add('active');
+
+                        initMarkers();
+                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                        if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
+                    }}
+
+                    function setStatusFilter(statusKey) {{
+                        pauseAnimation();
+                        currentStatusFilter = (currentStatusFilter === statusKey) ? null : statusKey;
+                        ['late', 'gps', 'extra', 'calc', 'new', 'moved'].forEach(k => {{
+                            let btn = document.getElementById('status-btn-' + k);
+                            if (btn) {{
+                                if (k === currentStatusFilter) btn.classList.add('active');
+                                else btn.classList.remove('active');
+                            }}
+                        }});
+                        initMarkers();
+                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                        if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
+                    }}
+
+                    function highlightMarkerByInfo(info) {{
+                        if (activeMarkerRef && activeMarkerRef._icon) {{
+                            let innerDiv = activeMarkerRef._icon.querySelector('.number-icon');
+                            if (innerDiv) innerDiv.classList.remove('number-icon-active');
+                        }}
+                        activeMarkerRef = null;
+                        if (!info || info.point_idx === undefined || info.point_idx === null) return;
+                        let target = isMode1 ? allMarkers[info.point_idx] : stepMarkers[info.point_idx];
+                        if (target && target._icon) {{
+                            let innerDiv = target._icon.querySelector('.number-icon');
+                            if (innerDiv) innerDiv.classList.add('number-icon-active');
+                            activeMarkerRef = target;
+                        }}
+                    }}
+
+                    function updateStep(stepIndex) {{
+                        if (stepIndex < 0 || stepIndex >= segments.length) return;
+                        currentStep = stepIndex;
+                        let currentSeg = segments[currentStep];
+
+                        if (!pointMatchesFilter(currentSeg.info)) {{
+                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && pointMatchesFilter(seg.info));
+                            if (nextValid !== -1) {{ currentStep = nextValid; currentSeg = segments[currentStep]; }}
+                        }}
+
+                        let info = currentSeg.info;
+                        let slider = document.getElementById('timeSlider');
+                        slider.value = currentStep;
+                        slider.style.accentColor = currentSeg.color;
+
+                        let timeLabel = info.time || '-';
+                        let custIdLabel = info.cust_id || '-';
+                        let qtyLabel = info.qty !== undefined ? info.qty : 0;
+                        let tripLabel = info.trip || currentSeg.trip || '-';
+                        let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
+
+                        // อัปเดตแบนเนอร์ด้านบนสุดให้แสดงพิกัดที่กำลังมาถึง
+                        document.getElementById('top-banner-content').innerHTML = `
+                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | รหัสลูกค้า: <span style="color:#64ffda;">${{custIdLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | พิกัด: ${{info.lat_display}}, ${{info.lng_display}} | สถานะ: ${{info.status}}
+                        `;
+
+                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - รหัส: <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}} | ยอด ${{qtyLabel}} ถัง)`;
+
+                        activePolylines.forEach(p => map.removeLayer(p));
+                        activePolylines = [];
+                        if (!isMode1) {{
+                            stepMarkers.forEach(m => {{ if (m) map.removeLayer(m); }});
+                            stepMarkers = [];
+                        }}
+
+                        let accumulatedDistance = 0.0;
+                        for (let i = 0; i <= currentStep; i++) {{
+                            let seg = segments[i];
+                            if (!pointMatchesFilter(seg.info)) continue;
+                            accumulatedDistance += (seg.dist_km || 0.0);
+                            let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
+                            activePolylines.push(polyline);
+
+                            if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
+                                let pIdx = seg.info.point_idx;
+                                let ptInfo = points[pIdx];
+                                if (ptInfo && !stepMarkers[pIdx]) {{
+                                    let seqNumber = pIdx + 1;
+                                    let customIcon = createMarkerIcon(seqNumber, ptInfo.color, ptInfo);
+                                    let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(map);
+                                    marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                                    stepMarkers[pIdx] = marker;
+                                }}
+                            }}
+                        }}
+
+                        highlightMarkerByInfo(info);
+
+                        document.getElementById('info-box').innerHTML = `
+                            <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
+                            <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
+                            <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
+                            <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
+                        `;
+
+                        let lastPt = currentSeg.path[currentSeg.path.length - 1];
+                        if (lastPt) {{ map.panTo(lastPt); }}
+                    }}
+
+                    function nextStep() {{
+                        let nextIdx = currentStep + 1;
+                        while (nextIdx < segments.length) {{
+                            if (pointMatchesFilter(segments[nextIdx].info)) break;
+                            nextIdx++;
+                        }}
+                        if (nextIdx < segments.length) {{
+                            currentStep = nextIdx;
+                            updateStep(currentStep);
+                        }} else {{
+                            pauseAnimation();
+                            document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้น!";
+                        }}
+                    }}
+
+                    function startAnimation() {{
+                        if (isPlaying) return;
+                        isPlaying = true;
+                        document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
+                        updateStep(currentStep);
+                        animTimer = setInterval(nextStep, currentSpeedMs);
+                    }}
+
+                    function pauseAnimation() {{
+                        isPlaying = false;
+                        if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
+                        document.getElementById('status-text').innerText = "⏸️ หยุดพักการจำลอง";
+                    }}
+
+                    function resetAnimation() {{
+                        pauseAnimation();
+                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                        currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
+                        updateStep(currentStep);
+                        document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
+                    }}
+
+                    function onSliderChange(val) {{
+                        pauseAnimation();
+                        updateStep(parseInt(val));
+                    }}
+
+                    if (segments.length > 0) {{ updateStep(0); }}
+                </script>
+            </body>
+            </html>
+            """
+
+            st.components.v1.html(map_html, height=800, scrolling=False)
+
+        # --- TAB 2: เปรียบเทียบเส้นทางเหมาะสมที่สุด (Optimized Route) ---
+        with tab2:
+            st.subheader(
+                "🚀 วิเคราะห์และเปรียบเทียบเส้นทางที่เหมาะสมที่สุด (Optimized Route / TSP Heuristic)"
+            )
+            st.markdown(
+                "ระบบจะทำการคำนวณจัดลำดับจุดส่งใหม่โดยอ้างอิงจากระยะทางที่ใกล้ที่สุด (Nearest Neighbor) โดย**ไม่ยึดติดกับเวลาจัดส่ง** เพื่อลดระยะทางรวมและการวิ่งย้อนไปมาให้เหลือน้อยที่สุด"
+            )
+
+            # คำนวณเส้นทาง Optimized สำหรับแต่ละเที่ยว
+            optimized_comparison_data = []
+            total_orig_dist_all = 0.0
+            total_opt_dist_all = 0.0
+            total_swapped_points = 0
+            total_points_count = 0
+
+            grouped_opt = df.groupby("trip", sort=False)
+
+            for trip_name, group in grouped_opt:
+                orig_records = group.to_dict("records")
+                n_pts = len(orig_records)
+                total_points_count += n_pts
+
+                # คำนวณระยะทางเดิม (ตามลำดับเวลาใน Excel)
+                orig_pts_coords = (
                     [warehouse_coord]
                     + list(zip(group["lat"], group["lng"]))
                     + [warehouse_coord]
                 )
-                records_list = group.to_dict("records")
-
-                total_trip_dist = 0.0
-                trip_times = []
-
-                for i in range(len(pts) - 1):
-                    p1, p2 = pts[i], pts[i + 1]
-                    road_path, dist_km = get_osrm_route(
-                        p1[0], p1[1], p2[0], p2[1]
+                orig_trip_dist = 0.0
+                for i in range(len(orig_pts_coords) - 1):
+                    _, d_km = get_osrm_route(
+                        orig_pts_coords[i][0],
+                        orig_pts_coords[i][1],
+                        orig_pts_coords[i + 1][0],
+                        orig_pts_coords[i + 1][1],
                     )
-                    total_trip_dist += dist_km
+                    orig_trip_dist += d_km
+                total_orig_dist_all += orig_trip_dist
 
-                    if i < len(records_list):
-                        info = records_list[i]
-                        info["point_idx"] = point_counter
-                        point_counter += 1
-
-                        row_incremental_distances.append(round(dist_km, 2))
-
-                        t_str = re.sub(
-                            r"[^\d:]", "", str(info.get("time", ""))
+                # ทำ Nearest Neighbor Optimization
+                unvisited = orig_records.copy()
+                current_pos = warehouse_coord
+                opt_records = []
+                while unvisited:
+                    best_idx = 0
+                    min_d = float("inf")
+                    for idx, pt in enumerate(unvisited):
+                        d = haversine(
+                            current_pos[0], current_pos[1], pt["lat"], pt["lng"]
                         )
-                        time_diff_str = "-"
-                        if t_str:
-                            try:
-                                parts = t_str.split(":")
-                                curr_dt = datetime.strptime(
-                                    f"{parts[0].zfill(2)}:{parts[1].zfill(2)}",
-                                    "%H:%M",
-                                )
-                                if last_time_dt is not None:
-                                    diff = curr_dt - last_time_dt
-                                    total_seconds = int(diff.total_seconds())
-                                    if total_seconds < 0:
-                                        total_seconds += 24 * 3600
-                                    mins = total_seconds // 60
-                                    time_diff_str = f"{mins} นาที"
-                                    if mins >= 60:
-                                        hrs = mins // 60
-                                        rmins = mins % 60
-                                        time_diff_str = (
-                                            f"{hrs} ชม. {rmins} นาที"
-                                        )
-                                last_time_dt = curr_dt
-                            except Exception:
-                                pass
-                        row_incremental_time_diffs.append(time_diff_str)
+                        if d < min_d:
+                            min_d = d
+                            best_idx = idx
+                    next_item = unvisited.pop(best_idx)
+                    opt_records.append(next_item)
+                    current_pos = (next_item["lat"], next_item["lng"])
 
-                        if info.get("time") and "ไม่ระบุ" not in str(
-                            info.get("time")
-                        ):
-                            trip_times.append(str(info.get("time")))
-                    else:
-                        info = {
-                            "cust_id": "WH-001",
-                            "time": "จบเที่ยววิ่ง",
-                            "qty": 0,
-                            "gps_diff": "0.00",
-                            "gps_diff_num": 0.0,
-                            "status": "วิ่งกลับเข้าคลังเรียบร้อย",
-                            "point_idx": None,
-                        }
-                    info["trip"] = trip_name
-                    info["seg_dist_km"] = round(dist_km, 2)
-
-                    segments_data.append({
-                        "trip": trip_name,
-                        "color": trip_colors.get(trip_name, "#0055FF"),
-                        "path": road_path,
-                        "info": info,
-                        "dist_km": round(dist_km, 2),
-                    })
-
-                trip_distances[trip_name] = round(total_trip_dist, 2)
-                if trip_times:
-                    trip_time_ranges[trip_name] = (
-                        f"{trip_times[0]} - {trip_times[-1]}"
-                    )
-                else:
-                    trip_time_ranges[trip_name] = "-"
-
-            total_day_distance = round(sum(trip_distances.values()), 2)
-
-        c4.success(f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม.")
-
-        df["inc_dist"] = row_incremental_distances
-        df["inc_time"] = row_incremental_time_diffs
-
-        st.subheader("📋 ตารางรายการจัดส่งสินค้าประจำวัน")
-
-        def get_notification_badge(row):
-            notices = []
-            has_special_tag = (
-                row.get("is_extra_trip")
-                or row.get("is_moved_trip")
-                or row.get("is_cannot_calc")
-                or row.get("is_new_member")
-            )
-
-            if "ไม่ตรงเวลา" in str(row["status"]):
-                notices.append("จัดส่งไม่ตรงเวลา")
-            elif not has_special_tag:
-                notices.append("จัดส่งตรงเวลา")
-
-            if row["gps_diff_num"] > 100:
-                notices.append(f"GPS ห่าง {row['gps_diff']}m")
-            if row.get("is_extra_trip"):
-                notices.append("รอบเสริม")
-            if row.get("is_cannot_calc"):
-                notices.append("ไม่สามารถคำนวณได้")
-            if row.get("is_new_member"):
-                notices.append("สมาชิกใหม่")
-            if row.get("is_moved_trip"):
-                notices.append("ย้ายรอบ")
-            return " | ".join(notices)
-
-        disp_df = df[[
-            "time",
-            "inc_time",
-            "trip",
-            "cust_id",
-            "qty",
-            "acc_qty",
-            "inc_dist",
-            "status",
-            "lat_display",
-            "lng_display",
-            "gps_diff",
-        ]].copy()
-
-        disp_df["การแจ้งเตือน"] = df.apply(get_notification_badge, axis=1)
-        disp_df.insert(0, "ลำดับ", range(1, len(disp_df) + 1))
-
-        disp_df.columns = [
-            "ลำดับ",
-            "เวลาส่ง",
-            "เวลาจากจุดก่อนหน้า",
-            "เที่ยวส่ง",
-            "รหัสสมาชิก",
-            "ยอดส่ง (ถัง)",
-            "ยอดส่งสะสม",
-            "ระยะทางจากจุดก่อนหน้า (กม.)",
-            "สถานะการส่ง",
-            "Latitude",
-            "Longitude",
-            "ค่าความต่าง GPS",
-            "สรุปการแจ้งเตือน",
-        ]
-
-        st.dataframe(
-            disp_df, use_container_width=True, height=350, hide_index=True
-        )
-
-        st.divider()
-
-        st.subheader("🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางจริง (OSRM Map)")
-
-        st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง")
-        summaries = []
-        for idx, t_info in enumerate(trip_quotas):
-            trip_name = f"เที่ยวที่ {t_info['trip_no']}"
-            group = (
-                df[df["trip"] == trip_name]
-                if trip_name in df["trip"].values
-                else pd.DataFrame()
-            )
-            t_dist = trip_distances.get(trip_name, 0.0)
-            t_time_range = trip_time_ranges.get(trip_name, "-")
-
-            actual_qty = group["qty"].sum() if not group.empty else 0
-            point_count = len(group)
-            ontime_count = (
-                len(
-                    group[
-                        ~group["status"].str.contains("ไม่ตรงเวลา", na=False)
-                    ]
+                # คำนวณระยะทางแบบ Optimized
+                opt_pts_coords = (
+                    [warehouse_coord]
+                    + [(pt["lat"], pt["lng"]) for pt in opt_records]
+                    + [warehouse_coord]
                 )
-                if not group.empty
-                else 0
+                opt_trip_dist = 0.0
+                for i in range(len(opt_pts_coords) - 1):
+                    _, d_km = get_osrm_route(
+                        opt_pts_coords[i][0],
+                        opt_pts_coords[i][1],
+                        opt_pts_coords[i + 1][0],
+                        opt_pts_coords[i + 1][1],
+                    )
+                    opt_trip_dist += d_km
+                total_opt_dist_all += opt_trip_dist
+
+                # นับจำนวนจุดที่ลำดับเปลี่ยนไป (สลับลำดับ)
+                swapped_count = 0
+                for idx, opt_item in enumerate(opt_records):
+                    orig_idx = next(
+                        i
+                        for i, o in enumerate(orig_records)
+                        if o["cust_id"] == opt_item["cust_id"]
+                    )
+                    if idx != orig_idx:
+                        swapped_count += 1
+                total_swapped_points += swapped_count
+
+                dist_diff = orig_trip_dist - opt_trip_dist
+                pct_saving = (
+                    (dist_diff / orig_trip_dist * 100)
+                    if orig_trip_dist > 0
+                    else 0.0
+                )
+
+                optimized_comparison_data.append({
+                    "เที่ยวการส่ง": trip_name,
+                    "จำนวนจุดส่ง": n_pts,
+                    "ระยะทางเดิม (กม.)": round(orig_trip_dist, 2),
+                    "ระยะทางที่เหมาะสม (กม.)": round(opt_trip_dist, 2),
+                    "ระยะทางที่ลดลง (กม.)": round(dist_diff, 2),
+                    "ประหยัดได้ (%)": f"{pct_saving:.2f}%",
+                    "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
+                })
+
+            total_dist_diff = total_orig_dist_all - total_opt_dist_all
+            total_pct_saving = (
+                (total_dist_diff / total_orig_dist_all * 100)
+                if total_orig_dist_all > 0
+                else 0.0
             )
-            late_count = (
-                len(group[group["status"].str.contains("ไม่ตรงเวลา", na=False)])
-                if not group.empty
-                else 0
+
+            # แสดงการเปรียบเทียบภาพรวม
+            col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+            col_a1.metric(
+                "ระยะทางเดิมรวม", f"{total_orig_dist_all:.2f} กม."
             )
-            gps_err_count = (
-                len(group[group["gps_diff_num"] > 100])
-                if not group.empty
-                else 0
+            col_a2.metric(
+                "ระยะทางหลังปรับปรุง",
+                f"{total_opt_dist_all:.2f} กม.",
+                delta=f"-{total_dist_diff:.2f} กม.",
+                delta_value="inverse",
+            )
+            col_a3.metric("ประสิทธิภาพการประหยัด", f"{total_pct_saving:.2f}%")
+            col_a4.metric(
+                "การสลับลำดับรวม",
+                f"{total_swapped_points} / {total_points_count} จุด",
+                delta=f"{(total_swapped_points/total_points_count*100):.1f}% ของจุดทั้งหมด",
             )
 
-            summaries.append({
-                "เที่ยวการส่ง": trip_name,
-                "เวลาจัดส่งแต่ละเที่ยว": t_time_range,
-                "ใบเบิก (DW)": t_info["dw_text"],
-                "ยอดเบิก (ถัง)": t_info["dws_qty"],
-                "ยอดคืน (ถัง)": t_info["res_qty"],
-                "ยอดส่งสุทธิ (เป้าหมาย)": t_info["net_qty"],
-                "ยอดจัดส่งจริง (ถัง)": actual_qty,
-                "จำนวนจุดส่ง (จุด)": point_count,
-                "ระยะทางวิ่งรวม (กม.)": f"{t_dist:.2f}",
-                "จัดส่งตรงเวลา (จุด)": ontime_count,
-                "จัดส่งไม่ตรงเวลา (จุด)": late_count,
-                "GPS คลาดเคลื่อน >100m (จุด)": gps_err_count,
-            })
-
-        total_dws = sum([t["dws_qty"] for t in trip_quotas])
-        total_res = sum([t["res_qty"] for t in trip_quotas])
-        total_net = sum([t["net_qty"] for t in trip_quotas])
-
-        summaries.append({
-            "เที่ยวการส่ง": "รวมทั้งหมดประจำวัน",
-            "เวลาจัดส่งแต่ละเที่ยว": "-",
-            "ใบเบิก (DW)": "-",
-            "ยอดเบิก (ถัง)": total_dws,
-            "ยอดคืน (ถัง)": total_res,
-            "ยอดส่งสุทธิ (เป้าหมาย)": total_net,
-            "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
-            "จำนวนจุดส่ง (จุด)": len(df),
-            "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
-            "จัดส่งตรงเวลา (จุด)": len(
-                df[~df["status"].str.contains("ไม่ตรงเวลา", na=False)]
-            ),
-            "จัดส่งไม่ตรงเวลา (จุด)": len(
-                df[df["status"].str.contains("ไม่ตรงเวลา", na=False)]
-            ),
-            "GPS คลาดเคลื่อน >100m (จุด)": len(df[df["gps_diff_num"] > 100]),
-        })
-
-        st.table(pd.DataFrame(summaries))
-
-        df_records = df.to_dict("records")
-        for idx, r in enumerate(df_records):
-            r["color"] = trip_colors.get(r.get("trip"), "#0055FF")
-            r["point_idx"] = idx
-
-        points_json = json.dumps(df_records, ensure_ascii=False)
-        segments_json = json.dumps(segments_data, ensure_ascii=False)
-        wh_json = json.dumps(warehouse_coord)
-        is_mode_1 = "แบบที่ 1" in play_mode
-
-        map_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <style>
-                #map {{ width: 100%; height: 560px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
-                .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
-                button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
-                button:hover {{ background-color: #005f73; transform: scale(1.02); }}
-                
-                .filter-bar {{ margin-bottom: 8px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
-                .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
-                .filter-btn:hover {{ background-color: #cfd8dc; }}
-                .filter-btn.active {{ background-color: #2c3e50; color: white; }}
-                .filter-btn.active:hover {{ background-color: #1a252f; }}
-
-                .status-filter-btn {{ padding: 4px 10px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 4px; }}
-                .status-filter-btn:hover {{ background-color: #d5dbdb; opacity: 0.9; }}
-                .status-filter-btn.active {{ background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }}
-                .status-filter-btn.active:hover {{ background-color: #c9302c; }}
-
-                .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
-                .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; transition: accent-color 0.3s ease; }}
-                
-                #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
-                .legend {{ display: flex; gap: 12px; margin-bottom: 6px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
-                .legend-item {{ display: flex; align-items: center; gap: 4px; }}
-                .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
-                
-                .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
-                .marker-container {{ position: relative; width: 28px; height: 28px; }}
-
-                .number-icon {{
-                    color: #FFFFFF !important;
-                    border: 2px solid #FFFFFF !important;
-                    border-radius: 50% !important;
-                    text-align: center !important;
-                    font-weight: bold !important;
-                    font-size: 11px !important;
-                    line-height: 22px !important;
-                    width: 26px !important;
-                    height: 26px !important;
-                    box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
-                    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-                    display: flex !important;
-                    align-items: center !important;
-                    justify-content: center !important;
-                    box-sizing: border-box !important;
-                }}
-
-                .number-icon-active {{
-                    transform: scale(1.6) !important;
-                    z-index: 1000 !important;
-                    border: 2px solid #FFFFFF !important;
-                    box-shadow: 0 0 14px #FFD700, 0 4px 10px rgba(0,0,0,0.8) !important;
-                }}
-
-                .marker-badge-late {{
-                    position: absolute; top: -6px; right: -8px;
-                    background-color: #D32F2F; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 20;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-                }}
-
-                .marker-badge-gps {{
-                    position: absolute; top: -6px; left: -8px;
-                    background-color: #FF9800; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 20;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-                }}
-
-                .marker-badge-extra {{
-                    position: absolute; bottom: -6px; left: -8px;
-                    background-color: #8E44AD; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 20;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-                }}
-
-                .marker-badge-calc {{
-                    position: absolute; bottom: -6px; right: -8px;
-                    background-color: #34495E; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 20;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-                }}
-
-                .marker-badge-new {{
-                    position: absolute; top: 50%; left: -10px; transform: translateY(-50%);
-                    background-color: #27AE60; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 20;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-                }}
-
-                .marker-badge-moved {{
-                    position: absolute; top: 50%; right: -10px; transform: translateY(-50%);
-                    background-color: #2980B9; color: white; border: 1.5px solid white;
-                    border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                    display: flex; align-items: center; justify-content: center; z-index: 20;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-                }}
-
-                .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
-            </style>
-        </head>
-        <body>
-            <div class="legend">
-                <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
-                <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
-                <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
-            </div>
-
-            <div class="filter-bar">
-                <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองเที่ยว:</span>
-                <button class="filter-btn active" id="btn-all" onclick="setTripFilter('ALL')">แสดงทั้งหมด</button>
-                <button class="filter-btn" id="btn-trip1" onclick="setTripFilter('เที่ยวที่ 1')">เที่ยวที่ 1</button>
-                <button class="filter-btn" id="btn-trip2" onclick="setTripFilter('เที่ยวที่ 2')">เที่ยวที่ 2</button>
-                <button class="filter-btn" id="btn-trip3" onclick="setTripFilter('เที่ยวที่ 3')">เที่ยวที่ 3</button>
-            </div>
-
-            <div class="filter-bar" style="background: #faf2f2;">
-                <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะ (คลิกเพื่อเลือก/ยกเลิก):</span>
-                <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')"><span style="background:#D32F2F; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">!</span> ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
-                <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')"><span style="background:#FF9800; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">G</span> GPS>100m (<span id="count-gps">0</span>)</button>
-                <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')"><span style="background:#8E44AD; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ร</span> รอบเสริม (<span id="count-extra">0</span>)</button>
-                <button class="status-filter-btn" id="status-btn-calc" onclick="setStatusFilter('calc')"><span style="background:#34495E; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">X</span> คำนวณไม่ได้ (<span id="count-calc">0</span>)</button>
-                <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')"><span style="background:#27AE60; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">N</span> สมาชิกใหม่ (<span id="count-new">0</span>)</button>
-                <button class="status-filter-btn" id="status-btn-moved" onclick="setStatusFilter('moved')"><span style="background:#2980B9; color:#fff; border-radius:50%; width:14px; height:14px; display:inline-flex; align-items:center; justify-content:center; font-size:9px;">ย</span> ย้ายรอบ (<span id="count-moved">0</span>)</button>
-            </div>
-
-            <div class="controls">
-                <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
-                <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
-                <button onclick="resetAnimation()">🔄 รีเซ็ต (Reset)</button>
-                <span id="status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50;">พร้อมสำหรับการจำลองเส้นทาง...</span>
-            </div>
-
-            <div class="timeline-container">
-                <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
-                <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:380px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - รหัส (จุด 1 | ยอด 0 ถัง | เที่ยวที่ 1)</span>
-            </div>
-
-            <div id="map"></div>
-            <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" หรือคลิกปุ่มกรองสถานะเพื่อดูพิกัดเฉพาะกลุ่ม</div>
-
-            <script>
-                const points = {points_json};
-                const segments = {segments_json};
-                const warehouse = {wh_json};
-                const isMode1 = {str(is_mode_1).lower()};
-                let currentSpeedMs = {anim_speed_ms};
-
-                let currentFilter = 'ALL';
-                let currentStatusFilter = null;
-
-                const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
-                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                    attribution: '© OpenStreetMap contributors'
-                }}).addTo(map);
-
-                L.marker(warehouse).addTo(map)
-                    .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
-
-                let allMarkers = [];
-                let activePolylines = [];
-                let stepMarkers = [];
-                let currentStep = 0;
-                let animTimer = null;
-                let isPlaying = false;
-                let activeMarkerRef = null;
-
-                function pointMatchesFilter(pt) {{
-                    if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
-                    
-                    if (currentStatusFilter !== null) {{
-                        let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
-                        let isGps = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
-                        let isExtra = pt.is_extra_trip;
-                        let isCalc = pt.is_cannot_calc;
-                        let isNew = pt.is_new_member;
-                        let isMoved = pt.is_moved_trip;
-
-                        if (currentStatusFilter === 'late' && !isLate) return false;
-                        if (currentStatusFilter === 'gps' && !isGps) return false;
-                        if (currentStatusFilter === 'extra' && !isExtra) return false;
-                        if (currentStatusFilter === 'calc' && !isCalc) return false;
-                        if (currentStatusFilter === 'new' && !isNew) return false;
-                        if (currentStatusFilter === 'moved' && !isMoved) return false;
-                    }}
-                    return true;
-                }}
-
-                function updateStatusCounts() {{
-                    let counts = {{ late: 0, gps: 0, extra: 0, calc: 0, new: 0, moved: 0 }};
-                    points.forEach(pt => {{
-                        if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
-                            if (pt.status && pt.status.includes("ไม่ตรงเวลา")) counts.late++;
-                            if ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100) counts.gps++;
-                            if (pt.is_extra_trip) counts.extra++;
-                            if (pt.is_cannot_calc) counts.calc++;
-                            if (pt.is_new_member) counts.new++;
-                            if (pt.is_moved_trip) counts.moved++;
-                        }}
-                    }});
-                    document.getElementById('count-late').innerText = counts.late;
-                    document.getElementById('count-gps').innerText = counts.gps;
-                    document.getElementById('count-extra').innerText = counts.extra;
-                    document.getElementById('count-calc').innerText = counts.calc;
-                    document.getElementById('count-new').innerText = counts.new;
-                    document.getElementById('count-moved').innerText = counts.moved;
-                }}
-
-                function createTooltipHtml(info, seqNum) {{
-                    let isLate = info.status && info.status.includes("ไม่ตรงเวลา");
-                    let isGpsDiff = (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100;
-                    
-                    let badgesHtml = [];
-                    if (isLate) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>`);
-                    else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{info.status}}</span>`);
-
-                    if (isGpsDiff) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800; color:#000;">GPS ห่าง >100m (${{info.gps_diff}}m)</span>`);
-                    if (info.is_extra_trip) badgesHtml.push(`<span class="alert-badge" style="background:#8E44AD;">รอบเสริม</span>`);
-                    if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#34495E;">ไม่สามารถคำนวณได้</span>`);
-                    if (info.is_new_member) badgesHtml.push(`<span class="alert-badge" style="background:#27AE60;">สมาชิกใหม่</span>`);
-                    if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#2980B9;">ย้ายรอบ</span>`);
-
-                    return `
-                        <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-                            <b>📍 จุดที่ ${{seqNum || '-'}} (${{info.trip || 'ไม่ระบุ'}})</b><br>
-                            ${{badgesHtml.join(' ')}}<br>
-                            <b>เวลา:</b> ${{info.time || '-'}}<br>
-                            <b>รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span><br>
-                            <b>ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
-                            <b>พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}}<br>
-                            <b>ค่าความต่าง GPS:</b> <b>${{info.gps_diff || '0.00'}} ม.</b>
-                        </div>
-                    `;
-                }}
-
-                function createMarkerIcon(seqNum, color, ptInfo) {{
-                    let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
-                    let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
-                    
-                    let lateBadgeHtml = isLate ? `<div class="marker-badge-late" title="จัดส่งไม่ตรงเวลา">!</div>` : '';
-                    let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps" title="GPS คลาดเคลื่อน >100m">G</div>` : '';
-                    let extraBadgeHtml = ptInfo && ptInfo.is_extra_trip ? `<div class="marker-badge-extra" title="รอบเสริม">ร</div>` : '';
-                    let calcBadgeHtml = ptInfo && ptInfo.is_cannot_calc ? `<div class="marker-badge-calc" title="ไม่สามารถคำนวณได้">X</div>` : '';
-                    let newBadgeHtml = ptInfo && ptInfo.is_new_member ? `<div class="marker-badge-new" title="สมาชิกใหม่">N</div>` : '';
-                    let movedBadgeHtml = ptInfo && ptInfo.is_moved_trip ? `<div class="marker-badge-moved" title="ย้ายรอบ">ย</div>` : '';
-
-                    let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{extraBadgeHtml}}${{calcBadgeHtml}}${{newBadgeHtml}}${{movedBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
-
-                    return L.divIcon({{
-                        className: '',
-                        html: innerHtml,
-                        iconSize: [28, 28],
-                        iconAnchor: [14, 14]
-                    }});
-                }}
-
-                function initMarkers() {{
-                    allMarkers.forEach(m => map.removeLayer(m));
-                    allMarkers = [];
-
-                    if (isMode1) {{
-                        points.forEach((pt, idx) => {{
-                            if (pointMatchesFilter(pt)) {{
-                                let seqNumber = idx + 1;
-                                let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
-                                let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
-                                marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
-                                allMarkers[idx] = marker;
-                            }}
-                        }});
-                    }}
-                    updateStatusCounts();
-                }}
-
-                initMarkers();
-
-                function setTripFilter(filterName) {{
-                    pauseAnimation();
-                    currentFilter = filterName;
-
-                    ['btn-all', 'btn-trip1', 'btn-trip2', 'btn-trip3'].forEach(id => {{
-                        let el = document.getElementById(id);
-                        if (el) el.classList.remove('active');
-                    }});
-
-                    if (filterName === 'ALL') document.getElementById('btn-all').classList.add('active');
-                    else if (filterName === 'เที่ยวที่ 1') document.getElementById('btn-trip1').classList.add('active');
-                    else if (filterName === 'เที่ยวที่ 2') document.getElementById('btn-trip2').classList.add('active');
-                    else if (filterName === 'เที่ยวที่ 3') document.getElementById('btn-trip3').classList.add('active');
-
-                    initMarkers();
-
-                    let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
-                    if (firstMatchIdx !== -1) {{
-                        currentStep = firstMatchIdx;
-                        updateStep(currentStep);
-                    }}
-                }}
-
-                function setStatusFilter(statusKey) {{
-                    pauseAnimation();
-                    if (currentStatusFilter === statusKey) {{
-                        currentStatusFilter = null;
-                    }} else {{
-                        currentStatusFilter = statusKey;
-                    }}
-
-                    ['late', 'gps', 'extra', 'calc', 'new', 'moved'].forEach(k => {{
-                        let btn = document.getElementById('status-btn-' + k);
-                        if (btn) {{
-                            if (k === currentStatusFilter) btn.classList.add('active');
-                            else btn.classList.remove('active');
-                        }}
-                    }});
-
-                    initMarkers();
-
-                    let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
-                    if (firstMatchIdx !== -1) {{
-                        currentStep = firstMatchIdx;
-                        updateStep(currentStep);
-                    }}
-                }}
-
-                function highlightMarkerByInfo(info) {{
-                    if (activeMarkerRef && activeMarkerRef._icon) {{
-                        let innerDiv = activeMarkerRef._icon.querySelector('.number-icon');
-                        if (innerDiv) innerDiv.classList.remove('number-icon-active');
-                    }}
-                    activeMarkerRef = null;
-
-                    if (!info || info.point_idx === undefined || info.point_idx === null) return;
-                    let target = isMode1 ? allMarkers[info.point_idx] : stepMarkers[info.point_idx];
-                    if (target && target._icon) {{
-                        let innerDiv = target._icon.querySelector('.number-icon');
-                        if (innerDiv) innerDiv.classList.add('number-icon-active');
-                        activeMarkerRef = target;
-                    }}
-                }}
-
-                function updateStep(stepIndex) {{
-                    if (stepIndex < 0 || stepIndex >= segments.length) return;
-
-                    currentStep = stepIndex;
-                    let currentSeg = segments[currentStep];
-
-                    if (!pointMatchesFilter(currentSeg.info)) {{
-                        let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && pointMatchesFilter(seg.info));
-                        if (nextValid !== -1) {{
-                            currentStep = nextValid;
-                            currentSeg = segments[currentStep];
-                        }} else {{
-                            let prevValid = segments.map((s, i) => i).reverse().find(i => pointMatchesFilter(segments[i].info));
-                            if (prevValid !== undefined) {{
-                                currentStep = prevValid;
-                                currentSeg = segments[currentStep];
-                            }}
-                        }}
-                    }}
-
-                    let info = currentSeg.info;
-
-                    let slider = document.getElementById('timeSlider');
-                    slider.value = currentStep;
-                    slider.style.accentColor = currentSeg.color;
-
-                    let timeLabel = info.time || '-';
-                    let custIdLabel = info.cust_id || '-';
-                    let qtyLabel = info.qty !== undefined ? info.qty : 0;
-                    let tripLabel = info.trip || currentSeg.trip || '-';
-                    let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
-
-                    document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - รหัส: <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}} | ยอด <span style="color:#D32F2F;">${{qtyLabel}} ถัง</span> | ${{tripLabel}})`;
-
-                    activePolylines.forEach(p => map.removeLayer(p));
-                    activePolylines = [];
-
-                    if (!isMode1) {{
-                        stepMarkers.forEach(m => {{ if (m) map.removeLayer(m); }});
-                        stepMarkers = [];
-                    }}
-
-                    let accumulatedDistance = 0.0;
-                    for (let i = 0; i <= currentStep; i++) {{
-                        let seg = segments[i];
-                        if (!pointMatchesFilter(seg.info)) continue;
-
-                        accumulatedDistance += (seg.dist_km || 0.0);
-
-                        let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
-                        activePolylines.push(polyline);
-
-                        if (!isMode1 && seg.info && seg.info.point_idx !== null && seg.info.point_idx !== undefined) {{
-                            let pIdx = seg.info.point_idx;
-                            let ptInfo = points[pIdx];
-                            if (ptInfo && !stepMarkers[pIdx]) {{
-                                let seqNumber = pIdx + 1;
-                                let customIcon = createMarkerIcon(seqNumber, ptInfo.color, ptInfo);
-                                let marker = L.marker([ptInfo.lat, ptInfo.lng], {{ icon: customIcon }}).addTo(map);
-                                marker.bindTooltip(createTooltipHtml(ptInfo, seqNumber), {{ direction: 'top', opacity: 0.95 }});
-                                stepMarkers[pIdx] = marker;
-                            }}
-                        }}
-                    }}
-
-                    highlightMarkerByInfo(info);
-
-                    let infoBox = document.getElementById('info-box');
-                    infoBox.innerHTML = `
-                        <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
-                        <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
-                        <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                        <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
-                    `;
-
-                    let lastPt = currentSeg.path[currentSeg.path.length - 1];
-                    if (lastPt) {{ map.panTo(lastPt); }}
-                }}
-
-                function nextStep() {{
-                    let nextIdx = currentStep + 1;
-                    while (nextIdx < segments.length) {{
-                        if (pointMatchesFilter(segments[nextIdx].info)) break;
-                        nextIdx++;
-                    }}
-
-                    if (nextIdx < segments.length) {{
-                        currentStep = nextIdx;
-                        updateStep(currentStep);
-                    }} else {{
-                        pauseAnimation();
-                        document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้น!";
-                    }}
-                }}
-
-                function startAnimation() {{
-                    if (isPlaying) return;
-                    isPlaying = true;
-                    document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
-                    updateStep(currentStep);
-                    animTimer = setInterval(nextStep, currentSpeedMs);
-                }}
-
-                function pauseAnimation() {{
-                    isPlaying = false;
-                    if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
-                    document.getElementById('status-text').innerText = "⏸️ หยุดพักการจำลอง";
-                }}
-
-                function resetAnimation() {{
-                    pauseAnimation();
-                    let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
-                    currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
-                    updateStep(currentStep);
-                    document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
-                }}
-
-                function onSliderChange(val) {{
-                    pauseAnimation();
-                    updateStep(parseInt(val));
-                }}
-
-                if (segments.length > 0) {{ updateStep(0); }}
-            </script>
-        </body>
-        </html>
-        """
-
-        st.components.v1.html(map_html, height=800, scrolling=False)
+            st.divider()
+            st.subheader(
+                "📊 ตารางเปรียบเทียบแยกตามเที่ยวการส่ง (Original vs Optimized)"
+            )
+            st.table(pd.DataFrame(optimized_comparison_data))
+
+            st.info(
+                "💡 **คำอธิบายเพิ่มเติม:** การสลับลำดับการจัดส่งแสดงถึงจำนวนจุดที่ระบบแนะนำให้สับเปลี่ยนจากลำดับเวลาเดิม เพื่อขจัดปัญหาการวิ่งวกวนไปมาบนถนนจริง ทำให้ประหยัดน้ำมันและเวลาเดินทางรวมได้มากขึ้น"
+            )
