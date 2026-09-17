@@ -750,7 +750,6 @@ if uploaded_file:
                 <style>
                     #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     
-                    /* แบนเนอร์แสดงพิกัดปัจจุบันด้านบนสุดเสมอ */
                     #top-active-banner {{
                         background: linear-gradient(135deg, #1e3d59, #17b978);
                         color: white;
@@ -822,37 +821,12 @@ if uploaded_file:
                         border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                         display: flex; align-items: center; justify-content: center; z-index: 20;
                     }}
-                    .marker-badge-extra {{
-                        position: absolute; bottom: -6px; left: -8px;
-                        background-color: #8E44AD; color: white; border: 1.5px solid white;
-                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                        display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
-                    .marker-badge-calc {{
-                        position: absolute; bottom: -6px; right: -8px;
-                        background-color: #34495E; color: white; border: 1.5px solid white;
-                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                        display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
-                    .marker-badge-new {{
-                        position: absolute; top: 50%; left: -10px; transform: translateY(-50%);
-                        background-color: #27AE60; color: white; border: 1.5px solid white;
-                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                        display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
-                    .marker-badge-moved {{
-                        position: absolute; top: 50%; right: -10px; transform: translateY(-50%);
-                        background-color: #2980B9; color: white; border: 1.5px solid white;
-                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                        display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
                     .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
                 </style>
             </head>
             <body>
-                <!-- แบนเนอร์แสดงพิกัดที่กำลังมาถึงด้านบนสุดเสมอ -->
                 <div id="top-active-banner">
-                    <div style="font-size: 12px; color: #ffeb3b; font-weight: bold; margin-bottom: 3px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง (แสดงด้านบนสุดตลอดเวลา):</div>
+                    <div style="font-size: 12px; color: #ffeb3b; font-weight: bold; margin-bottom: 3px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง:</div>
                     <div id="top-banner-content" style="font-size: 14px; font-weight: bold;">กำลังโหลดข้อมูล...</div>
                 </div>
 
@@ -874,10 +848,6 @@ if uploaded_file:
                     <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะ:</span>
                     <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')">GPS>100m (<span id="count-gps">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')">รอบเสริม (<span id="count-extra">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-calc" onclick="setStatusFilter('calc')">คำนวณไม่ได้ (<span id="count-calc">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')">สมาชิกใหม่ (<span id="count-new">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-moved" onclick="setStatusFilter('moved')">ย้ายรอบ (<span id="count-moved">0</span>)</button>
                 </div>
 
                 <div class="controls">
@@ -927,39 +897,22 @@ if uploaded_file:
                         if (currentStatusFilter !== null) {{
                             let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
                             let isGps = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
-                            let isExtra = pt.is_extra_trip;
-                            let isCalc = pt.is_cannot_calc;
-                            let isNew = pt.is_new_member;
-                            let isMoved = pt.is_moved_trip;
-
                             if (currentStatusFilter === 'late' && !isLate) return false;
                             if (currentStatusFilter === 'gps' && !isGps) return false;
-                            if (currentStatusFilter === 'extra' && !isExtra) return false;
-                            if (currentStatusFilter === 'calc' && !isCalc) return false;
-                            if (currentStatusFilter === 'new' && !isNew) return false;
-                            if (currentStatusFilter === 'moved' && !isMoved) return false;
                         }}
                         return true;
                     }}
 
                     function updateStatusCounts() {{
-                        let counts = {{ late: 0, gps: 0, extra: 0, calc: 0, new: 0, moved: 0 }};
+                        let counts = {{ late: 0, gps: 0 }};
                         points.forEach(pt => {{
                             if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
                                 if (pt.status && pt.status.includes("ไม่ตรงเวลา")) counts.late++;
                                 if ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100) counts.gps++;
-                                if (pt.is_extra_trip) counts.extra++;
-                                if (pt.is_cannot_calc) counts.calc++;
-                                if (pt.is_new_member) counts.new++;
-                                if (pt.is_moved_trip) counts.moved++;
                             }}
                         }});
                         document.getElementById('count-late').innerText = counts.late;
                         document.getElementById('count-gps').innerText = counts.gps;
-                        document.getElementById('count-extra').innerText = counts.extra;
-                        document.getElementById('count-calc').innerText = counts.calc;
-                        document.getElementById('count-new').innerText = counts.new;
-                        document.getElementById('count-moved').innerText = counts.moved;
                     }}
 
                     function createTooltipHtml(info, seqNum) {{
@@ -1020,7 +973,7 @@ if uploaded_file:
                     function setStatusFilter(statusKey) {{
                         pauseAnimation();
                         currentStatusFilter = (currentStatusFilter === statusKey) ? null : statusKey;
-                        ['late', 'gps', 'extra', 'calc', 'new', 'moved'].forEach(k => {{
+                        ['late', 'gps'].forEach(k => {{
                             let btn = document.getElementById('status-btn-' + k);
                             if (btn) {{
                                 if (k === currentStatusFilter) btn.classList.add('active');
@@ -1068,7 +1021,6 @@ if uploaded_file:
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
-                        # อัปเดตแบนเนอร์ด้านบนสุดให้แสดงพิกัดที่กำลังมาถึง
                         document.getElementById('top-banner-content').innerHTML = `
                             จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | รหัสลูกค้า: <span style="color:#64ffda;">${{custIdLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | พิกัด: ${{info.lat_display}}, ${{info.lng_display}} | สถานะ: ${{info.status}}
                         `;
@@ -1175,7 +1127,6 @@ if uploaded_file:
                 "ระบบจะทำการคำนวณจัดลำดับจุดส่งใหม่โดยอ้างอิงจากระยะทางที่ใกล้ที่สุด (Nearest Neighbor) โดย**ไม่ยึดติดกับเวลาจัดส่ง** เพื่อลดระยะทางรวมและการวิ่งย้อนไปมาให้เหลือน้อยที่สุด"
             )
 
-            # คำนวณเส้นทาง Optimized สำหรับแต่ละเที่ยว
             optimized_comparison_data = []
             total_orig_dist_all = 0.0
             total_opt_dist_all = 0.0
@@ -1189,7 +1140,6 @@ if uploaded_file:
                 n_pts = len(orig_records)
                 total_points_count += n_pts
 
-                # คำนวณระยะทางเดิม (ตามลำดับเวลาใน Excel)
                 orig_pts_coords = (
                     [warehouse_coord]
                     + list(zip(group["lat"], group["lng"]))
@@ -1206,7 +1156,6 @@ if uploaded_file:
                     orig_trip_dist += d_km
                 total_orig_dist_all += orig_trip_dist
 
-                # ทำ Nearest Neighbor Optimization
                 unvisited = orig_records.copy()
                 current_pos = warehouse_coord
                 opt_records = []
@@ -1224,7 +1173,6 @@ if uploaded_file:
                     opt_records.append(next_item)
                     current_pos = (next_item["lat"], next_item["lng"])
 
-                # คำนวณระยะทางแบบ Optimized
                 opt_pts_coords = (
                     [warehouse_coord]
                     + [(pt["lat"], pt["lng"]) for pt in opt_records]
@@ -1241,7 +1189,6 @@ if uploaded_file:
                     opt_trip_dist += d_km
                 total_opt_dist_all += opt_trip_dist
 
-                # นับจำนวนจุดที่ลำดับเปลี่ยนไป (สลับลำดับ)
                 swapped_count = 0
                 for idx, opt_item in enumerate(opt_records):
                     orig_idx = next(
@@ -1277,7 +1224,6 @@ if uploaded_file:
                 else 0.0
             )
 
-            # แสดงการเปรียบเทียบภาพรวม
             col_a1, col_a2, col_a3, col_a4 = st.columns(4)
             col_a1.metric(
                 "ระยะทางเดิมรวม", f"{total_orig_dist_all:.2f} กม."
@@ -1286,7 +1232,7 @@ if uploaded_file:
                 "ระยะทางหลังปรับปรุง",
                 f"{total_opt_dist_all:.2f} กม.",
                 delta=f"-{total_dist_diff:.2f} กม.",
-                delta_color="inverse",  # แก้ไขจาก delta_value เป็น delta_color แล้ว[cite: 2]
+                delta_color="inverse",
             )
             col_a3.metric("ประสิทธิภาพการประหยัด", f"{total_pct_saving:.2f}%")
             col_a4.metric(
