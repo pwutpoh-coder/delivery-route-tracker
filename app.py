@@ -1177,6 +1177,11 @@ if uploaded_file:
             total_swapped_points = 0
             total_points_count = 0
 
+            # สร้าง map โยงรหัสลูกค้ากับลำดับเดิมในแผนที่ที่ 1
+            original_order_map = {}
+            for orig_idx_val, r_item in enumerate(df.to_dict("records")):
+                original_order_map[r_item["cust_id"]] = orig_idx_val + 1
+
             grouped_opt = df.groupby("trip", sort=False)
             opt_segments_data = []
 
@@ -1275,7 +1280,7 @@ if uploaded_file:
                     "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
                 })
 
-                # สร้างเส้นทางสำหรับแผนที่ตัวที่ 2
+                # สร้างเส้นทางและส่งข้อมูลลำดับใหม่ + ลำดับเดิมไปแสดงผลบนแผนที่ที่ 2
                 opt_full_pts = [warehouse_coord] + [
                     (pt["lat"], pt["lng"]) for pt in opt_records
                 ] + [warehouse_coord]
@@ -1295,12 +1300,22 @@ if uploaded_file:
                         }
                     )
                     info["trip"] = trip_name
+                    # กำหนดลำดับใหม่ (Optimized Index) และลำดับเดิม
+                    opt_seq_num = i + 1 if i < len(opt_records) else ""
+                    orig_seq_num = (
+                        original_order_map.get(info["cust_id"], "-")
+                        if i < len(opt_records)
+                        else "-"
+                    )
+
                     opt_segments_data.append({
                         "trip": trip_name,
                         "color": trip_colors.get(trip_name, "#0055FF"),
                         "path": road_path,
                         "info": info,
                         "dist_km": round(dist_km, 2),
+                        "opt_seq": opt_seq_num,
+                        "orig_seq": orig_seq_num,
                     })
 
             total_dist_diff = total_orig_dist_all - total_opt_dist_all
@@ -1342,15 +1357,8 @@ if uploaded_file:
                 hide_index=True,
             )
 
-            # เรนเดอร์แผนที่ตัวที่ 2 (Optimized Route Map)
+            # เรนเดอร์แผนที่ตัวที่ 2 (Optimized Route Map) พร้อมแสดงลำดับแนะนำใหม่ + ป้ายแจ้งลำดับเดิม
             st.markdown("### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map)")
-            opt_points_json = json.dumps(
-                [
-                    {**pt, "color": trip_colors.get(pt.get("trip"), "#0055FF")}
-                    for pt in df.to_dict("records")
-                ],
-                ensure_ascii=False,
-            )
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
 
             opt_map_html = f"""
@@ -1364,11 +1372,33 @@ if uploaded_file:
                     #opt-map {{ width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     .opt-legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; }}
                     .opt-color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                    
+                    .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
+                    .opt-marker-container {{ position: relative; width: 32px; height: 32px; }}
+
                     .opt-number-icon {{
-                        color: #FFFFFF !important; border: 2px solid #FFFFFF !important; border-radius: 50% !important;
-                        text-align: center !important; font-weight: bold !important; font-size: 11px !important; line-height: 22px !important;
-                        width: 26px !important; height: 26px !important; box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
-                        display: flex !important; align-items: center !important; justify-content: center !important;
+                        color: #FFFFFF !important;
+                        border: 2px solid #FFFFFF !important;
+                        border-radius: 50% !important;
+                        text-align: center !important;
+                        font-weight: bold !important;
+                        font-size: 12px !important;
+                        line-height: 26px !important;
+                        width: 30px !important;
+                        height: 30px !important;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        box-sizing: border-box !important;
+                    }}
+
+                    .opt-orig-badge {{
+                        position: absolute; top: -8px; right: -12px;
+                        background-color: #333333; color: #FFD700; border: 1.5px solid white;
+                        border-radius: 10px; padding: 0 4px; font-size: 9px; font-weight: bold;
+                        box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
+                        white-space: nowrap;
                     }}
                 </style>
             </head>
@@ -1377,6 +1407,7 @@ if uploaded_file:
                     <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#0055FF;"></span> เที่ยว 1 (Optimized)</div>
                     <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#FF0055;"></span> เที่ยว 2 (Optimized)</div>
                     <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#00AA44;"></span> เที่ยว 3 (Optimized)</div>
+                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาของหมุดคือ <b>"ลำดับเดิม"</b> จากแผนที่แรก</div>
                 </div>
                 <div id="opt-map"></div>
                 <script>
@@ -1392,17 +1423,25 @@ if uploaded_file:
                         .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
                     optSegments.forEach(seg => {{
-                        L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                        if (seg.path && seg.path.length > 1) {{
+                            L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                        }}
                         let lastPt = seg.path[Math.floor(seg.path.length / 2)];
-                        if (lastPt && seg.info && seg.info.cust_id) {{
+                        if (lastPt && seg.info && seg.info.cust_id && seg.info.cust_id !== "WH-001") {{
+                            let optSeq = seg.opt_seq;
+                            let origSeq = seg.orig_seq;
+                            
+                            let origBadgeHtml = `<div class="opt-orig-badge">เดิม: ${{origSeq}}</div>`;
+                            let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
+                            
                             let customIcon = L.divIcon({{
                                 className: '',
-                                html: `<div class="opt-number-icon" style="background-color: ${{seg.color}};">รหัส: ${{seg.info.cust_id}}</div>`,
-                                iconSize: [70, 26], iconAnchor: [35, 13]
+                                html: innerHtml,
+                                iconSize: [32, 32], iconAnchor: [16, 16]
                             }});
-                            // วางหมุดจุดส่งแบบย่อในแผนที่ Optimized
+
                             L.marker(lastPt, {{icon: customIcon}}).addTo(optMap)
-                                .bindPopup(`<b>รหัสลูกค้า:</b> ${{seg.info.cust_id}}<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`);
+                                .bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}}<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
                         }}
                     }});
                 </script>
@@ -1413,5 +1452,5 @@ if uploaded_file:
             st.components.v1.html(opt_map_html, height=550, scrolling=False)
 
             st.info(
-                "💡 **คำอธิบายเพิ่มเติม:** แผนที่ในส่วนที่ 2 แสดงผลเส้นทางถนนจริงที่ผ่านการจัดเรียงลำดับใหม่ เพื่อลดระยะทางรวม (Shortest Path Heuristic) ช่วยให้ทีมขนส่งสามารถนำไปปรับใช้เป็นเส้นทางเลือกในรอบถัดไปได้ทันที"
+                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **ลำดับเดิม (Original Sequence)** เพื่อให้เห็นภาพการสลับจุดส่งได้อย่างชัดเจน"
             )
