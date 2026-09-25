@@ -145,6 +145,7 @@ import_type_part1 = st.sidebar.radio(
 
 trip_data_records = []
 total_target_qty = 0
+has_dwt_data = False
 
 if import_type_part1 == "1. ระบุยอดเบิก ยอดคืนเอง (แยกตามเที่ยว)":
     num_trips = st.sidebar.number_input("จำนวนเที่ยววิ่งในวันนี้", min_value=1, max_value=5, value=1, step=1)
@@ -154,6 +155,7 @@ if import_type_part1 == "1. ระบุยอดเบิก ยอดคืน
         return_qty = st.sidebar.number_input(f"ยอดคืน เที่ยวที่ {t+1} (ถัง)", min_value=0, value=0, key=f"return_{t}")
         net_delivered = max(0, issue_qty - return_qty)
         if issue_qty > 0 or return_qty > 0:
+            has_dwt_data = True
             trip_data_records.append({
                 "trip": t + 1,
                 "issue": issue_qty,
@@ -171,6 +173,7 @@ else:
             bev_col = pd.to_numeric(sub_dwt.iloc[:, 3], errors='coerce').fillna(0)
             total_target_qty = int(bev_col.sum())
             if total_target_qty > 0:
+                has_dwt_data = True
                 trip_data_records.append({
                     "trip": 1,
                     "issue": total_target_qty,
@@ -240,34 +243,33 @@ if file_summary is not None:
                 "status": status,
                 "reason": reason,
                 "orig_seq": int(orig_seq),
-                "trip": 1  # กำหนดรอบเริ่มต้นเป็น 1 หรือแบ่งตามเงื่อนไข
+                "trip": 1
             })
             
         df_customers = pd.DataFrame(data_rows)
         if not df_customers.empty:
-            # จัดเรียงลำดับตามเวลาน้อยไปหามาก (Time Ascending)
+            # จัดเรียงลำดับตามเวลาน้อยไปหามาก (Time Ascending) ทันทีที่โหลดข้อมูล
             df_customers['time_parsed'] = pd.to_datetime(df_customers['time_str'], format='%H:%M:%S', errors='coerce')
             df_customers = df_customers.sort_values(by=['time_parsed', 'orig_seq']).reset_index(drop=True)
-            # กำหนดลำดับตามเวลา (Sequence 1 to N)
             df_customers['seq_time'] = range(1, len(df_customers) + 1)
-            
-            # แบ่งรอบส่งอัตโนมัติทุกๆ 10 จุด หรือตามความเหมาะสม
             df_customers['trip'] = ((df_customers.index // 10) + 1).clip(upper=len(trip_colors))
             
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
 
+# ----------------------------------------------------
+# 5. การแสดงผลหลัก (แสดงแผนที่เสมอ แม้ยังไม่ใส่ข้อมูล)
+# ----------------------------------------------------
 if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
-    st.warning("⚠️ กรุณาเลือก 'สาขาคลังสินค้าต้นทาง' ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นใช้งาน")
+    st.warning("⚠️ กรุณาเลือก 'สาขาคลังสินค้าต้นทาง' ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นใช้งานแผนที่และระบบคำนวณ")
 
-if df_customers.empty:
-    st.info("💡 กรุณาอัปโหลดไฟล์ **'รายงานสรุปการจัดส่งประจำวัน.xls'** ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นวิเคราะห์เส้นทางและแสดงผลข้อมูล")
-else:
-    tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตามลำดับเวลาจริง (Actual Route)", "⚡ 2. เส้นทางที่เหมาะสมที่สุด (Optimized Route)"])
+tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตามลำดับเวลาจริง (Actual Route)", "⚡ 2. เส้นทางที่เหมาะสมที่สุด (Optimized Route)"])
 
-    with tab1:
-        st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (เรียงลำดับจากเวลาน้อยไปหามาก)")
-        
+with tab1:
+    st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (เรียงลำดับจากเวลาน้อยไปหามาก)")
+    
+    # แสดงตัวเลขและตารางผลลัพธ์เฉพาะเมื่อมีการนำเข้าข้อมูลสรุปแล้วเท่านั้น
+    if not df_customers.empty:
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
             filter_status = st.multiselect("กรองตามสถานะจัดส่ง", options=df_customers["status"].unique() if not df_customers.empty else [], default=[])
@@ -299,29 +301,28 @@ else:
         m2_col.metric("ระยะทางรวม (Actual)", f"{act_dist:.2f} กม.")
         m3_col.metric("เวลาเดินทางรวมโดยประมาณ", f"{act_dur:.1f} นาที")
 
-        if trip_data_records:
+        if has_dwt_data and trip_data_records:
             st.markdown("#### 📦 สรุปยอดเบิก-คืน แยกตามเที่ยววิ่ง")
             cols_trip = st.columns(len(trip_data_records))
             for i, tr in enumerate(trip_data_records):
                 with cols_trip[i]:
                     st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
         
-        # ----------------------------------------------------
-        # แถบควบคุมการเล่น (Playback & Animation Controls)
-        # ----------------------------------------------------
         st.markdown("---")
         st.markdown("#### ⏱️ แถบควบคุมเวลาและจำลองการจัดส่ง")
         
         max_steps = max(1, len(valid_actual_custs))
         
-        ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4 = st.columns([2, 1, 1, 1])
+        ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4, ctrl_c5 = st.columns([2, 1, 1, 1, 1])
         with ctrl_c1:
-            playback_step = st.slider("เลือกช่วงเวลา / ลำดับจุดส่ง", 1, max_steps, max_steps, key="playback_slider")
+            playback_step = st.slider("เลือกช่วงเวลา / ลำดับจุดส่ง", 1, max_steps, 1, key="playback_slider")
         with ctrl_c2:
             speed_opt = st.selectbox("ความเร็ว", ["ช้า (1x)", "ปานกลาง (2x)", "เร็ว (3x)"], index=1)
         with ctrl_c3:
-            play_btn = st.button("▶️ เล่นอัตโนมัติ")
+            play_btn = st.button("▶️ เล่น")
         with ctrl_c4:
+            pause_btn = st.button("⏸️ หยุด")
+        with ctrl_c5:
             reset_btn = st.button("🔄 รีเซ็ต")
 
         if reset_btn:
@@ -335,26 +336,36 @@ else:
                 placeholder_progress.info(f"กำลังจำลองการจัดส่งถึงจุดที่: {s} / {max_steps}")
                 time.sleep(sleep_time)
             placeholder_progress.empty()
+    else:
+        st.info("💡 กรุณาอัปโหลดไฟล์ **'รายงานสรุปการจัดส่งประจำวัน.xls'** เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง")
+        valid_actual_custs = pd.DataFrame()
+        act_geom = []
 
-        # สร้างแผนที่ Folium
-        map_center = [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
-        m = folium.Map(location=map_center, zoom_start=12)
-        
-        if depot_lat is not None and depot_lon is not None:
-            folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
-        
+    # สร้างแผนไว้ล่วงหน้าเสมอแม้ยังไม่มีข้อมูล
+    map_center = [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
+    m = folium.Map(location=map_center, zoom_start=12 if depot_lat is not None else 10)
+    
+    if depot_lat is not None and depot_lon is not None:
+        folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
+    
+    if not df_customers.empty and not valid_actual_custs.empty:
         if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
             current_display_limit = max_steps
+            # แสดงเส้นทางทั้งหมดเมื่อเลือกโหมดแสดงทุกจุด
+            if len(act_geom) > 1:
+                folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
         else:
             current_display_limit = playback_step
+            # เส้นทางจะแสดงเฉพาะเมื่อกดเล่นหรือเลือกสไลเดอร์ โดยเส้นจะค่อยๆ วิ่งไปถึงจุดล่าสุด
+            if playback_step > 1 and len(act_geom) > 1:
+                folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
 
         for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
-            is_latest = (idx + 1 == current_display_limit)
             if idx + 1 <= current_display_limit:
+                is_latest = (idx + 1 == current_display_limit)
                 t_idx = int(row.get('trip', 1)) - 1
                 color_name = trip_colors[t_idx % len(trip_colors)]
                 
-                # หากเป็นพิกัดล่าสุด ให้ใช้ไอคอนพิเศษ/สีเด่นชัด
                 if is_latest and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
                     icon_symbol = "star"
                     icon_color = "red"
@@ -369,19 +380,18 @@ else:
                     popup=popup_text,
                     icon=folium.Icon(color=icon_color, icon=icon_symbol)
                 ).add_to(m)
-                
-        if len(act_geom) > 1:
-            folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
-            
-        st_folium(m, width="100%", height=450)
         
+    st_folium(m, width="100%", height=450)
+    
+    if not df_customers.empty:
         st.markdown("### ตารางรายละเอียดลูกค้า (Actual เรียงตามเวลา)")
         st.dataframe(filtered_df, use_container_width=True)
 
-    with tab2:
-        st.subheader("การจัดลำดับเส้นทางใหม่ให้อธิประสิทธิภาพสูงสุด (TSP Optimized Route)")
-        st.markdown("ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด เพื่อประหยัดระยะทางและน้ำมันสูงสุด")
-        
+with tab2:
+    st.subheader("การจัดลำดับเส้นทางใหม่ให้อธิประสิทธิภาพสูงสุด (TSP Optimized Route)")
+    st.markdown("ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด เพื่อประหยัดระยะทางและน้ำมันสูงสุด")
+    
+    if not df_customers.empty:
         valid_opt_custs = df_customers.dropna(subset=['lat', 'lon']).copy()
         
         if not valid_opt_custs.empty and depot_lat is not None and depot_lon is not None:
@@ -395,9 +405,13 @@ else:
             opt_dist, opt_dur, opt_geom = get_osrm_route(opt_coords)
             
             om1, om2, om3 = st.columns(3)
-            om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_dist:.2f} กม.", delta_color="inverse")
-            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_dur:.1f} นาที", delta_color="inverse")
-            saved_km = max(0, act_dist - opt_dist)
+            # เปรียบเทียบกับค่า actual ด้านบน
+            act_coords_temp = [[depot_lon, depot_lat]] + [[r['lon'], r['lat']] for _, r in valid_opt_custs.iterrows()]
+            act_d_tmp, _, _ = get_osrm_route(act_coords_temp)
+            
+            om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_d_tmp:.2f} กม.", delta_color="inverse")
+            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta_color="inverse")
+            saved_km = max(0, act_d_tmp - opt_dist)
             om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
             
             m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
@@ -429,6 +443,11 @@ else:
             st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
         else:
             st.warning("กรุณาเลือกสาขาคลังสินค้าต้นทางและตรวจสอบข้อมูลพิกัด GPS ให้ครบถ้วน")
+    else:
+        # แสดงแผนที่ว่างเปล่าในแท็บ 2 ไว้ก่อนหากยังไม่โหลดข้อมูล
+        m_opt_empty = folium.Map(location=[13.7563, 100.5018], zoom_start=10)
+        st_folium(m_opt_empty, width="100%", height=450)
+        st.info("💡 กรุณานำเข้าข้อมูลไฟล์สรุปการจัดส่งเพื่อคำนวณเส้นทางที่มีประสิทธิภาพที่สุด")
 
 st.markdown("---")
 st.caption("Sprinkle Delivery Inspector System - พัฒนาด้วย Streamlit และ OSRM Routing")
