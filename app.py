@@ -281,9 +281,19 @@ if file_summary is not None:
       df_customers["time_parsed"] = pd.to_datetime(
           df_customers["time_str"], format="%H:%M:%S", errors="coerce"
       )
+
+      # กำหนดเงื่อนไข: เวลาเป็น 0:00, 00:00:00 หรือ 00:00 และไม่มียอดส่งน้ำ (target_qty == 0) ให้อยู่ลำดับสุดท้าย
+      df_customers["is_zero_time"] = (
+          df_customers["time_str"].isin(["00:00:00", "0:00", "00:00"])
+          & (df_customers["target_qty"] == 0)
+      )
+
+      # เรียงลำดับโดยดันข้อมูลที่เป็น 0:00 และยอด 0 ไปไว้ท้ายสุด
       df_customers = df_customers.sort_values(
-          by=["time_parsed", "orig_seq"]
+          by=["is_zero_time", "time_parsed", "orig_seq"],
+          ascending=[True, True, True],
       ).reset_index(drop=True)
+
       df_customers["seq_time"] = range(1, len(df_customers) + 1)
       df_customers["cum_qty"] = df_customers["target_qty"].cumsum()
 
@@ -312,7 +322,6 @@ if file_summary is not None:
 # ----------------------------------------------------
 # 5. การเตรียมเส้นทางและสถานะล่วงหน้า (Pre-computation)
 # ----------------------------------------------------
-# กำหนดค่าเริ่มต้น playback_step เป็น 1 เพื่อให้มีพิกัดที่ 1 รอไว้เสมอเมื่อข้อมูลพร้อม
 if "playback_step" not in st.session_state:
   st.session_state.playback_step = 1
 if "is_playing" not in st.session_state:
@@ -511,14 +520,12 @@ with tab1:
 
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
       current_display_limit = len(valid_actual_custs)
-      # เงื่อนไขใหม่ตามที่ขอ: โหมดแสดงทั้งหมด จะยังไม่วาดเส้นทาง (PolyLine) จนกว่าจะกดเล่น (is_playing เป็น True) หรือมีการเล่น
       if st.session_state.is_playing or st.session_state.playback_step > 1:
         if len(act_geom) > 1:
           folium.PolyLine(
               act_geom, color="blue", weight=4, opacity=0.7
           ).add_to(m)
     else:
-      # โหมดแสดงทีละพิกัด (Play Mode) วาดเส้นทางตามสเต็ปที่กำลังเล่น
       if (
           current_display_limit > 0
           and depot_lat is not None
