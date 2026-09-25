@@ -328,7 +328,6 @@ valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
 is_system_ready = False
 
-# [เพิ่มประสิทธิภาพ] ตัวแปร Cache เก็บเส้นทางของแต่ละสเต็ปล่วงหน้า ป้องกันการยิง API ซ้ำตอนกด Play
 if "cached_route_steps" not in st.session_state:
   st.session_state.cached_route_steps = {}
 
@@ -342,7 +341,6 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     if len(act_geom) > 0:
       is_system_ready = True
 
-      # Pre-compute เส้นทางล่วงหน้าทุกสเต็ปในเบื้องหลังตอนโหลดครั้งแรกครั้งเดียว
       if not st.session_state.cached_route_steps:
         with st.spinner(
             "⏳ กำลังจัดเตรียมเส้นทางจำลองไว้ในระบบ (Pre-computing)..."
@@ -419,9 +417,6 @@ with tab1:
     m2_col.metric("ระยะทางรวมทั้งวัน (Actual)", f"{act_dist:.2f} กม.")
     m3_col.metric("เวลาเดินทางรวมทั้งวัน", f"{act_dur:.1f} นาที")
 
-    # ----------------------------------------------------
-    # ส่วนสรุปการจัดส่งในแต่ละรอบ และรวมทั้งวัน
-    # ----------------------------------------------------
     st.markdown("---")
     st.markdown("### 📊 สรุปผลการจัดส่ง (แยกรายรอบ และรวมทั้งวัน)")
 
@@ -460,9 +455,6 @@ with tab1:
     )
     col_sum4.metric("ระยะทางสะสมรวมทั้งวัน", f"{act_dist:.2f} กม.")
 
-    # ----------------------------------------------------
-    # ส่วนควบคุมการเล่นแผนที่ (Playback Controls & Speed)
-    # ----------------------------------------------------
     st.markdown("---")
     st.markdown("#### ⏱️ แถบควบคุมการเล่นเส้นทางบนแผนที่")
 
@@ -513,7 +505,6 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    # [แทนที่แถบเลื่อน ด้วยแถบแสดงเวลาการจัดส่งปัจจุบัน]
     current_idx_bar = min(
         max(0, st.session_state.playback_step - 1),
         len(valid_actual_custs) - 1,
@@ -533,7 +524,6 @@ with tab1:
         ),
     )
 
-    # อัปเดตสเต็ปอัตโนมัติเมื่ออยู่ในโหมด Play
     if st.session_state.is_playing:
       if st.session_state.playback_step < max_steps:
         time.sleep(sleep_time)
@@ -547,7 +537,6 @@ with tab1:
         " เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง"
     )
 
-  # ตั้งค่าพิกัดกลางแผนที่ให้ขยับตามจุดล่าสุดอัตโนมัติ
   map_center = (
       [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
   )
@@ -565,7 +554,9 @@ with tab1:
       map_center = [latest_row["lat"], latest_row["lon"]]
 
   m = folium.Map(
-      location=map_center, zoom_start=14 if depot_lat is not None else 10
+      location=map_center,
+      zoom_start=14 if depot_lat is not None else 10,
+      prefer_canvas=True,
   )
 
   if depot_lat is not None and depot_lon is not None:
@@ -580,18 +571,16 @@ with tab1:
 
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
       current_display_limit = len(valid_actual_custs)
-      if st.session_state.is_playing or st.session_state.playback_step > 1:
-        if len(act_geom) > 1:
-          folium.PolyLine(
-              act_geom, color="blue", weight=4, opacity=0.7
-          ).add_to(m)
+      if len(act_geom) > 1:
+        folium.PolyLine(
+            act_geom, color="blue", weight=4, opacity=0.7
+        ).add_to(m)
     else:
       if (
           current_display_limit > 0
           and depot_lat is not None
           and depot_lon is not None
       ):
-        # ดึงเส้นทางที่คำนวณและเก็บไว้ใน Cache ล่วงหน้ามาแสดงผลทันทีโดยไม่หน่วง
         cached_geom = st.session_state.cached_route_steps.get(
             current_display_limit, act_geom
         )
@@ -637,7 +626,12 @@ with tab1:
             icon=div_icon,
         ).add_to(m)
 
-  st_folium(m, width="100%", height=450, key="map_tab1")
+  st_folium(
+      m,
+      width="100%",
+      height=450,
+      key=f"map_tab1_{st.session_state.playback_step}",
+  )
 
   if not df_customers.empty:
     st.markdown("### ตารางรายละเอียดลูกค้า (Actual เรียงตามเวลา)")
@@ -689,7 +683,9 @@ with tab2:
       saved_km = max(0, act_d_tmp - opt_dist)
       om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
 
-      m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
+      m_opt = folium.Map(
+          location=[depot_lat, depot_lon], zoom_start=12, prefer_canvas=True
+      )
       folium.Marker(
           [depot_lat, depot_lon],
           popup=f"คลังสินค้า: {selected_depot}",
@@ -742,7 +738,12 @@ with tab2:
             opt_sub_geom, color="green", weight=4, opacity=0.8
         ).add_to(m_opt)
 
-      st_folium(m_opt, width="100%", height=450, key="map_tab2_optimized")
+      st_folium(
+          m_opt,
+          width="100%",
+          height=450,
+          key=f"map_tab2_optimized_{selected_opt_step}",
+      )
 
       st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
       df_optimized["optimized_seq"] = range(1, len(df_optimized) + 1)
