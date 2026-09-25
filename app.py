@@ -49,12 +49,12 @@ def get_osrm_route(coords_list):
                 route = data["routes"][0]
                 distance_km = route["distance"] / 1000.0
                 duration_min = route["duration"] / 60.0
-                geometry = polyline.decode(route["geometry"]) # return list of (lat, lon)
+                geometry = polyline.decode(route["geometry"])
                 return distance_km, duration_min, geometry
     except Exception:
         pass
     
-    # Fallback กรณีเรียก OSRM ไม่สำเร็จ ใช้ Haversine คำนวณคร่าวๆ
+    # Fallback กรณี OSRM ไม่สำเร็จ
     total_dist = 0
     for i in range(len(coords_list) - 1):
         total_dist += haversine(coords_list[i][1], coords_list[i][0], coords_list[i+1][1], coords_list[i+1][0])
@@ -92,14 +92,36 @@ st.title("🚛 ระบบวิเคราะห์และติดตา�
 st.markdown("---")
 
 st.sidebar.header("⚙️ 1. ตั้งค่าคลังสินค้า (Depot)")
+
+# กำหนดรายชื่อสาขาคลังสินค้าทั้ง 18 สาขา
 depot_options = {
-    "สาขากรุงเทพกรีฑา": {"lat": 13.7480, "lon": 100.6620},
-    "สาขากิ่งแก้ว": {"lat": 13.6820, "lon": 100.7250},
+    "-- กรุณาเลือกสาขาต้นทาง --": {"lat": None, "lon": None},
+    "สาขาบางพลี": {"lat": 13.593901, "lon": 100.80256},
+    "สาขาสำโรง": {"lat": 13.660759, "lon": 100.593191},
+    "สาขากิ่งแก้ว": {"lat": 13.614988, "lon": 100.700414},
+    "สาขาประเวศ": {"lat": 13.711951, "lon": 100.689231},
+    "สาขาวังน้อย": {"lat": 14.270937, "lon": 100.756769},
+    "สาขาดอนเมือง": {"lat": 13.949959, "lon": 100.612249},
+    "สาขาปทุมธานี": {"lat": 14.037360, "lon": 100.606717},
+    "สาขาปากเกร็ด": {"lat": 13.937801, "lon": 100.507829},
+    "สาขารามอินทรา": {"lat": 13.832754, "lon": 100.714387},
+    "สาขากรุงเทพกรีฑา": {"lat": 13.743777, "lon": 100.673184},
+    "สาขาสุขุมวิท 50": {"lat": 13.699439, "lon": 100.587817},
+    "สาขาพระราม 3": {"lat": 13.684123, "lon": 100.548952},
+    "สาขาบุคคโล": {"lat": 13.698775, "lon": 100.487137},
+    "สาขาราษฎร์บูรณะ": {"lat": 13.684947, "lon": 100.496656},
+    "สาขาพระราม 2": {"lat": 13.612861, "lon": 100.384407},
+    "สาขาพุทธมณฑลสาย 1": {"lat": 13.729497, "lon": 100.428533},
+    "สาขาบางบัวทอง": {"lat": 13.909905, "lon": 100.407209},
+    "สาขาประชาชื่น": {"lat": 13.837436, "lon": 100.538753},
     "กำหนดเอง (Custom)": {"lat": 13.7563, "lon": 100.5018}
 }
-selected_depot = st.sidebar.selectbox("เลือกคลังสินค้าต้นทาง", list(depot_options.keys()))
 
-if selected_depot == "กำหนดเอง (Custom)":
+selected_depot = st.sidebar.selectbox("เลือกคลังสินค้าต้นทาง", list(depot_options.keys()), index=0)
+
+if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
+    depot_lat, depot_lon = 13.7563, 100.5018
+elif selected_depot == "กำหนดเอง (Custom)":
     depot_lat = st.sidebar.number_input("ละติจูดคลัง (Latitude)", value=13.7563, format="%.6f")
     depot_lon = st.sidebar.number_input("ลองจิจูดคลัง (Longitude)", value=100.5018, format="%.6f")
 else:
@@ -107,37 +129,39 @@ else:
     depot_lon = depot_options[selected_depot]["lon"]
 
 st.sidebar.markdown("---")
-st.sidebar.header("📁 2. นำเข้าข้อมูลการจัดส่ง")
+st.sidebar.header("📁 2. นำเข้าข้อมูลการจัดส่งและเที่ยววิ่ง")
 
-# ส่วนที่ 1: ยอดส่ง (เลือกวิธีได้)
-st.sidebar.subheader("ส่วนที่ 1: ข้อมูลยอดส่ง (น้ำดื่ม)")
+# ส่วนที่ 1: ข้อมูลยอดส่ง ยอดเบิก-ยอดคืน แยกตามเที่ยว
+st.sidebar.subheader("ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน (แยกตามเที่ยว)")
 import_type_part1 = st.sidebar.radio(
-    "เลือกวิธีนำเข้าข้อมูลยอดส่ง",
-    ["อัปโหลดไฟล์ 'รายงานใบเบิกใบคืนประจำวัน'", "กรอกยอดส่งด้วยตนเอง"]
+    "เลือกวิธีระบุข้อมูลยอดเบิก/คืน",
+    ["ระบุแยกตามเที่ยวส่ง", "กรอกยอดรวมครั้งเดียว"]
 )
 
+trip_data_records = []
 total_target_qty = 0
-file_dwt = None
 
-if import_type_part1 == "อัปโหลดไฟล์ 'รายงานใบเบิกใบคืนประจำวัน'":
-    file_dwt = st.sidebar.file_uploader("อัปโหลดไฟล์ .xls (รายงานใบเบิกใบคืนประจำวัน)", type=["xls", "xlsx"])
-    if file_dwt is not None:
-        try:
-            df_dwt_raw = pd.read_excel(file_dwt, header=None)
-            sub_dwt = df_dwt_raw.iloc[4:].copy()
-            sub_dwt = sub_dwt[sub_dwt.iloc[:, 2].notna() & (sub_dwt.iloc[:, 2] != 'รวม')]
-            bev_col = pd.to_numeric(sub_dwt.iloc[:, 3], errors='coerce').fillna(0)
-            total_target_qty = int(bev_col.sum())
-            st.sidebar.success(f"อ่านยอดเบิกสำเร็จ: {total_target_qty} หน่วย")
-        except Exception as e:
-            st.sidebar.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์เบิก: {e}")
+if import_type_part1 == "ระบุแยกตามเที่ยวส่ง":
+    num_trips = st.sidebar.number_input("จำนวนเที่ยววิ่งในวันนี้", min_value=1, max_value=5, value=1, step=1)
+    for t in range(int(num_trips)):
+        st.sidebar.markdown(f"**--- เที่ยวที่ {t+1} ---**")
+        issue_qty = st.sidebar.number_input(f"ยอดเบิก เที่ยวที่ {t+1} (ถัง)", min_value=0, value=100, key=f"issue_{t}")
+        return_qty = st.sidebar.number_input(f"ยอดคืน เที่ยวที่ {t+1} (ถัง)", min_value=0, value=0, key=f"return_{t}")
+        net_delivered = max(0, issue_qty - return_qty)
+        trip_data_records.append({
+            "trip": t + 1,
+            "issue": issue_qty,
+            "return": return_qty,
+            "net": net_delivered
+        })
+        total_target_qty += net_delivered
 else:
-    total_target_qty = st.sidebar.number_input("ระบุยอดส่งรวม (ถัง/หน่วย)", min_value=0, value=150, step=1)
+    total_target_qty = st.sidebar.number_input("ระบุยอดส่งสุทธิรวมทั้งหมด (ถัง/หน่วย)", min_value=0, value=150, step=1)
 
 st.sidebar.markdown("")
 # ส่วนที่ 2: รายละเอียดการจัดส่งแต่ละรายสมาชิก
 st.sidebar.subheader("ส่วนที่ 2: รายละเอียดรายสมาชิก")
-file_summary = st.sidebar.file_uploader("อัปโหลดไฟล์ .xls (รายงานสรุปการจัดส่งประจำวัน)", type=["xls", "xlsx"])
+file_summary = st.sidebar.file_uploader("อัปโหลดไฟล์ .xls (รายงานสรุปการจัดส่งประจำวัน)", type=["xls", "xlsx"], key="file_sum")
 
 # ----------------------------------------------------
 # 4. การประมวลผลข้อมูลไฟล์สรุปการจัดส่งรายสมาชิก
@@ -207,6 +231,10 @@ if df_customers.empty:
     if total_target_qty == 0:
         total_target_qty = int(df_customers["target_qty"].sum())
 
+# หากเลือกสาขาเป็นค่าเริ่มต้น แจ้งเตือนให้ผู้ใช้งานเลือกสาขาก่อน
+if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
+    st.warning("⚠️ กรุณาเลือก 'สาขาคลังสินค้าต้นทาง' ที่แถบเมนูด้านซ้าย เพื่อให้การคำนวณเส้นทางและพิกัดถูกต้องสมบูรณ์")
+
 # ----------------------------------------------------
 # 5. แสดงผลลัพธ์ผ่าน Tabs
 # ----------------------------------------------------
@@ -239,12 +267,20 @@ with tab1:
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
     
     m1_col, m2_col, m3_col = st.columns(3)
-    m1_col.metric("ยอดส่งรวมทั้งหมด", f"{total_target_qty} ถัง")
+    m1_col.metric("ยอดส่งสุทธิรวมทั้งหมด", f"{total_target_qty} ถัง")
     m2_col.metric("ระยะทางรวม (Actual)", f"{act_dist:.2f} กม.")
     m3_col.metric("เวลาเดินทางรวมโดยประมาณ", f"{act_dur:.1f} นาที")
+
+    # แสดงสรุปยอดแยกเที่ยว (ถ้ามี)
+    if trip_data_records:
+        st.markdown("#### 📦 สรุปยอดเบิก-คืน แยกตามเที่ยววิ่ง")
+        cols_trip = st.columns(len(trip_data_records))
+        for i, tr in enumerate(trip_data_records):
+            with cols_trip[i]:
+                st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
     
     m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
-    folium.Marker([depot_lat, depot_lon], popup="คลังสินค้า (Depot)", icon=folium.Icon(color="red", icon="home")).add_to(m)
+    folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
     for idx, row in valid_actual_custs.iterrows():
         folium.Marker(
@@ -284,7 +320,7 @@ with tab2:
         om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
         
         m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
-        folium.Marker([depot_lat, depot_lon], popup="คลังสินค้า (Depot)", icon=folium.Icon(color="red", icon="home")).add_to(m_opt)
+        folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m_opt)
         
         for step_idx, row in df_optimized.iterrows():
             folium.Marker(
