@@ -323,8 +323,6 @@ if "playback_step" not in st.session_state:
   st.session_state.playback_step = 1
 if "is_playing" not in st.session_state:
   st.session_state.is_playing = False
-if "slider_step" not in st.session_state:
-  st.session_state.slider_step = 1
 
 valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
@@ -473,7 +471,6 @@ with tab1:
       st.session_state.is_playing = True
       if st.session_state.playback_step >= max_steps:
         st.session_state.playback_step = 1
-      st.session_state.slider_step = st.session_state.playback_step
       st.rerun()
 
     if c_btn2.button("⏸️ พัก (Pause)"):
@@ -482,43 +479,32 @@ with tab1:
 
     if c_btn3.button("⏪ เล่นซ้ำ (Replay)", disabled=not is_system_ready):
       st.session_state.playback_step = 1
-      st.session_state.slider_step = 1
       st.session_state.is_playing = True
       st.rerun()
 
     if c_btn4.button("🔄 รีเซ็ต (Reset)"):
       st.session_state.playback_step = 1
-      st.session_state.slider_step = 1
       st.session_state.is_playing = False
       st.rerun()
 
-    # ซิงค์ค่าระหว่าง playback_step และ slider_step ให้ตรงกันก่อนสร้าง widget เพื่อป้องกัน state conflict
-    if not st.session_state.is_playing:
-      st.session_state.slider_step = int(st.session_state.playback_step)
-
-
-    def on_slider_change():
-      st.session_state.playback_step = st.session_state.slider_step
-      st.session_state.is_playing = (
-          False  # หยุดเล่นอัตโนมัติหากผู้ใช้เลื่อนเอง
-      )
-
-
-    # ใช้ slider ร่วมกับ key เพื่อจัดการสเต็ปได้อย่างแม่นยำ
-    st.slider(
+    # ใช้ slider ควบคุมด้วย value จาก playback_step โดยไม่กำหนด key เพื่อป้องกันข้อผิดพลาด WidgetAlreadyInstantiatedError
+    slider_val = st.slider(
         "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
         1,
         max_steps,
-        key="slider_step",
-        on_change=on_slider_change,
+        value=int(st.session_state.playback_step),
     )
+
+    if slider_val != st.session_state.playback_step:
+      st.session_state.playback_step = slider_val
+      st.session_state.is_playing = False  # หยุดเล่นอัตโนมัติหากผู้ใช้เลื่อนเอง
+      st.rerun()
 
     # อัปเดตสเต็ปอัตโนมัติเมื่ออยู่ในโหมด Play
     if st.session_state.is_playing:
       if st.session_state.playback_step < max_steps:
         time.sleep(sleep_time)
         st.session_state.playback_step += 1
-        st.session_state.slider_step = st.session_state.playback_step
         st.rerun()
       else:
         st.session_state.is_playing = False
