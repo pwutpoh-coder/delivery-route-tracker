@@ -131,17 +131,20 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.header("📁 2. นำเข้าข้อมูลการจัดส่งและเที่ยววิ่ง")
 
-# ส่วนที่ 1: ข้อมูลยอดส่ง ยอดเบิก-ยอดคืน แยกตามเที่ยว
-st.sidebar.subheader("ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน (แยกตามเที่ยว)")
+# ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน (แยกตาม 2 วิธีเลือก)
+st.sidebar.subheader("ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน")
 import_type_part1 = st.sidebar.radio(
     "เลือกวิธีระบุข้อมูลยอดเบิก/คืน",
-    ["ระบุแยกตามเที่ยวส่ง", "กรอกยอดรวมครั้งเดียว"]
+    [
+        "1. ระบุยอดเบิก ยอดคืนเอง (แยกตามเที่ยว)", 
+        "2. ข้อมูลจากไฟล์ 'รายงานใบเบิกใบคืนประจำวัน'"
+    ]
 )
 
 trip_data_records = []
 total_target_qty = 0
 
-if import_type_part1 == "ระบุแยกตามเที่ยวส่ง":
+if import_type_part1 == "1. ระบุยอดเบิก ยอดคืนเอง (แยกตามเที่ยว)":
     num_trips = st.sidebar.number_input("จำนวนเที่ยววิ่งในวันนี้", min_value=1, max_value=5, value=1, step=1)
     for t in range(int(num_trips)):
         st.sidebar.markdown(f"**--- เที่ยวที่ {t+1} ---**")
@@ -156,12 +159,40 @@ if import_type_part1 == "ระบุแยกตามเที่ยวส่�
         })
         total_target_qty += net_delivered
 else:
-    total_target_qty = st.sidebar.number_input("ระบุยอดส่งสุทธิรวมทั้งหมด (ถัง/หน่วย)", min_value=0, value=150, step=1)
+    file_dwt = st.sidebar.file_uploader("อัปโหลดไฟล์ .xls (รายงานใบเบิกใบคืนประจำวัน)", type=["xls", "xlsx"], key="file_dwt")
+    if file_dwt is not None:
+        try:
+            df_dwt_raw = pd.read_excel(file_dwt, header=None)
+            sub_dwt = df_dwt_raw.iloc[4:].copy()
+            sub_dwt = sub_dwt[sub_dwt.iloc[:, 2].notna() & (sub_dwt.iloc[:, 2] != 'รวม')]
+            bev_col = pd.to_numeric(sub_dwt.iloc[:, 3], errors='coerce').fillna(0)
+            total_target_qty = int(bev_col.sum())
+            trip_data_records.append({
+                "trip": 1,
+                "issue": total_target_qty,
+                "return": 0,
+                "net": total_target_qty
+            })
+            st.sidebar.success(f"อ่านยอดเบิกจากไฟล์สำเร็จ: {total_target_qty} หน่วย")
+        except Exception as e:
+            st.sidebar.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์เบิก: {e}")
+    else:
+        st.sidebar.info("📌 กรุณาอัปโหลดไฟล์ 'รายงานใบเบิกใบคืนประจำวัน'")
 
 st.sidebar.markdown("")
 # ส่วนที่ 2: รายละเอียดการจัดส่งแต่ละรายสมาชิก
 st.sidebar.subheader("ส่วนที่ 2: รายละเอียดรายสมาชิก")
 file_summary = st.sidebar.file_uploader("อัปโหลดไฟล์ .xls (รายงานสรุปการจัดส่งประจำวัน)", type=["xls", "xlsx"], key="file_sum")
+
+st.sidebar.markdown("---")
+st.sidebar.header("🗺️ 3. ตั้งค่าการแสดงแผนที่")
+map_view_mode = st.sidebar.radio(
+    "รูปแบบการแสดงพิกัดบนแผนที่",
+    [
+        "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)", 
+        "แสดงทีละพิกัดตามลำดับเส้นทางที่วิ่งผ่าน"
+    ]
+)
 
 # ----------------------------------------------------
 # 4. การประมวลผลข้อมูลไฟล์สรุปการจัดส่งรายสมาชิก
@@ -279,15 +310,28 @@ with tab1:
             with cols_trip[i]:
                 st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
     
+    # วาดแผนที่ตามโหมดที่เลือก
     m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
     folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
-    for idx, row in valid_actual_custs.iterrows():
-        folium.Marker(
-            [row['lat'], row['lon']],
-            popup=f"<b>{row['cust_id']}</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
-            icon=folium.Icon(color="blue", icon="info-sign")
-        ).add_to(m)
+    if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
+        for idx, row in valid_actual_custs.iterrows():
+            folium.Marker(
+                [row['lat'], row['lon']],
+                popup=f"<b>{row['cust_id']}</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
+                icon=folium.Icon(color="blue", icon="info-sign")
+            ).add_to(m)
+    else:
+        # แสดงทีละพิกัดตามลำดับ (ทำ Selectbox เลือกดูทีละจุด หรือแสดงสเต็ปตามเส้นทาง)
+        selected_step = st.slider("เลือกดูลำดับจุดส่งบนแผนที่", 1, max(1, len(valid_actual_custs)), 1)
+        sub_valid_custs = valid_actual_custs.iloc[:selected_step]
+        for idx, row in sub_valid_custs.iterrows():
+            folium.Marker(
+                [row['lat'], row['lon']],
+                popup=f"<b>ลำดับที่ {idx+1} ({row['cust_id']})</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
+                icon=folium.Icon(color="blue", icon="info-sign")
+            ).add_to(m)
+        st.caption(f"กำลังแสดงหมุดพิกัดตั้งแต่จุดที่ 1 ถึง {selected_step}")
         
     if len(act_geom) > 1:
         folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
@@ -322,12 +366,23 @@ with tab2:
         m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
         folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m_opt)
         
-        for step_idx, row in df_optimized.iterrows():
-            folium.Marker(
-                [row['lat'], row['lon']],
-                popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
-                icon=folium.Icon(color="green", icon="ok-sign")
-            ).add_to(m_opt)
+        if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
+            for step_idx, row in df_optimized.iterrows():
+                folium.Marker(
+                    [row['lat'], row['lon']],
+                    popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
+                    icon=folium.Icon(color="green", icon="ok-sign")
+                ).add_to(m_opt)
+        else:
+            selected_opt_step = st.slider("เลือกดูลำดับจุดส่ง Optimized บนแผนที่", 1, max(1, len(df_optimized)), 1, key="opt_slider")
+            sub_opt_custs = df_optimized.iloc[:selected_opt_step]
+            for step_idx, row in sub_opt_custs.iterrows():
+                folium.Marker(
+                    [row['lat'], row['lon']],
+                    popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
+                    icon=folium.Icon(color="green", icon="ok-sign")
+                ).add_to(m_opt)
+            st.caption(f"กำลังแสดงหมุดพิกัด Optimized ตั้งแต่จุดที่ 1 ถึง {selected_opt_step}")
             
         if len(opt_geom) > 1:
             folium.PolyLine(opt_geom, color="green", weight=4, opacity=0.8).add_to(m_opt)
