@@ -454,7 +454,6 @@ with tab1:
 
     max_steps = max(1, len(valid_actual_custs))
 
-    # แถบเลือกความเร็วในการเล่น (Speed Selector)
     speed_option = st.selectbox(
         "⚡ เลือกระดับความเร็วในการเล่นจำลองเส้นทาง",
         ["ช้ามาก (1.5 วินาที/จุด)", "ปกติ (0.8 วินาที/จุด)", "เร็ว (0.3 วินาที/จุด)"],
@@ -488,17 +487,18 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    playback_step = st.slider(
+    # ใช้ค่าจาก session_state ตรงๆ ไม่ผูก key ซ้ำซ้อน เพื่อให้ Slider ขยับตามอัตโนมัติ
+    slider_val = st.slider(
         "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
         1,
         max_steps,
-        max(1, min(st.session_state.playback_step, max_steps)),
-        key="playback_slider",
+        int(st.session_state.playback_step),
     )
-    if playback_step != st.session_state.playback_step:
-      st.session_state.playback_step = playback_step
+    if slider_val != st.session_state.playback_step:
+      st.session_state.playback_step = slider_val
+      st.session_state.is_playing = False  # หยุด Auto-play ชั่วคราวถ้าผู้ใช้เลื่อนเอง
 
-    # จัดการระบบ Auto Play ให้วิ่งไหลอัตโนมัติทีละสเต็ปตามความเร็วที่เลือก
+    # จัดการระบบ Auto Play วิ่งไหลอัตโนมัติทีละสเต็ป
     if st.session_state.is_playing:
       if st.session_state.playback_step < max_steps:
         time.sleep(sleep_time)
