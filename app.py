@@ -50,7 +50,7 @@ def get_osrm_route_cached(coords_tuple):
         route = data["routes"][0]
         distance_km = route["distance"] / 1000.0
         duration_min = route["duration"] / 60.0
-        geometry = polyline.decode(route["geometry"])
+        geometry = polyline.decode(route["geometry"])  # คืนค่าเป็น [(lat, lon), ...]
         return distance_km, duration_min, geometry
   except Exception:
     pass
@@ -320,7 +320,7 @@ if file_summary is not None:
     st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
 
 # ----------------------------------------------------
-# 5. การเตรียมเส้นทางและสถานะล่วงหน้า (Pre-computation)
+# 5. การเตรียมเส้นทางและตัดแบ่งพิกัดถนนล่วงหน้า (Pre-computation & Slicing)
 # ----------------------------------------------------
 if "playback_step" not in st.session_state:
   st.session_state.playback_step = 1
@@ -330,7 +330,7 @@ if "is_playing" not in st.session_state:
 valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
 is_system_ready = False
-step_geometries = {}  # เก็บเส้นทางสำเร็จรูปในแต่ละสเต็ปเพื่อความรวดเร็ว
+step_geometries = {}
 
 if not df_customers.empty and depot_lat is not None and depot_lon is not None:
   valid_actual_custs = df_customers.dropna(subset=["lat", "lon"]).copy()
@@ -338,23 +338,26 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     actual_coords = [[depot_lon, depot_lat]]
     for _, row in valid_actual_custs.iterrows():
       actual_coords.append([row["lon"], row["lat"]])
+
+    # ดึงเส้นทางจริงครั้งเดียวทั้งเส้นจาก OSRM
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
 
-    # Pre-compute เส้นทางทีละสเต็ปเก็บไว้ล่วงหน้า (แก้ปัญหาแผนที่กระพริบและเส้นทางไม่ขึ้น)
-    sub_coords_run = [[depot_lon, depot_lat]]
-    curr_trip_track = 1
-    for idx_s, (_, r_s) in enumerate(valid_actual_custs.iterrows()):
-      t_num = int(r_s.get("trip", 1))
-      if t_num != curr_trip_track:
-        sub_coords_run.append([depot_lon, depot_lat])
-        sub_coords_run.append([depot_lon, depot_lat])
-        curr_trip_track = t_num
-      sub_coords_run.append([r_s["lon"], r_s["lat"]])
-
-      _, _, s_geom = get_osrm_route(sub_coords_run)
-      step_geometries[idx_s + 1] = s_geom
-
+    # ตัดแบ่งเส้นทาง (Slicing) ตามพิกัดถนนจริงสำหรับแต่ละสเต็ปทันที
     if len(act_geom) > 0:
+      geom_idx = 0
+      for idx_s, (_, r_s) in enumerate(valid_actual_custs.iterrows()):
+        c_lat, c_lon = r_s["lat"], r_s["lon"]
+        best_idx = geom_idx
+        min_d = float("inf")
+        search_end = min(len(act_geom), geom_idx + 300)
+        for g in range(geom_idx, search_end):
+          d = (act_geom[g][0] - c_lat) ** 2 + (act_geom[g][1] - c_lon) ** 2
+          if d < min_d:
+            min_d = d
+            best_idx = g
+        geom_idx = best_idx
+        step_geometries[idx_s + 1] = act_geom[: geom_idx + 1]
+
       is_system_ready = True
 
 # ----------------------------------------------------
@@ -412,9 +415,6 @@ with tab1:
     m2_col.metric("ระยะทางรวมทั้งวัน (Actual)", f"{act_dist:.2f} กม.")
     m3_col.metric("เวลาเดินทางรวมทั้งวัน", f"{act_dur:.1f} นาที")
 
-    # ----------------------------------------------------
-    # ส่วนสรุปการจัดส่งในแต่ละรอบ และรวมทั้งวัน
-    # ----------------------------------------------------
     st.markdown("---")
     st.markdown("### 📊 สรุปผลการจัดส่ง (แยกรายรอบ และรวมทั้งวัน)")
 
@@ -453,16 +453,13 @@ with tab1:
     )
     col_sum4.metric("ระยะทางสะสมรวมทั้งวัน", f"{act_dist:.2f} กม.")
 
-    # ----------------------------------------------------
-    # ส่วนควบคุมการเล่นแผนที่ (Playback Controls & Speed)
-    # ----------------------------------------------------
     st.markdown("---")
     st.markdown("#### ⏱️ แถบควบคุมการเล่นเส้นทางบนแผนที่")
 
     st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
     if is_system_ready:
       st.success(
-          "✅ **ระบบโหลดข้อมูลและจำลองเส้นทางถนนจริงเรียบร้อยพร้อมเล่นแล้ว!**"
+          "✅ **ระบบพร้อมจำลองเส้นทางวิ่งตามถนนจริงทีละสเต็ปแล้ว!**"
       )
     else:
       st.warning(
@@ -472,7 +469,6 @@ with tab1:
 
     max_steps = max(1, len(valid_actual_custs))
 
-    # เลือกระดับความเร็วในการเล่น
     speed_option = st.selectbox(
         "⚡ เลือกระดับความเร็วในการเล่นจำลองเส้นทาง",
         ["ช้ามาก (1.5 วินาที/จุด)", "ปกติ (0.8 วินาที/จุด)", "เร็ว (0.3 วินาที/จุด)"],
@@ -561,18 +557,17 @@ with tab1:
 
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
       current_display_limit = len(valid_actual_custs)
-      if st.session_state.is_playing or st.session_state.playback_step > 1:
-        if len(act_geom) > 1:
-          folium.PolyLine(
-              act_geom, color="blue", weight=4, opacity=0.7
-          ).add_to(m)
+      if len(act_geom) > 1:
+        folium.PolyLine(
+            act_geom, color="blue", weight=4, opacity=0.7
+        ).add_to(m)
     else:
-      # ดึงเส้นทางสำเร็จรูปที่คำนวณเตรียมไว้แล้วมาแสดงทันที (ไม่ต้องคำนวณซ้ำตอนกดเล่น)
+      # แสดงเส้นทางตามถนนที่ถูกตัดแบ่งมาทีละสเต็ปอย่างแม่นยำ
       if current_display_limit in step_geometries:
         sub_geom = step_geometries[current_display_limit]
         if len(sub_geom) > 0:
           folium.PolyLine(
-              sub_geom, color="blue", weight=4, opacity=0.7
+              sub_geom, color="blue", weight=4, opacity=0.8
           ).add_to(m)
 
     for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
@@ -598,7 +593,7 @@ with tab1:
 
         if is_latest:
           div_icon = folium.DivIcon(
-              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; border: 3px solid gold; box-shadow: 0 0 12px gold;">{seq_num}</div>'
+              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; border: 3px solid gold; box-shadow: 0 0 15px gold;">{seq_num}</div>'
           )
         else:
           div_icon = folium.DivIcon(
@@ -697,7 +692,7 @@ with tab2:
 
           if is_latest_opt:
             div_icon_opt = folium.DivIcon(
-                html=f'<div style="background-color: green; color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; border: 3px solid gold; box-shadow: 0 0 12px gold;">{opt_seq_num}</div>'
+                html=f'<div style="background-color: green; color: white; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; border: 3px solid gold; box-shadow: 0 0 15px gold;">{opt_seq_num}</div>'
             )
           else:
             div_icon_opt = folium.DivIcon(
