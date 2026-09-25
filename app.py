@@ -1,6 +1,5 @@
 import io
 import math
-import time
 import numpy as np
 import pandas as pd
 import polyline
@@ -50,7 +49,7 @@ def get_osrm_route_cached(coords_tuple):
         route = data["routes"][0]
         distance_km = route["distance"] / 1000.0
         duration_min = route["duration"] / 60.0
-        geometry = polyline.decode(route["geometry"])  # คืนค่าเป็น [(lat, lon), ...]
+        geometry = polyline.decode(route["geometry"])
         return distance_km, duration_min, geometry
   except Exception:
     pass
@@ -223,7 +222,7 @@ st.sidebar.header("🗺️ 3. ตั้งค่าการแสดงแผ�
 map_view_mode = st.sidebar.radio(
     "รูปแบบการแสดงพิกัดบนแผนที่",
     [
-        "แสดงทีละพิกัดตามลำดับเส้นทางที่วิ่งผ่าน (เริ่มเมื่อกด Play)",
+        "แสดงทีละพิกัดตามลำดับเส้นทางที่วิ่งผ่าน (ทีละสเต็ป)",
         "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)",
     ],
 )
@@ -324,8 +323,6 @@ if file_summary is not None:
 # ----------------------------------------------------
 if "playback_step" not in st.session_state:
   st.session_state.playback_step = 1
-if "is_playing" not in st.session_state:
-  st.session_state.is_playing = False
 
 valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
@@ -454,71 +451,46 @@ with tab1:
     col_sum4.metric("ระยะทางสะสมรวมทั้งวัน", f"{act_dist:.2f} กม.")
 
     st.markdown("---")
-    st.markdown("#### ⏱️ แถบควบคุมการเล่นเส้นทางบนแผนที่")
+    st.markdown("#### ⏱️ ควบคุมการจำลองเส้นทางบนแผนที่ทีละสเต็ป")
 
-    st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
     if is_system_ready:
       st.success(
-          "✅ **ระบบพร้อมจำลองเส้นทางวิ่งตามถนนจริงทีละสเต็ปแล้ว!**"
+          "✅ **ระบบพร้อมแสดงผลเส้นทางทีละสเต็ปโดยกดปุ่ม '▶ ถัดไป' หรือเลื่อนสไลเดอร์**"
       )
     else:
       st.warning(
-          "⏳ **กำลังโหลดหรือข้อมูลยังไม่ครบถ้วน...**"
-          " กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ให้เรียบร้อย"
+          "⏳ **กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ข้อมูลให้ครบถ้วน**"
       )
 
     max_steps = max(1, len(valid_actual_custs))
 
-    speed_option = st.selectbox(
-        "⚡ เลือกระดับความเร็วในการเล่นจำลองเส้นทาง",
-        ["ช้ามาก (1.5 วินาที/จุด)", "ปกติ (0.8 วินาที/จุด)", "เร็ว (0.3 วินาที/จุด)"],
-        index=1,
-    )
-    if "ช้ามาก" in speed_option:
-      sleep_time = 1.5
-    elif "เร็ว" in speed_option:
-      sleep_time = 0.3
-    else:
-      sleep_time = 0.8
-
-    c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
-    if c_btn1.button("▶️ เล่น (Play)", disabled=not is_system_ready):
-      st.session_state.is_playing = True
-      if st.session_state.playback_step >= max_steps:
-        st.session_state.playback_step = 1
-      st.rerun()
-
-    if c_btn2.button("⏸️ พัก (Pause)"):
-      st.session_state.is_playing = False
-      st.rerun()
-
-    if c_btn3.button("⏪ เล่นซ้ำ (Replay)", disabled=not is_system_ready):
+    # ปุ่มควบคุมสเต็ปแบบโต้ตอบทันที (ไม่หน่วง ไม่กระพริบ)
+    b_col1, b_col2, b_col3, b_col4 = st.columns(4)
+    if b_col1.button("⏮️ หน้าแรก", disabled=not is_system_ready):
       st.session_state.playback_step = 1
-      st.session_state.is_playing = True
       st.rerun()
-
-    if c_btn4.button("🔄 รีเซ็ต (Reset)"):
-      st.session_state.playback_step = 1
-      st.session_state.is_playing = False
+    if b_col2.button("◀ ก่อนหน้า", disabled=not is_system_ready):
+      if st.session_state.playback_step > 1:
+        st.session_state.playback_step -= 1
+        st.rerun()
+    if b_col3.button("▶ ถัดไป", disabled=not is_system_ready):
+      if st.session_state.playback_step < max_steps:
+        st.session_state.playback_step += 1
+        st.rerun()
+    if b_col4.button("⏭️ สุดท้าย", disabled=not is_system_ready):
+      st.session_state.playback_step = max_steps
       st.rerun()
 
     playback_step = st.slider(
-        "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
+        "เลือกลำดับจุดส่งเพื่อดูเส้นทางและพิกัดเด่น",
         1,
         max_steps,
         int(st.session_state.playback_step),
     )
     if playback_step != st.session_state.playback_step:
       st.session_state.playback_step = playback_step
-      st.session_state.is_playing = False
+      st.rerun()
 
-    if st.session_state.is_playing:
-      if st.session_state.playback_step < max_steps:
-        time.sleep(sleep_time)
-        st.session_state.playback_step += 1
-        st.rerun()
-      else:
-        st.session_state.is_playing = False
   else:
     st.info(
         "💡 กรุณาอัปโหลดไฟล์ **'รายงานสรุปการจัดส่งประจำวัน.xls'**"
@@ -528,11 +500,7 @@ with tab1:
   map_center = (
       [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
   )
-  if (
-      not df_customers.empty
-      and not valid_actual_custs.empty
-      and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
-  ):
+  if not df_customers.empty and not valid_actual_custs.empty:
     current_idx = min(
         max(0, int(st.session_state.playback_step) - 1),
         len(valid_actual_custs) - 1,
@@ -562,12 +530,12 @@ with tab1:
             act_geom, color="blue", weight=4, opacity=0.7
         ).add_to(m)
     else:
-      # แสดงเส้นทางตามถนนที่ถูกตัดแบ่งมาทีละสเต็ปอย่างแม่นยำ
+      # แสดงเส้นทางตามถนนที่ถูกตัดแบ่งมาถึงสเต็ปปัจจุบันทันที
       if current_display_limit in step_geometries:
         sub_geom = step_geometries[current_display_limit]
         if len(sub_geom) > 0:
           folium.PolyLine(
-              sub_geom, color="blue", weight=4, opacity=0.8
+              sub_geom, color="blue", weight=5, opacity=0.85
           ).add_to(m)
 
     for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
@@ -592,8 +560,9 @@ with tab1:
                 """
 
         if is_latest:
+          # พิกัดล่าสุดจะแสดงผลเด่นชัดขึ้นด้วยวงแหวนสีทองเรืองแสงขนาดใหญ่
           div_icon = folium.DivIcon(
-              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; border: 3px solid gold; box-shadow: 0 0 15px gold;">{seq_num}</div>'
+              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; border: 4px solid gold; box-shadow: 0 0 20px gold;">{seq_num}</div>'
           )
         else:
           div_icon = folium.DivIcon(
@@ -692,7 +661,7 @@ with tab2:
 
           if is_latest_opt:
             div_icon_opt = folium.DivIcon(
-                html=f'<div style="background-color: green; color: white; border-radius: 50%; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; border: 3px solid gold; box-shadow: 0 0 15px gold;">{opt_seq_num}</div>'
+                html=f'<div style="background-color: green; color: white; border-radius: 50%; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 14px; border: 4px solid gold; box-shadow: 0 0 20px gold;">{opt_seq_num}</div>'
             )
           else:
             div_icon_opt = folium.DivIcon(
