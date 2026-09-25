@@ -1,3 +1,9 @@
 streamlit
 pandas
+numpy
+requests
+folium
+streamlit-folium
+polyline
+xlrd
 openpyxl
