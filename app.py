@@ -20,7 +20,7 @@ st.set_page_config(
 
 
 # ----------------------------------------------------
-# 1. ฟังก์ชันคำนวณระยะทาง Haversine & OSRM (สำหรับรถยนต์/รถกระบะ 4 ล้อขึ้นไป)
+# 1. ฟังก์ชันคำนวณระยะทาง Haversine & OSRM (พร้อมระบบ Cache ป้องกัน Server ล่ม/Timeout)
 # ----------------------------------------------------
 def haversine(lat1, lon1, lat2, lon2):
   R = 6371.0  # รัศมีโลกหน่วยเป็นกิโลเมตร
@@ -33,12 +33,9 @@ def haversine(lat1, lon1, lat2, lon2):
   return R * c
 
 
-def get_osrm_route(coords_list):
-  """coords_list: [[lon1, lat1], [lon2, lat2], ...]
-
-  Returns: (total_distance_km, total_duration_min, decoded_geometry)
-  ใช้โปรไฟล์ driving ของ OSRM ซึ่งอิงเส้นทางถนนจริงสำหรับรถยนต์และรถกระบะ
-  """
+@st.cache_data(show_spinner=False)
+def get_osrm_route_cached(coords_tuple):
+  coords_list = [list(c) for c in coords_tuple]
   if len(coords_list) < 2:
     return 0, 0, []
 
@@ -70,6 +67,14 @@ def get_osrm_route(coords_list):
   total_duration = (total_dist / 30.0) * 60.0
   fallback_geom = [(c[1], c[0]) for c in coords_list]
   return total_dist, total_duration, fallback_geom
+
+
+def get_osrm_route(coords_list):
+  """แปลง list เป็น tuple เพื่อให้สามารถใช้งาน @st.cache_data ได้อย่างมีประสิทธิภาพ
+
+  รองรับรถยนต์และรถกระบะ 4 ล้อขึ้นไปตามถนนจริง
+  """
+  return get_osrm_route_cached(tuple(tuple(c) for c in coords_list))
 
 
 # ----------------------------------------------------
