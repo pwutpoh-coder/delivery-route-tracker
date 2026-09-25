@@ -335,7 +335,6 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     for _, row in valid_actual_custs.iterrows():
       actual_coords.append([row["lon"], row["lat"]])
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
-    # เช็คว่าระบบโหลดข้อมูลและคำนวณเส้นทางเสร็จสมบูรณ์พร้อมเล่นแล้ว
     if len(act_geom) > 0:
       is_system_ready = True
 
@@ -436,12 +435,11 @@ with tab1:
     col_sum4.metric("ระยะทางสะสมรวมทั้งวัน", f"{act_dist:.2f} กม.")
 
     # ----------------------------------------------------
-    # ส่วนควบคุมการเล่นแผนที่ (Playback Controls)
+    # ส่วนควบคุมการเล่นแผนที่ (Playback Controls & Speed)
     # ----------------------------------------------------
     st.markdown("---")
     st.markdown("#### ⏱️ แถบควบคุมการเล่นเส้นทางบนแผนที่")
 
-    # เพิ่มปุ่มแสดงสถานะความพร้อมของระบบโหลดเส้นทาง
     st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
     if is_system_ready:
       st.success(
@@ -456,10 +454,21 @@ with tab1:
 
     max_steps = max(1, len(valid_actual_custs))
 
+    # แถบเลือกความเร็วในการเล่น (Speed Selector)
+    speed_option = st.selectbox(
+        "⚡ เลือกระดับความเร็วในการเล่นจำลองเส้นทาง",
+        ["ช้ามาก (1.5 วินาที/จุด)", "ปกติ (0.8 วินาที/จุด)", "เร็ว (0.3 วินาที/จุด)"],
+        index=1,
+    )
+    if "ช้ามาก" in speed_option:
+      sleep_time = 1.5
+    elif "เร็ว" in speed_option:
+      sleep_time = 0.3
+    else:
+      sleep_time = 0.8
+
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
-    if c_btn1.button(
-        "▶️ เล่น (Play)", disabled=not is_system_ready
-    ):  # จะกดได้ก็ต่อเมื่อระบบพร้อมแล้วเท่านั้น
+    if c_btn1.button("▶️ เล่น (Play)", disabled=not is_system_ready):
       st.session_state.is_playing = True
       if st.session_state.playback_step >= max_steps:
         st.session_state.playback_step = 1
@@ -489,10 +498,10 @@ with tab1:
     if playback_step != st.session_state.playback_step:
       st.session_state.playback_step = playback_step
 
-    # จัดการระบบ Auto Play วิ่งทีละสเต็ป
+    # จัดการระบบ Auto Play ให้วิ่งไหลอัตโนมัติทีละสเต็ปตามความเร็วที่เลือก
     if st.session_state.is_playing:
       if st.session_state.playback_step < max_steps:
-        time.sleep(0.8)
+        time.sleep(sleep_time)
         st.session_state.playback_step += 1
         st.rerun()
       else:
