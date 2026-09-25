@@ -626,12 +626,8 @@ with tab1:
             icon=div_icon,
         ).add_to(m)
 
-  st_folium(
-      m,
-      width="100%",
-      height=450,
-      key=f"map_tab1_{st.session_state.playback_step}",
-  )
+  # แก้ไขจุดสำคัญ: ใช้ Key แบบค่าคงที่ (Static Key) เพื่อให้แผนที่ทำการอัปเดตต่อเนื่อง ไม่กระพริบ
+  st_folium(m, width="100%", height=450, key="map_tab1_static_key")
 
   if not df_customers.empty:
     st.markdown("### ตารางรายละเอียดลูกค้า (Actual เรียงตามเวลา)")
@@ -738,12 +734,7 @@ with tab2:
             opt_sub_geom, color="green", weight=4, opacity=0.8
         ).add_to(m_opt)
 
-      st_folium(
-          m_opt,
-          width="100%",
-          height=450,
-          key=f"map_tab2_optimized_{selected_opt_step}",
-      )
+      st_folium(m_opt, width="100%", height=450, key="map_tab2_optimized_static")
 
       st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
       df_optimized["optimized_seq"] = range(1, len(df_optimized) + 1)
