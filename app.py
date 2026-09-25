@@ -312,8 +312,9 @@ if file_summary is not None:
 # ----------------------------------------------------
 # 5. การเตรียมเส้นทางและสถานะล่วงหน้า (Pre-computation)
 # ----------------------------------------------------
+# กำหนดค่าเริ่มต้น playback_step เป็น 1 เพื่อให้มีพิกัดที่ 1 รอไว้เสมอเมื่อข้อมูลพร้อม
 if "playback_step" not in st.session_state:
-  st.session_state.playback_step = 0
+  st.session_state.playback_step = 1
 if "is_playing" not in st.session_state:
   st.session_state.is_playing = False
 
@@ -435,10 +436,7 @@ with tab1:
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
     if c_btn1.button("▶️ เล่น (Play)"):
       st.session_state.is_playing = True
-      if (
-          st.session_state.playback_step == 0
-          or st.session_state.playback_step >= max_steps
-      ):
+      if st.session_state.playback_step >= max_steps:
         st.session_state.playback_step = 1
       st.rerun()
 
@@ -452,15 +450,15 @@ with tab1:
       st.rerun()
 
     if c_btn4.button("🔄 รีเซ็ต (Reset)"):
-      st.session_state.playback_step = 0
+      st.session_state.playback_step = 1
       st.session_state.is_playing = False
       st.rerun()
 
     playback_step = st.slider(
         "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
-        0,
+        1,
         max_steps,
-        st.session_state.playback_step,
+        max(1, min(st.session_state.playback_step, max_steps)),
         key="playback_slider",
     )
     if playback_step != st.session_state.playback_step:
@@ -480,19 +478,18 @@ with tab1:
         " เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง"
     )
 
-  # ปรับปรุง: ตั้งค่าจุดศูนย์กลางแผนที่ให้ขยับตามจุดล่าสุดที่กำลังเล่น (Playback) อัตโนมัติ
+  # ตั้งค่าพิกัดกลางแผนที่ให้ขยับตามจุดล่าสุดอัตโนมัติ
   map_center = (
       [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
   )
   if (
       not df_customers.empty
       and not valid_actual_custs.empty
-      and st.session_state.playback_step > 0
-      and map_view_mode
-      != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
+      and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
   ):
     current_idx = min(
-        st.session_state.playback_step - 1, len(valid_actual_custs) - 1
+        max(0, st.session_state.playback_step - 1),
+        len(valid_actual_custs) - 1,
     )
     latest_row = valid_actual_custs.iloc[current_idx]
     if pd.notna(latest_row["lat"]) and pd.notna(latest_row["lon"]):
@@ -514,11 +511,14 @@ with tab1:
 
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
       current_display_limit = len(valid_actual_custs)
-      if len(act_geom) > 1:
-        folium.PolyLine(
-            act_geom, color="blue", weight=4, opacity=0.7
-        ).add_to(m)
+      # เงื่อนไขใหม่ตามที่ขอ: โหมดแสดงทั้งหมด จะยังไม่วาดเส้นทาง (PolyLine) จนกว่าจะกดเล่น (is_playing เป็น True) หรือมีการเล่น
+      if st.session_state.is_playing or st.session_state.playback_step > 1:
+        if len(act_geom) > 1:
+          folium.PolyLine(
+              act_geom, color="blue", weight=4, opacity=0.7
+          ).add_to(m)
     else:
+      # โหมดแสดงทีละพิกัด (Play Mode) วาดเส้นทางตามสเต็ปที่กำลังเล่น
       if (
           current_display_limit > 0
           and depot_lat is not None
