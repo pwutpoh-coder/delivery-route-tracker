@@ -20,7 +20,7 @@ st.set_page_config(
 
 
 # ----------------------------------------------------
-# 1. ฟังก์ชันคำนวณระยะทาง Haversine & OSRM
+# 1. ฟังก์ชันคำนวณระยะทาง Haversine & OSRM (สำหรับรถยนต์/รถกระบะ 4 ล้อขึ้นไป)
 # ----------------------------------------------------
 def haversine(lat1, lon1, lat2, lon2):
   R = 6371.0  # รัศมีโลกหน่วยเป็นกิโลเมตร
@@ -37,6 +37,7 @@ def get_osrm_route(coords_list):
   """coords_list: [[lon1, lat1], [lon2, lat2], ...]
 
   Returns: (total_distance_km, total_duration_min, decoded_geometry)
+  ใช้โปรไฟล์ driving ของ OSRM ซึ่งอิงเส้นทางถนนจริงสำหรับรถยนต์และรถกระบะ
   """
   if len(coords_list) < 2:
     return 0, 0, []
@@ -57,7 +58,7 @@ def get_osrm_route(coords_list):
   except Exception:
     pass
 
-  # Fallback กรณีเรียก OSRM ไม่สำเร็จ ใช้เส้นตรงเชื่อมพิกัด
+  # Fallback กรณีเรียก OSRM ไม่สำเร็จ
   total_dist = 0
   for i in range(len(coords_list) - 1):
     total_dist += haversine(
@@ -328,39 +329,15 @@ valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
 is_system_ready = False
 
-if "cached_route_steps" not in st.session_state:
-  st.session_state.cached_route_steps = {}
-
 if not df_customers.empty and depot_lat is not None and depot_lon is not None:
   valid_actual_custs = df_customers.dropna(subset=["lat", "lon"]).copy()
   if not valid_actual_custs.empty:
     actual_coords = [[depot_lon, depot_lat]]
     for _, row in valid_actual_custs.iterrows():
       actual_coords.append([row["lon"], row["lat"]])
-
-    # ดึงเส้นทางหลักรอบเดียว ป้องกัน API ปฏิเสธการเชื่อมต่อ
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
-    if len(actual_coords) > 1:
+    if len(act_geom) > 0:
       is_system_ready = True
-
-      if not st.session_state.cached_route_steps:
-        with st.spinner(
-            "⏳ กำลังจัดเตรียมเส้นทางจำลองไว้ในระบบ (Pre-computing)..."
-        ):
-          sub_coords = [[depot_lon, depot_lat]]
-          current_active_trip = 1
-          for idx_sub, (_, row_sub) in enumerate(
-              valid_actual_custs.iterrows()
-          ):
-            trip_num = int(row_sub.get("trip", 1))
-            if trip_num != current_active_trip:
-              sub_coords.append([depot_lon, depot_lat])
-              current_active_trip = trip_num
-            sub_coords.append([row_sub["lon"], row_sub["lat"]])
-
-            # สร้างเส้นทางเชื่อมต่อแต่ละสเต็ปอย่างแม่นยำและรวดเร็ว
-            step_geom = [(c[1], c[0]) for c in sub_coords]
-            st.session_state.cached_route_steps[idx_sub + 1] = step_geom
 
 # ----------------------------------------------------
 # 6. การแสดงผลหลัก (Tabs)
@@ -417,6 +394,9 @@ with tab1:
     m2_col.metric("ระยะทางรวมทั้งวัน (Actual)", f"{act_dist:.2f} กม.")
     m3_col.metric("เวลาเดินทางรวมทั้งวัน", f"{act_dur:.1f} นาที")
 
+    # ----------------------------------------------------
+    # ส่วนสรุปการจัดส่งในแต่ละรอบ และรวมทั้งวัน
+    # ----------------------------------------------------
     st.markdown("---")
     st.markdown("### 📊 สรุปผลการจัดส่ง (แยกรายรอบ และรวมทั้งวัน)")
 
@@ -455,21 +435,26 @@ with tab1:
     )
     col_sum4.metric("ระยะทางสะสมรวมทั้งวัน", f"{act_dist:.2f} กม.")
 
+    # ----------------------------------------------------
+    # ส่วนควบคุมการเล่นแผนที่ (Playback Controls & Speed)
+    # ----------------------------------------------------
     st.markdown("---")
     st.markdown("#### ⏱️ แถบควบคุมการเล่นเส้นทางบนแผนที่")
 
     st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
     if is_system_ready:
       st.success(
-          "✅ **ระบบพร้อมเล่นจำลองเส้นทางแล้ว!** (กดปุ่ม Play เพื่อเริ่มเล่นได้ทันที)"
+          "✅ **ระบบโหลดข้อมูลและจำลองเส้นทางถนนจริงเรียบร้อยพร้อมเล่นแล้ว!**"
       )
     else:
       st.warning(
-          "⏳ **กำลังรอข้อมูล...** กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ให้เรียบร้อย"
+          "⏳ **กำลังโหลดหรือข้อมูลยังไม่ครบถ้วน...**"
+          " กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ให้เรียบร้อย"
       )
 
     max_steps = max(1, len(valid_actual_custs))
 
+    # เลือกระดับความเร็วในการเล่น
     speed_option = st.selectbox(
         "⚡ เลือกระดับความเร็วในการเล่นจำลองเส้นทาง",
         ["ช้ามาก (1.5 วินาที/จุด)", "ปกติ (0.8 วินาที/จุด)", "เร็ว (0.3 วินาที/จุด)"],
@@ -503,25 +488,20 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    current_idx_bar = min(
-        max(0, st.session_state.playback_step - 1),
-        len(valid_actual_custs) - 1,
+    # ใช้ session_state ควบคุมค่า slider โดยตรงเพื่อป้องกันการค้างของ UI
+    playback_step = st.slider(
+        "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
+        1,
+        max_steps,
+        int(st.session_state.playback_step),
     )
-    current_row_bar = valid_actual_custs.iloc[current_idx_bar]
-    current_time_str = current_row_bar.get("time_str", "00:00:00")
-    current_cust_name = current_row_bar.get("cust_name", "-")
-    current_cust_id = current_row_bar.get("cust_id", "-")
+    if playback_step != st.session_state.playback_step:
+      st.session_state.playback_step = playback_step
+      st.session_state.is_playing = (
+          False  # หากผู้ใช้เลื่อนเอง ให้หยุดเล่นอัตโนมัติชั่วคราว
+      )
 
-    progress_pct = min(1.0, st.session_state.playback_step / max_steps)
-    st.progress(
-        progress_pct,
-        text=(
-            f"⏰ เวลาจัดส่งปัจจุบัน: {current_time_str} | ลูกค้า:"
-            f" {current_cust_id} - {current_cust_name} (จุดที่"
-            f" {st.session_state.playback_step}/{max_steps})"
-        ),
-    )
-
+    # จัดการระบบ Auto Play วิ่งไหลอัตโนมัติทีละสเต็ป
     if st.session_state.is_playing:
       if st.session_state.playback_step < max_steps:
         time.sleep(sleep_time)
@@ -535,6 +515,7 @@ with tab1:
         " เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง"
     )
 
+  # ตั้งค่าพิกัดกลางแผนที่ให้ขยับตามจุดล่าสุดอัตโนมัติ
   map_center = (
       [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
   )
@@ -544,7 +525,7 @@ with tab1:
       and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
   ):
     current_idx = min(
-        max(0, st.session_state.playback_step - 1),
+        max(0, int(st.session_state.playback_step) - 1),
         len(valid_actual_custs) - 1,
     )
     latest_row = valid_actual_custs.iloc[current_idx]
@@ -552,9 +533,7 @@ with tab1:
       map_center = [latest_row["lat"], latest_row["lon"]]
 
   m = folium.Map(
-      location=map_center,
-      zoom_start=14 if depot_lat is not None else 10,
-      prefer_canvas=True,
+      location=map_center, zoom_start=14 if depot_lat is not None else 10
   )
 
   if depot_lat is not None and depot_lon is not None:
@@ -565,18 +544,48 @@ with tab1:
     ).add_to(m)
 
   if not df_customers.empty and not valid_actual_custs.empty:
-    current_display_limit = st.session_state.playback_step
+    current_display_limit = int(st.session_state.playback_step)
 
-    # จัดการการแสดงผลตามโหมดที่เลือก
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
-      # แสดงพิกัดทั้งหมดทันที แต่เส้นทางจะแสดงเฉพาะเมื่อกด Play หรือกำลังเล่นเท่านั้น
+      current_display_limit = len(valid_actual_custs)
       if st.session_state.is_playing or st.session_state.playback_step > 1:
         if len(act_geom) > 1:
           folium.PolyLine(
               act_geom, color="blue", weight=4, opacity=0.7
           ).add_to(m)
+    else:
+      if (
+          current_display_limit > 0
+          and depot_lat is not None
+          and depot_lon is not None
+      ):
+        sub_coords = [[depot_lon, depot_lat]]
+        current_active_trip = 1
 
-      for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
+        for idx_sub, (_, row_sub) in enumerate(valid_actual_custs.iterrows()):
+          if idx_sub + 1 <= current_display_limit:
+            trip_num = int(row_sub.get("trip", 1))
+            if trip_num != current_active_trip:
+              sub_coords.append([depot_lon, depot_lat])
+              sub_coords.append([depot_lon, depot_lat])
+              current_active_trip = trip_num
+
+            sub_coords.append([row_sub["lon"], row_sub["lat"]])
+
+        if len(sub_coords) >= 2:
+          _, _, sub_geom = get_osrm_route(sub_coords)
+          folium.PolyLine(
+              sub_geom, color="blue", weight=4, opacity=0.7
+          ).add_to(m)
+
+    for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
+      if (
+          map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
+          or idx + 1 <= current_display_limit
+      ):
+        is_latest = (idx + 1 == current_display_limit) and (
+            map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
+        )
         t_idx = int(row.get("trip", 1)) - 1
         color_name = trip_colors[t_idx % len(trip_colors)]
         seq_num = row.get("seq_time", idx + 1)
@@ -590,9 +599,14 @@ with tab1:
                 <b>รอบที่:</b> {row.get('trip', 1)} (ลำดับที่ {seq_num})
                 """
 
-        div_icon = folium.DivIcon(
-            html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
-        )
+        if is_latest:
+          div_icon = folium.DivIcon(
+              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; border: 3px solid gold; box-shadow: 0 0 12px gold;">{seq_num}</div>'
+          )
+        else:
+          div_icon = folium.DivIcon(
+              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
+          )
 
         folium.Marker(
             [row["lat"], row["lon"]],
@@ -601,55 +615,7 @@ with tab1:
             icon=div_icon,
         ).add_to(m)
 
-    else:
-      # โหมดแสดงทีละพิกัดตามลำดับเส้นทางและวิ่งเส้นทางตามจริง
-      if (
-          current_display_limit > 0
-          and depot_lat is not None
-          and depot_lon is not None
-      ):
-        cached_geom = st.session_state.cached_route_steps.get(
-            current_display_limit, act_geom
-        )
-        if len(cached_geom) > 0:
-          folium.PolyLine(
-              cached_geom, color="blue", weight=4, opacity=0.7
-          ).add_to(m)
-
-      for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
-        if idx + 1 <= current_display_limit:
-          is_latest = (idx + 1 == current_display_limit) and st.session_state.is_playing
-          t_idx = int(row.get("trip", 1)) - 1
-          color_name = trip_colors[t_idx % len(trip_colors)]
-          seq_num = row.get("seq_time", idx + 1)
-
-          popup_text = f"""
-                  <b>รหัสลูกค้า:</b> {row['cust_id']}<br>
-                  <b>ชื่อลูกค้า:</b> {row['cust_name']}<br>
-                  <b>ยอดจัดส่ง:</b> {row['target_qty']} ถัง<br>
-                  <b>พิกัด GPS:</b> {row['gps_str']}<br>
-                  <b>เวลาการจัดส่ง:</b> {row['time_str']}<br>
-                  <b>รอบที่:</b> {row.get('trip', 1)} (ลำดับที่ {seq_num})
-                  """
-
-          if is_latest:
-            div_icon = folium.DivIcon(
-                html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; border: 3px solid gold; box-shadow: 0 0 12px gold;">{seq_num}</div>'
-            )
-          else:
-            div_icon = folium.DivIcon(
-                html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
-            )
-
-          folium.Marker(
-              [row["lat"], row["lon"]],
-              popup=popup_text,
-              tooltip=f"{row['cust_id']} - {row['cust_name']} (ยอด: {row['target_qty']} ถัง)",
-              icon=div_icon,
-          ).add_to(m)
-
-  # ตรึง Key ของแผนที่ให้เสถียร ไม่รีเรนเดอร์ซ้ำซ้อน
-  st_folium(m, width="100%", height=450, key="map_tab1_static_key")
+  st_folium(m, width="100%", height=450, key="map_tab1")
 
   if not df_customers.empty:
     st.markdown("### ตารางรายละเอียดลูกค้า (Actual เรียงตามเวลา)")
@@ -661,7 +627,7 @@ with tab2:
   )
   st.markdown(
       "ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด"
-      " เพื่อประหยัดระยะทางและน้ำมันสูงสุด"
+      " บนเส้นทางถนนจริง เพื่อประหยัดระยะทางและน้ำมันสูงสุด"
   )
 
   if not df_customers.empty:
@@ -701,9 +667,7 @@ with tab2:
       saved_km = max(0, act_d_tmp - opt_dist)
       om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
 
-      m_opt = folium.Map(
-          location=[depot_lat, depot_lon], zoom_start=12, prefer_canvas=True
-      )
+      m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
       folium.Marker(
           [depot_lat, depot_lon],
           popup=f"คลังสินค้า: {selected_depot}",
@@ -756,7 +720,7 @@ with tab2:
             opt_sub_geom, color="green", weight=4, opacity=0.8
         ).add_to(m_opt)
 
-      st_folium(m_opt, width="100%", height=450, key="map_tab2_optimized_static")
+      st_folium(m_opt, width="100%", height=450, key="map_tab2_optimized")
 
       st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
       df_optimized["optimized_seq"] = range(1, len(df_optimized) + 1)
