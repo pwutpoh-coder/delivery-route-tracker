@@ -248,7 +248,6 @@ if file_summary is not None:
             
         df_customers = pd.DataFrame(data_rows)
         if not df_customers.empty:
-            # จัดเรียงลำดับตามเวลาน้อยไปหามาก (Time Ascending) ทันทีที่โหลดข้อมูล
             df_customers['time_parsed'] = pd.to_datetime(df_customers['time_str'], format='%H:%M:%S', errors='coerce')
             df_customers = df_customers.sort_values(by=['time_parsed', 'orig_seq']).reset_index(drop=True)
             df_customers['seq_time'] = range(1, len(df_customers) + 1)
@@ -268,7 +267,6 @@ tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตา�
 with tab1:
     st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (เรียงลำดับจากเวลาน้อยไปหามาก)")
     
-    # แสดงตัวเลขและตารางผลลัพธ์เฉพาะเมื่อมีการนำเข้าข้อมูลสรุปแล้วเท่านั้น
     if not df_customers.empty:
         col_f1, col_f2, col_f3 = st.columns(3)
         with col_f1:
@@ -317,13 +315,13 @@ with tab1:
         with ctrl_c1:
             playback_step = st.slider("เลือกช่วงเวลา / ลำดับจุดส่ง", 1, max_steps, 1, key="playback_slider")
         with ctrl_c2:
-            speed_opt = st.selectbox("ความเร็ว", ["ช้า (1x)", "ปานกลาง (2x)", "เร็ว (3x)"], index=1)
+            speed_opt = st.selectbox("ความเร็ว", ["ช้า (1x)", "ปานกลาง (2x)", "เร็ว (3x)"], index=1, key="speed_select_tab1")
         with ctrl_c3:
-            play_btn = st.button("▶️ เล่น")
+            play_btn = st.button("▶️ เล่น", key="play_btn_tab1")
         with ctrl_c4:
-            pause_btn = st.button("⏸️ หยุด")
+            pause_btn = st.button("⏸️ หยุด", key="pause_btn_tab1")
         with ctrl_c5:
-            reset_btn = st.button("🔄 รีเซ็ต")
+            reset_btn = st.button("🔄 รีเซ็ต", key="reset_btn_tab1")
 
         if reset_btn:
             playback_step = 1
@@ -341,7 +339,6 @@ with tab1:
         valid_actual_custs = pd.DataFrame()
         act_geom = []
 
-    # สร้างแผนไว้ล่วงหน้าเสมอแม้ยังไม่มีข้อมูล
     map_center = [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
     m = folium.Map(location=map_center, zoom_start=12 if depot_lat is not None else 10)
     
@@ -351,12 +348,10 @@ with tab1:
     if not df_customers.empty and not valid_actual_custs.empty:
         if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
             current_display_limit = max_steps
-            # แสดงเส้นทางทั้งหมดเมื่อเลือกโหมดแสดงทุกจุด
             if len(act_geom) > 1:
                 folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
         else:
             current_display_limit = playback_step
-            # เส้นทางจะแสดงเฉพาะเมื่อกดเล่นหรือเลือกสไลเดอร์ โดยเส้นจะค่อยๆ วิ่งไปถึงจุดล่าสุด
             if playback_step > 1 and len(act_geom) > 1:
                 folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
 
@@ -381,7 +376,7 @@ with tab1:
                     icon=folium.Icon(color=icon_color, icon=icon_symbol)
                 ).add_to(m)
         
-    st_folium(m, width="100%", height=450)
+    st_folium(m, width="100%", height=450, key="map_tab1")
     
     if not df_customers.empty:
         st.markdown("### ตารางรายละเอียดลูกค้า (Actual เรียงตามเวลา)")
@@ -405,12 +400,11 @@ with tab2:
             opt_dist, opt_dur, opt_geom = get_osrm_route(opt_coords)
             
             om1, om2, om3 = st.columns(3)
-            # เปรียบเทียบกับค่า actual ด้านบน
             act_coords_temp = [[depot_lon, depot_lat]] + [[r['lon'], r['lat']] for _, r in valid_opt_custs.iterrows()]
             act_d_tmp, _, _ = get_osrm_route(act_coords_temp)
             
             om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_d_tmp:.2f} กม.", delta_color="inverse")
-            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta_color="inverse")
+            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_d_tmp:.2f} กม.", delta_color="inverse")
             saved_km = max(0, act_d_tmp - opt_dist)
             om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
             
@@ -435,7 +429,7 @@ with tab2:
             if len(opt_geom) > 1:
                 folium.PolyLine(opt_geom, color="green", weight=4, opacity=0.8).add_to(m_opt)
                 
-            st_folium(m_opt, width="100%", height=450)
+            st_folium(m_opt, width="100%", height=450, key="map_tab2_optimized")
             
             st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
             df_optimized['optimized_seq'] = range(1, len(df_optimized) + 1)
@@ -443,10 +437,11 @@ with tab2:
             st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
         else:
             st.warning("กรุณาเลือกสาขาคลังสินค้าต้นทางและตรวจสอบข้อมูลพิกัด GPS ให้ครบถ้วน")
+            m_opt_empty = folium.Map(location=[13.7563, 100.5018], zoom_start=10)
+            st_folium(m_opt_empty, width="100%", height=450, key="map_tab2_empty")
     else:
-        # แสดงแผนที่ว่างเปล่าในแท็บ 2 ไว้ก่อนหากยังไม่โหลดข้อมูล
         m_opt_empty = folium.Map(location=[13.7563, 100.5018], zoom_start=10)
-        st_folium(m_opt_empty, width="100%", height=450)
+        st_folium(m_opt_empty, width="100%", height=450, key="map_tab2_empty")
         st.info("💡 กรุณานำเข้าข้อมูลไฟล์สรุปการจัดส่งเพื่อคำนวณเส้นทางที่มีประสิทธิภาพที่สุด")
 
 st.markdown("---")
