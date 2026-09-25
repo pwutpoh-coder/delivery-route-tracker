@@ -281,14 +281,11 @@ if file_summary is not None:
       df_customers["time_parsed"] = pd.to_datetime(
           df_customers["time_str"], format="%H:%M:%S", errors="coerce"
       )
-
-      # กำหนดเงื่อนไข: เวลาเป็น 0:00, 00:00:00 หรือ 00:00 และไม่มียอดส่งน้ำ (target_qty == 0) ให้อยู่ลำดับสุดท้าย
       df_customers["is_zero_time"] = (
           df_customers["time_str"].isin(["00:00:00", "0:00", "00:00"])
           & (df_customers["target_qty"] == 0)
       )
 
-      # เรียงลำดับโดยดันข้อมูลที่เป็น 0:00 และยอด 0 ไปไว้ท้ายสุด
       df_customers = df_customers.sort_values(
           by=["is_zero_time", "time_parsed", "orig_seq"],
           ascending=[True, True, True],
@@ -329,6 +326,7 @@ if "is_playing" not in st.session_state:
 
 valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
+is_system_ready = False
 
 if not df_customers.empty and depot_lat is not None and depot_lon is not None:
   valid_actual_custs = df_customers.dropna(subset=["lat", "lon"]).copy()
@@ -337,6 +335,9 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     for _, row in valid_actual_custs.iterrows():
       actual_coords.append([row["lon"], row["lat"]])
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
+    # เช็คว่าระบบโหลดข้อมูลและคำนวณเส้นทางเสร็จสมบูรณ์พร้อมเล่นแล้ว
+    if len(act_geom) > 0:
+      is_system_ready = True
 
 # ----------------------------------------------------
 # 6. การแสดงผลหลัก (Tabs)
@@ -440,10 +441,25 @@ with tab1:
     st.markdown("---")
     st.markdown("#### ⏱️ แถบควบคุมการเล่นเส้นทางบนแผนที่")
 
+    # เพิ่มปุ่มแสดงสถานะความพร้อมของระบบโหลดเส้นทาง
+    st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
+    if is_system_ready:
+      st.success(
+          "✅ **ระบบโหลดข้อมูลและจำลองเส้นทางเรียบร้อยพร้อมเล่นแล้ว!**"
+          " (สามารถกดปุ่ม Play ด้านล่างได้ทันที)"
+      )
+    else:
+      st.warning(
+          "⏳ **กำลังโหลดหรือข้อมูลยังไม่ครบถ้วน...**"
+          " กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ให้เรียบร้อย"
+      )
+
     max_steps = max(1, len(valid_actual_custs))
 
     c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
-    if c_btn1.button("▶️ เล่น (Play)"):
+    if c_btn1.button(
+        "▶️ เล่น (Play)", disabled=not is_system_ready
+    ):  # จะกดได้ก็ต่อเมื่อระบบพร้อมแล้วเท่านั้น
       st.session_state.is_playing = True
       if st.session_state.playback_step >= max_steps:
         st.session_state.playback_step = 1
@@ -453,7 +469,7 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    if c_btn3.button("⏪ เล่นซ้ำ (Replay)"):
+    if c_btn3.button("⏪ เล่นซ้ำ (Replay)", disabled=not is_system_ready):
       st.session_state.playback_step = 1
       st.session_state.is_playing = True
       st.rerun()
