@@ -199,7 +199,7 @@ map_view_mode = st.sidebar.radio(
 )
 
 # ----------------------------------------------------
-# 4. การประมวลผลข้อมูลไฟล์สรุปการจัดส่งรายสมาชิก
+# 4. การประมวลผลข้อมูลไฟล์สรุปการจัดส่งรายสมาชิก (ประมวลผลทันทีเมื่ออัปโหลด)
 # ----------------------------------------------------
 df_customers = pd.DataFrame()
 
@@ -307,33 +307,16 @@ with tab1:
                     st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
         
         st.markdown("---")
-        st.markdown("#### ⏱️ แถบควบคุมเวลาและจำลองการจัดส่ง")
+        st.markdown("#### ⏱️ แถบควบคุมเวลาและแสดงผลตามลำดับ")
         
         max_steps = max(1, len(valid_actual_custs))
         
-        ctrl_c1, ctrl_c2, ctrl_c3, ctrl_c4, ctrl_c5 = st.columns([2, 1, 1, 1, 1])
+        ctrl_c1, ctrl_c2 = st.columns([4, 1])
         with ctrl_c1:
-            playback_step = st.slider("เลือกช่วงเวลา / ลำดับจุดส่ง", 1, max_steps, 1, key="playback_slider")
+            playback_step = st.slider("เลือกช่วงเวลา / ลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที", 1, max_steps, max_steps, key="playback_slider")
         with ctrl_c2:
-            speed_opt = st.selectbox("ความเร็ว", ["ช้า (1x)", "ปานกลาง (2x)", "เร็ว (3x)"], index=1, key="speed_select_tab1")
-        with ctrl_c3:
-            play_btn = st.button("▶️ เล่น", key="play_btn_tab1")
-        with ctrl_c4:
-            pause_btn = st.button("⏸️ หยุด", key="pause_btn_tab1")
-        with ctrl_c5:
-            reset_btn = st.button("🔄 รีเซ็ต", key="reset_btn_tab1")
-
-        if reset_btn:
-            playback_step = 1
-
-        if play_btn:
-            speed_map = {"ช้า (1x)": 1.0, "ปานกลาง (2x)": 0.5, "เร็ว (3x)": 0.2}
-            sleep_time = speed_map.get(speed_opt, 0.5)
-            placeholder_progress = st.empty()
-            for s in range(1, max_steps + 1):
-                placeholder_progress.info(f"กำลังจำลองการจัดส่งถึงจุดที่: {s} / {max_steps}")
-                time.sleep(sleep_time)
-            placeholder_progress.empty()
+            if st.button("🔄 รีเซ็ตลำดับ", key="reset_btn_tab1"):
+                playback_step = 1
     else:
         st.info("💡 กรุณาอัปโหลดไฟล์ **'รายงานสรุปการจัดส่งประจำวัน.xls'** เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง")
         valid_actual_custs = pd.DataFrame()
@@ -352,8 +335,17 @@ with tab1:
                 folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
         else:
             current_display_limit = playback_step
+            # เส้นทางจะแสดงเฉพาะพิกัดถึงจุดที่เลือกบนสไลเดอร์ทันที (ไม่มีเส้นทางค้างไว้ก่อนกด)
             if playback_step > 1 and len(act_geom) > 1:
-                folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
+                sub_coords = []
+                if depot_lat is not None and depot_lon is not None:
+                    sub_coords.append([depot_lon, depot_lat])
+                for idx_sub, (_, row_sub) in enumerate(valid_actual_custs.iterrows()):
+                    if idx_sub + 1 <= playback_step:
+                        sub_coords.append([row_sub['lon'], row_sub['lat']])
+                if len(sub_coords) >= 2:
+                    _, _, sub_geom = get_osrm_route(sub_coords)
+                    folium.PolyLine(sub_geom, color="blue", weight=4, opacity=0.7).add_to(m)
 
         for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
             if idx + 1 <= current_display_limit:
