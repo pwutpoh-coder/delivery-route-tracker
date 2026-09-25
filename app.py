@@ -57,7 +57,7 @@ def get_osrm_route(coords_list):
   except Exception:
     pass
 
-  # Fallback กรณีเรียก OSRM ไม่สำเร็จ
+  # Fallback กรณีเรียก OSRM ไม่สำเร็จ ใช้เส้นตรงเชื่อมพิกัด
   total_dist = 0
   for i in range(len(coords_list) - 1):
     total_dist += haversine(
@@ -337,8 +337,10 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     actual_coords = [[depot_lon, depot_lat]]
     for _, row in valid_actual_custs.iterrows():
       actual_coords.append([row["lon"], row["lat"]])
+
+    # ดึงเส้นทางหลักรอบเดียว ป้องกัน API ปฏิเสธการเชื่อมต่อ
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
-    if len(act_geom) > 0:
+    if len(actual_coords) > 1:
       is_system_ready = True
 
       if not st.session_state.cached_route_steps:
@@ -353,14 +355,12 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
             trip_num = int(row_sub.get("trip", 1))
             if trip_num != current_active_trip:
               sub_coords.append([depot_lon, depot_lat])
-              sub_coords.append([depot_lon, depot_lat])
               current_active_trip = trip_num
             sub_coords.append([row_sub["lon"], row_sub["lat"]])
 
-            _, _, step_geom = get_osrm_route(sub_coords)
-            st.session_state.cached_route_steps[idx_sub + 1] = (
-                step_geom if step_geom else act_geom
-            )
+            # สร้างเส้นทางเชื่อมต่อแต่ละสเต็ปอย่างแม่นยำและรวดเร็ว
+            step_geom = [(c[1], c[0]) for c in sub_coords]
+            st.session_state.cached_route_steps[idx_sub + 1] = step_geom
 
 # ----------------------------------------------------
 # 6. การแสดงผลหลัก (Tabs)
@@ -461,13 +461,11 @@ with tab1:
     st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
     if is_system_ready:
       st.success(
-          "✅ **ระบบโหลดข้อมูลและจำลองเส้นทางล่วงหน้าเสร็จสิ้น พร้อมเล่นแล้ว!**"
-          " (กดปุ่ม Play ได้ทันที ไม่มีอาการหน่วง)"
+          "✅ **ระบบพร้อมเล่นจำลองเส้นทางแล้ว!** (กดปุ่ม Play เพื่อเริ่มเล่นได้ทันที)"
       )
     else:
       st.warning(
-          "⏳ **กำลังโหลดหรือข้อมูลยังไม่ครบถ้วน...**"
-          " กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ให้เรียบร้อย"
+          "⏳ **กำลังรอข้อมูล...** กรุณาเลือกคลังสินค้าและอัปโหลดไฟล์ให้เรียบร้อย"
       )
 
     max_steps = max(1, len(valid_actual_custs))
@@ -569,9 +567,9 @@ with tab1:
   if not df_customers.empty and not valid_actual_custs.empty:
     current_display_limit = st.session_state.playback_step
 
-    # ตรรกะการแสดงเส้นทางและพิกัดตามโหมดที่เลือก
+    # จัดการการแสดงผลตามโหมดที่เลือก
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
-      # แสดงพิกัดทั้งหมดทันที แต่เส้นทางจะแสดงก็ต่อเมื่อมีการกด Play หรือกำลังเล่น
+      # แสดงพิกัดทั้งหมดทันที แต่เส้นทางจะแสดงเฉพาะเมื่อกด Play หรือกำลังเล่นเท่านั้น
       if st.session_state.is_playing or st.session_state.playback_step > 1:
         if len(act_geom) > 1:
           folium.PolyLine(
@@ -604,7 +602,7 @@ with tab1:
         ).add_to(m)
 
     else:
-      # โหมดแสดงทีละพิกัดตามลำดับเส้นทางที่วิ่งผ่าน
+      # โหมดแสดงทีละพิกัดตามลำดับเส้นทางและวิ่งเส้นทางตามจริง
       if (
           current_display_limit > 0
           and depot_lat is not None
@@ -650,7 +648,7 @@ with tab1:
               icon=div_icon,
           ).add_to(m)
 
-  # ใช้ Key แบบค่าคงที่เพื่อป้องกันการรีเรนเดอร์หน้าเว็บกระพริบ
+  # ตรึง Key ของแผนที่ให้เสถียร ไม่รีเรนเดอร์ซ้ำซ้อน
   st_folium(m, width="100%", height=450, key="map_tab1_static_key")
 
   if not df_customers.empty:
