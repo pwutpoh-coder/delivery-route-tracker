@@ -119,22 +119,19 @@ depot_options = {
 
 selected_depot = st.sidebar.selectbox("เลือกคลังสินค้าต้นทาง", list(depot_options.keys()), index=0)
 
-is_depot_selected = (selected_depot != "-- กรุณาเลือกสาขาต้นทาง --")
-
-if is_depot_selected:
+depot_lat, depot_lon = None, None
+if selected_depot != "-- กรุณาเลือกสาขาต้นทาง --":
     if selected_depot == "กำหนดเอง (Custom)":
         depot_lat = st.sidebar.number_input("ละติจูดคลัง (Latitude)", value=13.7563, format="%.6f")
         depot_lon = st.sidebar.number_input("ลองจิจูดคลัง (Longitude)", value=100.5018, format="%.6f")
     else:
         depot_lat = depot_options[selected_depot]["lat"]
         depot_lon = depot_options[selected_depot]["lon"]
-else:
-    depot_lat, depot_lon = None, None
 
 st.sidebar.markdown("---")
 st.sidebar.header("📁 2. นำเข้าข้อมูลการจัดส่งและเที่ยววิ่ง")
 
-# ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน (แยกตาม 2 วิธีเลือก)
+# ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน
 st.sidebar.subheader("ส่วนที่ 1: ข้อมูลยอดเบิก / ยอดคืน")
 import_type_part1 = st.sidebar.radio(
     "เลือกวิธีระบุข้อมูลยอดเบิก/คืน",
@@ -151,16 +148,17 @@ if import_type_part1 == "1. ระบุยอดเบิก ยอดคืน
     num_trips = st.sidebar.number_input("จำนวนเที่ยววิ่งในวันนี้", min_value=1, max_value=5, value=1, step=1)
     for t in range(int(num_trips)):
         st.sidebar.markdown(f"**--- เที่ยวที่ {t+1} ---**")
-        issue_qty = st.sidebar.number_input(f"ยอดเบิก เที่ยวที่ {t+1} (ถัง)", min_value=0, value=100, key=f"issue_{t}")
+        issue_qty = st.sidebar.number_input(f"ยอดเบิก เที่ยวที่ {t+1} (ถัง)", min_value=0, value=0, key=f"issue_{t}")
         return_qty = st.sidebar.number_input(f"ยอดคืน เที่ยวที่ {t+1} (ถัง)", min_value=0, value=0, key=f"return_{t}")
         net_delivered = max(0, issue_qty - return_qty)
-        trip_data_records.append({
-            "trip": t + 1,
-            "issue": issue_qty,
-            "return": return_qty,
-            "net": net_delivered
-        })
-        total_target_qty += net_delivered
+        if issue_qty > 0 or return_qty > 0:
+            trip_data_records.append({
+                "trip": t + 1,
+                "issue": issue_qty,
+                "return": return_qty,
+                "net": net_delivered
+            })
+            total_target_qty += net_delivered
 else:
     file_dwt = st.sidebar.file_uploader("อัปโหลดไฟล์ .xls (รายงานใบเบิกใบคืนประจำวัน)", type=["xls", "xlsx"], key="file_dwt")
     if file_dwt is not None:
@@ -170,17 +168,16 @@ else:
             sub_dwt = sub_dwt[sub_dwt.iloc[:, 2].notna() & (sub_dwt.iloc[:, 2] != 'รวม')]
             bev_col = pd.to_numeric(sub_dwt.iloc[:, 3], errors='coerce').fillna(0)
             total_target_qty = int(bev_col.sum())
-            trip_data_records.append({
-                "trip": 1,
-                "issue": total_target_qty,
-                "return": 0,
-                "net": total_target_qty
-            })
+            if total_target_qty > 0:
+                trip_data_records.append({
+                    "trip": 1,
+                    "issue": total_target_qty,
+                    "return": 0,
+                    "net": total_target_qty
+                })
             st.sidebar.success(f"อ่านยอดเบิกจากไฟล์สำเร็จ: {total_target_qty} หน่วย")
         except Exception as e:
             st.sidebar.error(f"เกิดข้อผิดพลาดในการอ่านไฟล์เบิก: {e}")
-    else:
-        st.sidebar.info("📌 กรุณาอัปโหลดไฟล์ 'รายงานใบเบิกใบคืนประจำวัน'")
 
 st.sidebar.markdown("")
 # ส่วนที่ 2: รายละเอียดการจัดส่งแต่ละรายสมาชิก
@@ -251,25 +248,16 @@ if file_summary is not None:
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
 
-# กรณีไม่มีการอัปโหลดไฟล์สรุป ให้ใช้ข้อมูลตัวอย่างจำลอง
-if df_customers.empty and is_depot_selected:
-    demo_data = [
-        {"cust_id": "01705/3", "cust_name": "เฮอริเทจ สแน็ค แอนด์ ฟู้ด จำกัด", "target_qty": 6, "lat": 13.50813, "lon": 100.14182, "diff_gps": 6.01, "time_str": "08:43:00", "status": "จัดส่งตรงเวลา", "reason": "ลูกค้าอยู่บ้าน", "orig_seq": 1},
-        {"cust_id": "113166/2", "cust_name": "ไทยยูเนี่ยน กรุ๊ป จำกัด (มหาชน)", "target_qty": 23, "lat": 13.50208, "lon": 100.13442, "diff_gps": 18.67, "time_str": "09:03:00", "status": "จัดส่งตรงเวลา", "reason": "ลูกค้าตั้งถัง", "orig_seq": 2},
-        {"cust_id": "209305", "cust_name": "นนทชล สกุลวิศุทธ์", "target_qty": 4, "lat": 13.51825, "lon": 100.14875, "diff_gps": 54.78, "time_str": "09:23:00", "status": "รอบเสริม", "reason": "ลูกค้าอยู่บ้าน", "orig_seq": 3},
-        {"cust_id": "99655", "cust_name": "สยาม อะกริ ซัพพลาย จำกัด", "target_qty": 12, "lat": 13.54006, "lon": 100.19691, "diff_gps": 12.82, "time_str": "10:18:00", "status": "จัดส่งไม่ตรงเวลา", "reason": "ลูกค้าอยู่บ้าน", "orig_seq": 4},
-        {"cust_id": "249062/1", "cust_name": "ออล วี วัน จำกัด", "target_qty": 2, "lat": 13.54620, "lon": 100.20154, "diff_gps": 0.54, "time_str": "10:28:00", "status": "จัดส่งตรงเวลา", "reason": "ลูกค้าอยู่บ้าน", "orig_seq": 5},
-    ]
-    df_customers = pd.DataFrame(demo_data)
-    if total_target_qty == 0:
-        total_target_qty = int(df_customers["target_qty"].sum())
+# ตรวจสอบการเลือกสาขาและไฟล์ข้อมูล
+if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
+    st.warning("⚠️ กรุณาเลือก 'สาขาคลังสินค้าต้นทาง' ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นใช้งาน")
 
-# ----------------------------------------------------
-# 5. แสดงผลลัพธ์ผ่าน Tabs (ตรวจสอบเงื่อนไขการเลือกคลังสินค้าก่อน)
-# ----------------------------------------------------
-if not is_depot_selected:
-    st.warning("⚠️ กรุณาเลือก **'สาขาคลังสินค้าต้นทาง'** ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นการคำนวณและแสดงผลแผนที่เส้นทาง")
+if df_customers.empty:
+    st.info("💡 กรุณาอัปโหลดไฟล์ **'รายงานสรุปการจัดส่งประจำวัน.xls'** ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นวิเคราะห์เส้นทางและแสดงผลข้อมูล")
 else:
+    # ----------------------------------------------------
+    # 5. แสดงผลลัพธ์ผ่าน Tabs (เมื่อมีข้อมูลจริงแล้วเท่านั้น)
+    # ----------------------------------------------------
     tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตามลำดับเวลาจริง (Actual Route)", "⚡ 2. เส้นทางที่เหมาะสมที่สุด (Optimized Route)"])
 
     with tab1:
@@ -291,7 +279,10 @@ else:
         if search_query:
             filtered_df = filtered_df[filtered_df["cust_id"].str.contains(search_query, na=False) | filtered_df["cust_name"].str.contains(search_query, na=False)]
 
-        actual_coords = [[depot_lon, depot_lat]]
+        actual_coords = []
+        if depot_lat is not None and depot_lon is not None:
+            actual_coords.append([depot_lon, depot_lat])
+            
         valid_actual_custs = filtered_df.dropna(subset=['lat', 'lon'])
         for _, row in valid_actual_custs.iterrows():
             actual_coords.append([row['lon'], row['lat']])
@@ -303,7 +294,6 @@ else:
         m2_col.metric("ระยะทางรวม (Actual)", f"{act_dist:.2f} กม.")
         m3_col.metric("เวลาเดินทางรวมโดยประมาณ", f"{act_dur:.1f} นาที")
 
-        # แสดงสรุปยอดแยกเที่ยว (ถ้ามี)
         if trip_data_records:
             st.markdown("#### 📦 สรุปยอดเบิก-คืน แยกตามเที่ยววิ่ง")
             cols_trip = st.columns(len(trip_data_records))
@@ -311,9 +301,11 @@ else:
                 with cols_trip[i]:
                     st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
         
-        # วาดแผนที่ตามโหมดที่เลือก
-        m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
-        folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
+        map_center = [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
+        m = folium.Map(location=map_center, zoom_start=12)
+        
+        if depot_lat is not None and depot_lon is not None:
+            folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
         
         if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
             for idx, row in valid_actual_custs.iterrows():
@@ -347,7 +339,7 @@ else:
         
         valid_opt_custs = df_customers.dropna(subset=['lat', 'lon']).copy()
         
-        if not valid_opt_custs.empty:
+        if not valid_opt_custs.empty and depot_lat is not None and depot_lon is not None:
             optimized_list = optimize_route_tsp(depot_lat, depot_lon, valid_opt_custs)
             df_optimized = pd.DataFrame(optimized_list)
             
@@ -394,7 +386,7 @@ else:
             display_cols = ['optimized_seq', 'cust_id', 'cust_name', 'target_qty', 'time_str', 'status']
             st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
         else:
-            st.warning("ไม่พบข้อมูลพิกัด GPS สำหรับคำนวณเส้นทาง Optimized")
+            st.warning("กรุณาเลือกสาขาคลังสินค้าต้นทางและตรวจสอบข้อมูลพิกัด GPS ให้ครบถ้วน")
 
 st.markdown("---")
 st.caption("Sprinkle Delivery Inspector System - พัฒนาด้วย Streamlit และ OSRM Routing")
