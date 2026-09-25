@@ -13,7 +13,7 @@ import polyline
 # ----------------------------------------------------
 st.set_page_config(
     page_title="Sprinkle Delivery Inspector & Route Optimizer",
-    page_layout="wide",
+    layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -109,7 +109,7 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.header("📁 2. นำเข้าข้อมูลการจัดส่ง")
 
-# ส่วนที่ 1: ยอดส่ง
+# ส่วนที่ 1: ยอดส่ง (เลือกวิธีได้)
 st.sidebar.subheader("ส่วนที่ 1: ข้อมูลยอดส่ง (น้ำดื่ม)")
 import_type_part1 = st.sidebar.radio(
     "เลือกวิธีนำเข้าข้อมูลยอดส่ง",
