@@ -20,7 +20,7 @@ st.set_page_config(
 
 
 # ----------------------------------------------------
-# 1. ฟังก์ชันคำนวณระยะทาง Haversine & OSRM (พร้อมระบบ Cache ป้องกัน Server ล่ม/Timeout)
+# 1. ฟังก์ชันคำนวณระยะทาง Haversine & OSRM (พร้อมระบบ Cache)
 # ----------------------------------------------------
 def haversine(lat1, lon1, lat2, lon2):
   R = 6371.0  # รัศมีโลกหน่วยเป็นกิโลเมตร
@@ -70,10 +70,7 @@ def get_osrm_route_cached(coords_tuple):
 
 
 def get_osrm_route(coords_list):
-  """แปลง list เป็น tuple เพื่อให้สามารถใช้งาน @st.cache_data ได้อย่างมีประสิทธิภาพ
-
-  รองรับรถยนต์และรถกระบะ 4 ล้อขึ้นไปตามถนนจริง
-  """
+  """รองรับรถยนต์และรถกระบะ 4 ล้อขึ้นไปตามถนนจริงผ่าน OSRM"""
   return get_osrm_route_cached(tuple(tuple(c) for c in coords_list))
 
 
@@ -333,6 +330,7 @@ if "is_playing" not in st.session_state:
 valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
 is_system_ready = False
+step_geometries = {}  # เก็บเส้นทางสำเร็จรูปในแต่ละสเต็ปเพื่อความรวดเร็ว
 
 if not df_customers.empty and depot_lat is not None and depot_lon is not None:
   valid_actual_custs = df_customers.dropna(subset=["lat", "lon"]).copy()
@@ -341,6 +339,21 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     for _, row in valid_actual_custs.iterrows():
       actual_coords.append([row["lon"], row["lat"]])
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
+
+    # Pre-compute เส้นทางทีละสเต็ปเก็บไว้ล่วงหน้า (แก้ปัญหาแผนที่กระพริบและเส้นทางไม่ขึ้น)
+    sub_coords_run = [[depot_lon, depot_lat]]
+    curr_trip_track = 1
+    for idx_s, (_, r_s) in enumerate(valid_actual_custs.iterrows()):
+      t_num = int(r_s.get("trip", 1))
+      if t_num != curr_trip_track:
+        sub_coords_run.append([depot_lon, depot_lat])
+        sub_coords_run.append([depot_lon, depot_lat])
+        curr_trip_track = t_num
+      sub_coords_run.append([r_s["lon"], r_s["lat"]])
+
+      _, _, s_geom = get_osrm_route(sub_coords_run)
+      step_geometries[idx_s + 1] = s_geom
+
     if len(act_geom) > 0:
       is_system_ready = True
 
@@ -493,7 +506,6 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    # ใช้ session_state ควบคุมค่า slider โดยตรงเพื่อป้องกันการค้างของ UI
     playback_step = st.slider(
         "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
         1,
@@ -502,11 +514,8 @@ with tab1:
     )
     if playback_step != st.session_state.playback_step:
       st.session_state.playback_step = playback_step
-      st.session_state.is_playing = (
-          False  # หากผู้ใช้เลื่อนเอง ให้หยุดเล่นอัตโนมัติชั่วคราว
-      )
+      st.session_state.is_playing = False
 
-    # จัดการระบบ Auto Play วิ่งไหลอัตโนมัติทีละสเต็ป
     if st.session_state.is_playing:
       if st.session_state.playback_step < max_steps:
         time.sleep(sleep_time)
@@ -520,7 +529,6 @@ with tab1:
         " เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง"
     )
 
-  # ตั้งค่าพิกัดกลางแผนที่ให้ขยับตามจุดล่าสุดอัตโนมัติ
   map_center = (
       [depot_lat, depot_lon] if depot_lat is not None else [13.7563, 100.5018]
   )
@@ -559,26 +567,10 @@ with tab1:
               act_geom, color="blue", weight=4, opacity=0.7
           ).add_to(m)
     else:
-      if (
-          current_display_limit > 0
-          and depot_lat is not None
-          and depot_lon is not None
-      ):
-        sub_coords = [[depot_lon, depot_lat]]
-        current_active_trip = 1
-
-        for idx_sub, (_, row_sub) in enumerate(valid_actual_custs.iterrows()):
-          if idx_sub + 1 <= current_display_limit:
-            trip_num = int(row_sub.get("trip", 1))
-            if trip_num != current_active_trip:
-              sub_coords.append([depot_lon, depot_lat])
-              sub_coords.append([depot_lon, depot_lat])
-              current_active_trip = trip_num
-
-            sub_coords.append([row_sub["lon"], row_sub["lat"]])
-
-        if len(sub_coords) >= 2:
-          _, _, sub_geom = get_osrm_route(sub_coords)
+      # ดึงเส้นทางสำเร็จรูปที่คำนวณเตรียมไว้แล้วมาแสดงทันที (ไม่ต้องคำนวณซ้ำตอนกดเล่น)
+      if current_display_limit in step_geometries:
+        sub_geom = step_geometries[current_display_limit]
+        if len(sub_geom) > 0:
           folium.PolyLine(
               sub_geom, color="blue", weight=4, opacity=0.7
           ).add_to(m)
