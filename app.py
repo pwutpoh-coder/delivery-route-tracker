@@ -87,7 +87,7 @@ def optimize_route_tsp(depot_lat, depot_lon, df_customers):
     return ordered_route
 
 # สีสำหรับแต่ละรอบการจัดส่ง (Trip Colors)
-trip_colors = ["blue", "green", "purple", "orange", "darkred"]
+trip_colors = ["blue", "green", "purple", "orange", "darkred", "cadetblue"]
 
 # ----------------------------------------------------
 # 3. ส่วนติดต่อผู้ใช้ (UI Sidebar & Main)
@@ -97,7 +97,6 @@ st.markdown("---")
 
 st.sidebar.header("⚙️ 1. ตั้งค่าคลังสินค้า (Depot)")
 
-# กำหนดรายชื่อสาขาคลังสินค้าทั้ง 18 สาขา พร้อมพิกัด
 depot_options = {
     "-- กรุณาเลือกสาขาต้นทาง --": {"lat": None, "lon": None},
     "สาขาบางพลี": {"lat": 13.593901, "lon": 100.80256},
@@ -148,7 +147,7 @@ total_target_qty = 0
 has_dwt_data = False
 
 if import_type_part1 == "1. ระบุยอดเบิก ยอดคืนเอง (แยกตามเที่ยว)":
-    num_trips = st.sidebar.number_input("จำนวนเที่ยววิ่งในวันนี้", min_value=1, max_value=5, value=1, step=1)
+    num_trips = st.sidebar.number_input("จำนวนเที่ยววิ่งในวันนี้", min_value=1, max_value=6, value=1, step=1)
     for t in range(int(num_trips)):
         st.sidebar.markdown(f"**--- เที่ยวที่ {t+1} ---**")
         issue_qty = st.sidebar.number_input(f"ยอดเบิก เที่ยวที่ {t+1} (ถัง)", min_value=0, value=0, key=f"issue_{t}")
@@ -199,7 +198,7 @@ map_view_mode = st.sidebar.radio(
 )
 
 # ----------------------------------------------------
-# 4. การประมวลผลข้อมูลไฟล์สรุปการจัดส่งรายสมาชิก (ประมวลผลทันทีเมื่ออัปโหลด)
+# 4. ประมวลผลข้อมูลไฟล์สรุปการจัดส่งรายสมาชิก (คอลัมน์ C และ F)
 # ----------------------------------------------------
 df_customers = pd.DataFrame()
 
@@ -214,10 +213,10 @@ if file_summary is not None:
                 break
             
             cust_name = row[1]
-            target_qty = pd.to_numeric(row[2], errors='coerce') or 0
+            target_qty = pd.to_numeric(row[2], errors='coerce') or 0  # คอลัมน์ C: ยอดส่ง
             gps_str = str(row[3]) if not pd.isna(row[3]) else ""
             diff_gps = pd.to_numeric(row[4], errors='coerce') or 0.0
-            time_str = str(row[5]) if not pd.isna(row[5]) else "00:00:00"
+            time_str = str(row[5]) if not pd.isna(row[5]) else "00:00:00"  # คอลัมน์ F: เวลาจัดส่ง
             status = str(row[6]) if not pd.isna(row[6]) else "ปกติ"
             reason = str(row[7]) if not pd.isna(row[7]) else "-"
             orig_seq = pd.to_numeric(row[8], errors='coerce') or (idx - 3)
@@ -242,22 +241,42 @@ if file_summary is not None:
                 "time_str": time_str,
                 "status": status,
                 "reason": reason,
-                "orig_seq": int(orig_seq),
-                "trip": 1
+                "orig_seq": int(orig_seq)
             })
             
         df_customers = pd.DataFrame(data_rows)
         if not df_customers.empty:
+            # เรียงลำดับตามเวลาจัดส่ง (จากเวลาน้อยไปมาก)
             df_customers['time_parsed'] = pd.to_datetime(df_customers['time_str'], format='%H:%M:%S', errors='coerce')
             df_customers = df_customers.sort_values(by=['time_parsed', 'orig_seq']).reset_index(drop=True)
             df_customers['seq_time'] = range(1, len(df_customers) + 1)
-            df_customers['trip'] = np.clip((df_customers.index // 10) + 1, 1, len(trip_colors))
+            
+            # ตรวจสอบรอบการส่งจากยอดสะสม (Cumulative Sum) เทียบกับโควตาแต่ละเที่ยว
+            df_customers['cum_qty'] = df_customers['target_qty'].cumsum()
+            
+            if trip_data_records:
+                thresholds = []
+                curr_sum = 0
+                for tr in trip_data_records:
+                    curr_sum += tr['net']
+                    thresholds.append((tr['trip'], curr_sum))
+                
+                def assign_trip(cum_q):
+                    for trip_num, limit in thresholds:
+                        if cum_q <= limit:
+                            return trip_num
+                    return thresholds[-1][0] if thresholds else 1
+                
+                df_customers['trip'] = df_customers['cum_qty'].apply(assign_trip)
+            else:
+                # Fallback หากไม่มีข้อมูลเที่ยววิ่ง กำหนดรอบละ 10 จุด หรือ 50 ถัง
+                df_customers['trip'] = np.clip((df_customers.index // 10) + 1, 1, len(trip_colors))
             
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
 
 # ----------------------------------------------------
-# 5. การแสดงผลหลัก (แสดงแผนที่เสมอ แม้ยังไม่ใส่ข้อมูล)
+# 5. การแสดงผลหลัก (Tabs)
 # ----------------------------------------------------
 if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
     st.warning("⚠️ กรุณาเลือก 'สาขาคลังสินค้าต้นทาง' ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นใช้งานแผนที่และระบบคำนวณ")
@@ -265,7 +284,7 @@ if selected_depot == "-- กรุณาเลือกสาขาต้นท�
 tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตามลำดับเวลาจริง (Actual Route)", "⚡ 2. เส้นทางที่เหมาะสมที่สุด (Optimized Route)"])
 
 with tab1:
-    st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (เรียงลำดับจากเวลาน้อยไปหามาก)")
+    st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (เรียงลำดับจากเวลาน้อยไปหามากจากคอลัมน์ F)")
     
     if not df_customers.empty:
         col_f1, col_f2, col_f3 = st.columns(3)
@@ -307,16 +326,30 @@ with tab1:
                     st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
         
         st.markdown("---")
-        st.markdown("#### ⏱️ แถบควบคุมเวลาและแสดงผลตามลำดับ")
+        st.markdown("#### ⏱️ แถบควบคุมการเล่นและจัดการรอบการจัดส่ง")
         
         max_steps = max(1, len(valid_actual_custs))
         
-        ctrl_c1, ctrl_c2 = st.columns([4, 1])
-        with ctrl_c1:
-            playback_step = st.slider("เลือกช่วงเวลา / ลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที", 1, max_steps, max_steps, key="playback_slider")
-        with ctrl_c2:
-            if st.button("🔄 รีเซ็ตลำดับ", key="reset_btn_tab1"):
-                playback_step = 1
+        # จัดการ Session State สำหรับ Play, Pause, Replay, Reset
+        if "playback_step" not in st.session_state:
+            st.session_state.playback_step = max_steps
+        if "is_playing" not in st.session_state:
+            st.session_state.is_playing = False
+
+        c_btn1, c_btn2, c_btn3, c_btn4 = st.columns(4)
+        if c_btn1.button("▶️ เล่น (Play)"):
+            st.session_state.is_playing = True
+        if c_btn2.button("⏸️ พัก (Pause)"):
+            st.session_state.is_playing = False
+        if c_btn3.button("⏪ เล่นซ้ำ (Replay)"):
+            st.session_state.playback_step = 1
+            st.session_state.is_playing = True
+        if c_btn4.button("🔄 รีเซ็ต (Reset)"):
+            st.session_state.playback_step = max_steps
+            st.session_state.is_playing = False
+
+        playback_step = st.slider("เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที", 1, max_steps, st.session_state.playback_step, key="playback_slider")
+        st.session_state.playback_step = playback_step
     else:
         st.info("💡 กรุณาอัปโหลดไฟล์ **'รายงานสรุปการจัดส่งประจำวัน.xls'** เพื่อแสดงผลลัพธ์การคำนวณและข้อมูลสถิติการจัดส่ง")
         valid_actual_custs = pd.DataFrame()
@@ -334,14 +367,13 @@ with tab1:
             if len(act_geom) > 1:
                 folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
         else:
-            current_display_limit = playback_step
-            # เส้นทางจะแสดงเฉพาะพิกัดถึงจุดที่เลือกบนสไลเดอร์ทันที (ไม่มีเส้นทางค้างไว้ก่อนกด)
-            if playback_step > 1 and len(act_geom) > 1:
+            current_display_limit = st.session_state.playback_step
+            if current_display_limit > 1 and len(act_geom) > 1:
                 sub_coords = []
                 if depot_lat is not None and depot_lon is not None:
                     sub_coords.append([depot_lon, depot_lat])
                 for idx_sub, (_, row_sub) in enumerate(valid_actual_custs.iterrows()):
-                    if idx_sub + 1 <= playback_step:
+                    if idx_sub + 1 <= current_display_limit:
                         sub_coords.append([row_sub['lon'], row_sub['lat']])
                 if len(sub_coords) >= 2:
                     _, _, sub_geom = get_osrm_route(sub_coords)
@@ -356,7 +388,7 @@ with tab1:
                 if is_latest and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
                     icon_symbol = "star"
                     icon_color = "red"
-                    popup_text = f"<b>🚨 จุดล่าสุด (ลำดับที่ {row.get('seq_time', idx+1)})</b><br>{row['cust_id']}: {row['cust_name']}<br>เวลา: {row['time_str']}"
+                    popup_text = f"<b>🚨 จุดล่าสุด (ลำดับที่ {row.get('seq_time', idx+1)})</b><br>{row['cust_id']}: {row['cust_name']}<br>เวลา: {row['time_str']}<br>รอบที่: {row.get('trip', 1)}"
                 else:
                     icon_symbol = "info-sign"
                     icon_color = color_name
@@ -375,7 +407,7 @@ with tab1:
         st.dataframe(filtered_df, use_container_width=True)
 
 with tab2:
-    st.subheader("การจัดลำดับเส้นทางใหม่ให้อธิประสิทธิภาพสูงสุด (TSP Optimized Route)")
+    st.subheader("การจัดลำดับเส้นทางใหม่ให้มีประสิทธิภาพสูงสุด (TSP Optimized Route)")
     st.markdown("ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด เพื่อประหยัดระยะทางและน้ำมันสูงสุด")
     
     if not df_customers.empty:
@@ -425,7 +457,7 @@ with tab2:
             
             st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
             df_optimized['optimized_seq'] = range(1, len(df_optimized) + 1)
-            display_cols = ['optimized_seq', 'cust_id', 'cust_name', 'target_qty', 'time_str', 'status']
+            display_cols = ['optimized_seq', 'cust_id', 'cust_name', 'target_qty', 'time_str', 'status', 'trip']
             st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
         else:
             st.warning("กรุณาเลือกสาขาคลังสินค้าต้นทางและตรวจสอบข้อมูลพิกัด GPS ให้ครบถ้วน")
