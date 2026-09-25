@@ -328,7 +328,7 @@ valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
 is_system_ready = False
 
-# [เพิ่มประสิทธิภาพ] ตัวแปร Cache เก็บเส้นทางของแต่ละสเต็ปล่วงหน้า เพื่อป้องกันการยิง API ซ้ำตอนกด Play
+# [เพิ่มประสิทธิภาพ] ตัวแปร Cache เก็บเส้นทางของแต่ละสเต็ปล่วงหน้า ป้องกันการยิง API ซ้ำตอนกด Play
 if "cached_route_steps" not in st.session_state:
   st.session_state.cached_route_steps = {}
 
@@ -359,7 +359,6 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
               current_active_trip = trip_num
             sub_coords.append([row_sub["lon"], row_sub["lat"]])
 
-            # บันทึกพิกัดย่อยของสเต็ปนี้ไว้ล่วงหน้า
             _, _, step_geom = get_osrm_route(sub_coords)
             st.session_state.cached_route_steps[idx_sub + 1] = (
                 step_geom if step_geom else act_geom
@@ -514,18 +513,25 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    # ใช้ slider ควบคุมด้วย value จาก playback_step โดยไม่กำหนด key
-    slider_val = st.slider(
-        "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
-        1,
-        max_steps,
-        value=int(st.session_state.playback_step),
+    # [แทนที่แถบเลื่อน ด้วยแถบแสดงเวลาการจัดส่งปัจจุบัน]
+    current_idx_bar = min(
+        max(0, st.session_state.playback_step - 1),
+        len(valid_actual_custs) - 1,
     )
+    current_row_bar = valid_actual_custs.iloc[current_idx_bar]
+    current_time_str = current_row_bar.get("time_str", "00:00:00")
+    current_cust_name = current_row_bar.get("cust_name", "-")
+    current_cust_id = current_row_bar.get("cust_id", "-")
 
-    if slider_val != st.session_state.playback_step:
-      st.session_state.playback_step = slider_val
-      st.session_state.is_playing = False  # หยุดเล่นอัตโนมัติหากผู้ใช้เลื่อนเอง
-      st.rerun()
+    progress_pct = min(1.0, st.session_state.playback_step / max_steps)
+    st.progress(
+        progress_pct,
+        text=(
+            f"⏰ เวลาจัดส่งปัจจุบัน: {current_time_str} | ลูกค้า:"
+            f" {current_cust_id} - {current_cust_name} (จุดที่"
+            f" {st.session_state.playback_step}/{max_steps})"
+        ),
+    )
 
     # อัปเดตสเต็ปอัตโนมัติเมื่ออยู่ในโหมด Play
     if st.session_state.is_playing:
@@ -585,7 +591,7 @@ with tab1:
           and depot_lat is not None
           and depot_lon is not None
       ):
-        # ดึงเส้นทางที่คำนวณและเก็บไว้ใน Cache ล่วงหน้ามาแสดงผลทันที (ไม่หน่วง ไม่ยิง API ซ้ำ)
+        # ดึงเส้นทางที่คำนวณและเก็บไว้ใน Cache ล่วงหน้ามาแสดงผลทันทีโดยไม่หน่วง
         cached_geom = st.session_state.cached_route_steps.get(
             current_display_limit, act_geom
         )
