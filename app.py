@@ -569,34 +569,16 @@ with tab1:
   if not df_customers.empty and not valid_actual_custs.empty:
     current_display_limit = st.session_state.playback_step
 
+    # ตรรกะการแสดงเส้นทางและพิกัดตามโหมดที่เลือก
     if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
-      current_display_limit = len(valid_actual_custs)
-      if len(act_geom) > 1:
-        folium.PolyLine(
-            act_geom, color="blue", weight=4, opacity=0.7
-        ).add_to(m)
-    else:
-      if (
-          current_display_limit > 0
-          and depot_lat is not None
-          and depot_lon is not None
-      ):
-        cached_geom = st.session_state.cached_route_steps.get(
-            current_display_limit, act_geom
-        )
-        if len(cached_geom) > 0:
+      # แสดงพิกัดทั้งหมดทันที แต่เส้นทางจะแสดงก็ต่อเมื่อมีการกด Play หรือกำลังเล่น
+      if st.session_state.is_playing or st.session_state.playback_step > 1:
+        if len(act_geom) > 1:
           folium.PolyLine(
-              cached_geom, color="blue", weight=4, opacity=0.7
+              act_geom, color="blue", weight=4, opacity=0.7
           ).add_to(m)
 
-    for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
-      if (
-          map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
-          or idx + 1 <= current_display_limit
-      ):
-        is_latest = (idx + 1 == current_display_limit) and (
-            map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)"
-        )
+      for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
         t_idx = int(row.get("trip", 1)) - 1
         color_name = trip_colors[t_idx % len(trip_colors)]
         seq_num = row.get("seq_time", idx + 1)
@@ -610,14 +592,9 @@ with tab1:
                 <b>รอบที่:</b> {row.get('trip', 1)} (ลำดับที่ {seq_num})
                 """
 
-        if is_latest:
-          div_icon = folium.DivIcon(
-              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; border: 3px solid gold; box-shadow: 0 0 12px gold;">{seq_num}</div>'
-          )
-        else:
-          div_icon = folium.DivIcon(
-              html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
-          )
+        div_icon = folium.DivIcon(
+            html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
+        )
 
         folium.Marker(
             [row["lat"], row["lon"]],
@@ -626,7 +603,54 @@ with tab1:
             icon=div_icon,
         ).add_to(m)
 
-  # แก้ไขจุดสำคัญ: ใช้ Key แบบค่าคงที่ (Static Key) เพื่อให้แผนที่ทำการอัปเดตต่อเนื่อง ไม่กระพริบ
+    else:
+      # โหมดแสดงทีละพิกัดตามลำดับเส้นทางที่วิ่งผ่าน
+      if (
+          current_display_limit > 0
+          and depot_lat is not None
+          and depot_lon is not None
+      ):
+        cached_geom = st.session_state.cached_route_steps.get(
+            current_display_limit, act_geom
+        )
+        if len(cached_geom) > 0:
+          folium.PolyLine(
+              cached_geom, color="blue", weight=4, opacity=0.7
+          ).add_to(m)
+
+      for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
+        if idx + 1 <= current_display_limit:
+          is_latest = (idx + 1 == current_display_limit) and st.session_state.is_playing
+          t_idx = int(row.get("trip", 1)) - 1
+          color_name = trip_colors[t_idx % len(trip_colors)]
+          seq_num = row.get("seq_time", idx + 1)
+
+          popup_text = f"""
+                  <b>รหัสลูกค้า:</b> {row['cust_id']}<br>
+                  <b>ชื่อลูกค้า:</b> {row['cust_name']}<br>
+                  <b>ยอดจัดส่ง:</b> {row['target_qty']} ถัง<br>
+                  <b>พิกัด GPS:</b> {row['gps_str']}<br>
+                  <b>เวลาการจัดส่ง:</b> {row['time_str']}<br>
+                  <b>รอบที่:</b> {row.get('trip', 1)} (ลำดับที่ {seq_num})
+                  """
+
+          if is_latest:
+            div_icon = folium.DivIcon(
+                html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 12px; border: 3px solid gold; box-shadow: 0 0 12px gold;">{seq_num}</div>'
+            )
+          else:
+            div_icon = folium.DivIcon(
+                html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
+            )
+
+          folium.Marker(
+              [row["lat"], row["lon"]],
+              popup=popup_text,
+              tooltip=f"{row['cust_id']} - {row['cust_name']} (ยอด: {row['target_qty']} ถัง)",
+              icon=div_icon,
+          ).add_to(m)
+
+  # ใช้ Key แบบค่าคงที่เพื่อป้องกันการรีเรนเดอร์หน้าเว็บกระพริบ
   st_folium(m, width="100%", height=450, key="map_tab1_static_key")
 
   if not df_customers.empty:
