@@ -8,7 +8,9 @@ import folium
 from streamlit_folium import st_folium
 import polyline
 
-# ตั้งค่าหน้าเว็บ
+# ----------------------------------------------------
+# 0. ตั้งค่าหน้าเว็บ (ต้องเป็นคำสั่ง st แรกสุดของไฟล์เสมอ)
+# ----------------------------------------------------
 st.set_page_config(
     page_title="Sprinkle Delivery Inspector & Route Optimizer",
     page_layout="wide",
@@ -56,7 +58,6 @@ def get_osrm_route(coords_list):
     total_dist = 0
     for i in range(len(coords_list) - 1):
         total_dist += haversine(coords_list[i][1], coords_list[i][0], coords_list[i+1][1], coords_list[i+1][0])
-    # สมมติความเร็วเฉลี่ย 30 กม./ชม.
     total_duration = (total_dist / 30.0) * 60.0
     fallback_geom = [(c[1], c[0]) for c in coords_list]
     return total_dist, total_duration, fallback_geom
@@ -123,10 +124,8 @@ if import_type_part1 == "อัปโหลดไฟล์ 'รายงาน�
     if file_dwt is not None:
         try:
             df_dwt_raw = pd.read_excel(file_dwt, header=None)
-            # ค้นหายอดเบิกจากไฟล์ (ตามโครงสร้างตัวอย่าง คอลัมน์ที่ 3 คือ เบิก)
             sub_dwt = df_dwt_raw.iloc[4:].copy()
             sub_dwt = sub_dwt[sub_dwt.iloc[:, 2].notna() & (sub_dwt.iloc[:, 2] != 'รวม')]
-            # แปลงคอลัมน์เบิกเป็นตัวเลข
             bev_col = pd.to_numeric(sub_dwt.iloc[:, 3], errors='coerce').fillna(0)
             total_target_qty = int(bev_col.sum())
             st.sidebar.success(f"อ่านยอดเบิกสำเร็จ: {total_target_qty} หน่วย")
@@ -148,8 +147,6 @@ df_customers = pd.DataFrame()
 if file_summary is not None:
     try:
         df_sum_raw = pd.read_excel(file_summary, header=None)
-        # ตามตัวอย่างโครงสร้างไฟล์: Header อยู่แถวที่ 3 (index 3)
-        # ข้อมูลลูกค้าเริ่มตั้งแต่แถวที่ 4 จนถึงแถวที่มีคำว่า 'รวม' หรือว่าง
         data_rows = []
         for idx in range(4, len(df_sum_raw)):
             row = df_sum_raw.iloc[idx]
@@ -190,14 +187,13 @@ if file_summary is not None:
             })
             
         df_customers = pd.DataFrame(data_rows)
-        # เรียงตามลำดับเดิม
         if not df_customers.empty and "orig_seq" in df_customers.columns:
             df_customers = df_customers.sort_values("orig_seq").reset_index(drop=True)
             
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
 
-# กรณีไม่มีการอัปโหลดไฟล์สรุป ให้ใช้ข้อมูลตัวอย่างจำลองเพื่อให้ระบบแสดงผลได้ทันที
+# กรณีไม่มีการอัปโหลดไฟล์สรุป ให้ใช้ข้อมูลตัวอย่างจำลอง
 if df_customers.empty:
     st.info("💡 กำลังแสดงข้อมูลจำลอง (Demo Data) เนื่องจากยังไม่ได้อัปโหลดไฟล์ 'รายงานสรุปการจัดส่งประจำวัน.xls'")
     demo_data = [
@@ -219,7 +215,6 @@ tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตา�
 with tab1:
     st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (Actual Sequence)")
     
-    # ตัวกรองสถานะพิเศษ
     col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
         filter_status = st.multiselect("กรองตามสถานะจัดส่ง", options=df_customers["status"].unique() if not df_customers.empty else [], default=[])
@@ -236,7 +231,6 @@ with tab1:
     if search_query:
         filtered_df = filtered_df[filtered_df["cust_id"].str.contains(search_query, na=False) | filtered_df["cust_name"].str.contains(search_query, na=False)]
 
-    # คำนวณระยะทางและเวลาตามลำดับจริง
     actual_coords = [[depot_lon, depot_lat]]
     valid_actual_custs = filtered_df.dropna(subset=['lat', 'lon'])
     for _, row in valid_actual_custs.iterrows():
@@ -249,7 +243,6 @@ with tab1:
     m2_col.metric("ระยะทางรวม (Actual)", f"{act_dist:.2f} กม.")
     m3_col.metric("เวลาเดินทางรวมโดยประมาณ", f"{act_dur:.1f} นาที")
     
-    # แสดงแผนที่ Folium
     m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
     folium.Marker([depot_lat, depot_lon], popup="คลังสินค้า (Depot)", icon=folium.Icon(color="red", icon="home")).add_to(m)
     
@@ -272,7 +265,6 @@ with tab2:
     st.subheader("การจัดลำดับเส้นทางใหม่ให้อธิประสิทธิภาพสูงสุด (TSP Optimized Route)")
     st.markdown("ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด เพื่อประหยัดระยะทางและน้ำมันสูงสุด")
     
-    # กรองเฉพาะลูกค้าที่มีพิกัดถูกต้อง
     valid_opt_custs = df_customers.dropna(subset=['lat', 'lon']).copy()
     
     if not valid_opt_custs.empty:
@@ -291,7 +283,6 @@ with tab2:
         saved_km = max(0, act_dist - opt_dist)
         om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
         
-        # แผนที่ Optimized
         m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
         folium.Marker([depot_lat, depot_lon], popup="คลังสินค้า (Depot)", icon=folium.Icon(color="red", icon="home")).add_to(m_opt)
         
@@ -308,7 +299,6 @@ with tab2:
         st_folium(m_opt, width="100%", height=450)
         
         st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
-        # เพิ่มลำดับแนะนำใหม่
         df_optimized['optimized_seq'] = range(1, len(df_optimized) + 1)
         display_cols = ['optimized_seq', 'cust_id', 'cust_name', 'target_qty', 'time_str', 'status']
         st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
