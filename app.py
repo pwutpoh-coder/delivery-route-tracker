@@ -251,7 +251,7 @@ if file_summary is not None:
             df_customers['time_parsed'] = pd.to_datetime(df_customers['time_str'], format='%H:%M:%S', errors='coerce')
             df_customers = df_customers.sort_values(by=['time_parsed', 'orig_seq']).reset_index(drop=True)
             df_customers['seq_time'] = range(1, len(df_customers) + 1)
-            df_customers['trip'] = ((df_customers.index // 10) + 1).clip(upper=len(trip_colors))
+            df_customers['trip'] = np.clip((df_customers.index // 10) + 1, 1, len(trip_colors))
             
     except Exception as e:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
@@ -404,7 +404,7 @@ with tab2:
             act_d_tmp, _, _ = get_osrm_route(act_coords_temp)
             
             om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_d_tmp:.2f} กม.", delta_color="inverse")
-            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_d_tmp:.2f} กม.", delta_color="inverse")
+            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta_color="inverse")
             saved_km = max(0, act_d_tmp - opt_dist)
             om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
             
