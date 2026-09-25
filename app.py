@@ -328,6 +328,10 @@ valid_actual_custs = pd.DataFrame()
 act_dist, act_dur, act_geom = 0, 0, []
 is_system_ready = False
 
+# [เพิ่มประสิทธิภาพ] ตัวแปร Cache เก็บเส้นทางของแต่ละสเต็ปล่วงหน้า เพื่อป้องกันการยิง API ซ้ำตอนกด Play
+if "cached_route_steps" not in st.session_state:
+  st.session_state.cached_route_steps = {}
+
 if not df_customers.empty and depot_lat is not None and depot_lon is not None:
   valid_actual_custs = df_customers.dropna(subset=["lat", "lon"]).copy()
   if not valid_actual_custs.empty:
@@ -337,6 +341,29 @@ if not df_customers.empty and depot_lat is not None and depot_lon is not None:
     act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
     if len(act_geom) > 0:
       is_system_ready = True
+
+      # Pre-compute เส้นทางล่วงหน้าทุกสเต็ปในเบื้องหลังตอนโหลดครั้งแรกครั้งเดียว
+      if not st.session_state.cached_route_steps:
+        with st.spinner(
+            "⏳ กำลังจัดเตรียมเส้นทางจำลองไว้ในระบบ (Pre-computing)..."
+        ):
+          sub_coords = [[depot_lon, depot_lat]]
+          current_active_trip = 1
+          for idx_sub, (_, row_sub) in enumerate(
+              valid_actual_custs.iterrows()
+          ):
+            trip_num = int(row_sub.get("trip", 1))
+            if trip_num != current_active_trip:
+              sub_coords.append([depot_lon, depot_lat])
+              sub_coords.append([depot_lon, depot_lat])
+              current_active_trip = trip_num
+            sub_coords.append([row_sub["lon"], row_sub["lat"]])
+
+            # บันทึกพิกัดย่อยของสเต็ปนี้ไว้ล่วงหน้า
+            _, _, step_geom = get_osrm_route(sub_coords)
+            st.session_state.cached_route_steps[idx_sub + 1] = (
+                step_geom if step_geom else act_geom
+            )
 
 # ----------------------------------------------------
 # 6. การแสดงผลหลัก (Tabs)
@@ -443,8 +470,8 @@ with tab1:
     st.markdown("##### 🟢 สถานะการเตรียมพร้อมของระบบ")
     if is_system_ready:
       st.success(
-          "✅ **ระบบโหลดข้อมูลและจำลองเส้นทางเรียบร้อยพร้อมเล่นแล้ว!**"
-          " (สามารถกดปุ่ม Play ด้านล่างได้ทันที)"
+          "✅ **ระบบโหลดข้อมูลและจำลองเส้นทางล่วงหน้าเสร็จสิ้น พร้อมเล่นแล้ว!**"
+          " (กดปุ่ม Play ได้ทันที ไม่มีอาการหน่วง)"
       )
     else:
       st.warning(
@@ -487,7 +514,7 @@ with tab1:
       st.session_state.is_playing = False
       st.rerun()
 
-    # ใช้ slider ควบคุมด้วย value จาก playback_step โดยไม่กำหนด key เพื่อป้องกันข้อผิดพลาด WidgetAlreadyInstantiatedError
+    # ใช้ slider ควบคุมด้วย value จาก playback_step โดยไม่กำหนด key
     slider_val = st.slider(
         "เลือกลำดับจุดส่งเพื่ออัปเดตเส้นทางทันที",
         1,
@@ -558,23 +585,13 @@ with tab1:
           and depot_lat is not None
           and depot_lon is not None
       ):
-        sub_coords = [[depot_lon, depot_lat]]
-        current_active_trip = 1
-
-        for idx_sub, (_, row_sub) in enumerate(valid_actual_custs.iterrows()):
-          if idx_sub + 1 <= current_display_limit:
-            trip_num = int(row_sub.get("trip", 1))
-            if trip_num != current_active_trip:
-              sub_coords.append([depot_lon, depot_lat])
-              sub_coords.append([depot_lon, depot_lat])
-              current_active_trip = trip_num
-
-            sub_coords.append([row_sub["lon"], row_sub["lat"]])
-
-        if len(sub_coords) >= 2:
-          _, _, sub_geom = get_osrm_route(sub_coords)
+        # ดึงเส้นทางที่คำนวณและเก็บไว้ใน Cache ล่วงหน้ามาแสดงผลทันที (ไม่หน่วง ไม่ยิง API ซ้ำ)
+        cached_geom = st.session_state.cached_route_steps.get(
+            current_display_limit, act_geom
+        )
+        if len(cached_geom) > 0:
           folium.PolyLine(
-              sub_geom, color="blue", weight=4, opacity=0.7
+              cached_geom, color="blue", weight=4, opacity=0.7
           ).add_to(m)
 
     for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
