@@ -119,14 +119,17 @@ depot_options = {
 
 selected_depot = st.sidebar.selectbox("เลือกคลังสินค้าต้นทาง", list(depot_options.keys()), index=0)
 
-if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
-    depot_lat, depot_lon = 13.7563, 100.5018
-elif selected_depot == "กำหนดเอง (Custom)":
-    depot_lat = st.sidebar.number_input("ละติจูดคลัง (Latitude)", value=13.7563, format="%.6f")
-    depot_lon = st.sidebar.number_input("ลองจิจูดคลัง (Longitude)", value=100.5018, format="%.6f")
+is_depot_selected = (selected_depot != "-- กรุณาเลือกสาขาต้นทาง --")
+
+if is_depot_selected:
+    if selected_depot == "กำหนดเอง (Custom)":
+        depot_lat = st.sidebar.number_input("ละติจูดคลัง (Latitude)", value=13.7563, format="%.6f")
+        depot_lon = st.sidebar.number_input("ลองจิจูดคลัง (Longitude)", value=100.5018, format="%.6f")
+    else:
+        depot_lat = depot_options[selected_depot]["lat"]
+        depot_lon = depot_options[selected_depot]["lon"]
 else:
-    depot_lat = depot_options[selected_depot]["lat"]
-    depot_lon = depot_options[selected_depot]["lon"]
+    depot_lat, depot_lon = None, None
 
 st.sidebar.markdown("---")
 st.sidebar.header("📁 2. นำเข้าข้อมูลการจัดส่งและเที่ยววิ่ง")
@@ -249,8 +252,7 @@ if file_summary is not None:
         st.error(f"เกิดข้อผิดพลาดในการประมวลผลไฟล์สรุปการจัดส่ง: {e}")
 
 # กรณีไม่มีการอัปโหลดไฟล์สรุป ให้ใช้ข้อมูลตัวอย่างจำลอง
-if df_customers.empty:
-    st.info("💡 กำลังแสดงข้อมูลจำลอง (Demo Data) เนื่องจากยังไม่ได้อัปโหลดไฟล์ 'รายงานสรุปการจัดส่งประจำวัน.xls'")
+if df_customers.empty and is_depot_selected:
     demo_data = [
         {"cust_id": "01705/3", "cust_name": "เฮอริเทจ สแน็ค แอนด์ ฟู้ด จำกัด", "target_qty": 6, "lat": 13.50813, "lon": 100.14182, "diff_gps": 6.01, "time_str": "08:43:00", "status": "จัดส่งตรงเวลา", "reason": "ลูกค้าอยู่บ้าน", "orig_seq": 1},
         {"cust_id": "113166/2", "cust_name": "ไทยยูเนี่ยน กรุ๊ป จำกัด (มหาชน)", "target_qty": 23, "lat": 13.50208, "lon": 100.13442, "diff_gps": 18.67, "time_str": "09:03:00", "status": "จัดส่งตรงเวลา", "reason": "ลูกค้าตั้งถัง", "orig_seq": 2},
@@ -262,139 +264,137 @@ if df_customers.empty:
     if total_target_qty == 0:
         total_target_qty = int(df_customers["target_qty"].sum())
 
-# หากเลือกสาขาเป็นค่าเริ่มต้น แจ้งเตือนให้ผู้ใช้งานเลือกสาขาก่อน
-if selected_depot == "-- กรุณาเลือกสาขาต้นทาง --":
-    st.warning("⚠️ กรุณาเลือก 'สาขาคลังสินค้าต้นทาง' ที่แถบเมนูด้านซ้าย เพื่อให้การคำนวณเส้นทางและพิกัดถูกต้องสมบูรณ์")
-
 # ----------------------------------------------------
-# 5. แสดงผลลัพธ์ผ่าน Tabs
+# 5. แสดงผลลัพธ์ผ่าน Tabs (ตรวจสอบเงื่อนไขการเลือกคลังสินค้าก่อน)
 # ----------------------------------------------------
-tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตามลำดับเวลาจริง (Actual Route)", "⚡ 2. เส้นทางที่เหมาะสมที่สุด (Optimized Route)"])
+if not is_depot_selected:
+    st.warning("⚠️ กรุณาเลือก **'สาขาคลังสินค้าต้นทาง'** ที่แถบเมนูด้านซ้าย เพื่อเริ่มต้นการคำนวณและแสดงผลแผนที่เส้นทาง")
+else:
+    tab1, tab2 = st.tabs(["🗺️ 1. แผนผังเส้นทางตามลำดับเวลาจริง (Actual Route)", "⚡ 2. เส้นทางที่เหมาะสมที่สุด (Optimized Route)"])
 
-with tab1:
-    st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (Actual Sequence)")
-    
-    col_f1, col_f2, col_f3 = st.columns(3)
-    with col_f1:
-        filter_status = st.multiselect("กรองตามสถานะจัดส่ง", options=df_customers["status"].unique() if not df_customers.empty else [], default=[])
-    with col_f2:
-        gps_outlier = st.checkbox("แสดงเฉพาะจุด GPS คลาดเคลื่อน > 100 เมตร")
-    with col_f3:
-        search_query = st.text_input("ค้นหารหัสหรือชื่อลูกค้า")
+    with tab1:
+        st.subheader("รายงานการจัดส่งตามลำดับเวลาจริง (Actual Sequence)")
         
-    filtered_df = df_customers.copy()
-    if filter_status:
-        filtered_df = filtered_df[filtered_df["status"].isin(filter_status)]
-    if gps_outlier:
-        filtered_df = filtered_df[filtered_df["diff_gps"] > 100]
-    if search_query:
-        filtered_df = filtered_df[filtered_df["cust_id"].str.contains(search_query, na=False) | filtered_df["cust_name"].str.contains(search_query, na=False)]
-
-    actual_coords = [[depot_lon, depot_lat]]
-    valid_actual_custs = filtered_df.dropna(subset=['lat', 'lon'])
-    for _, row in valid_actual_custs.iterrows():
-        actual_coords.append([row['lon'], row['lat']])
-        
-    act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
-    
-    m1_col, m2_col, m3_col = st.columns(3)
-    m1_col.metric("ยอดส่งสุทธิรวมทั้งหมด", f"{total_target_qty} ถัง")
-    m2_col.metric("ระยะทางรวม (Actual)", f"{act_dist:.2f} กม.")
-    m3_col.metric("เวลาเดินทางรวมโดยประมาณ", f"{act_dur:.1f} นาที")
-
-    # แสดงสรุปยอดแยกเที่ยว (ถ้ามี)
-    if trip_data_records:
-        st.markdown("#### 📦 สรุปยอดเบิก-คืน แยกตามเที่ยววิ่ง")
-        cols_trip = st.columns(len(trip_data_records))
-        for i, tr in enumerate(trip_data_records):
-            with cols_trip[i]:
-                st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
-    
-    # วาดแผนที่ตามโหมดที่เลือก
-    m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
-    folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
-    
-    if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
-        for idx, row in valid_actual_custs.iterrows():
-            folium.Marker(
-                [row['lat'], row['lon']],
-                popup=f"<b>{row['cust_id']}</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
-                icon=folium.Icon(color="blue", icon="info-sign")
-            ).add_to(m)
-    else:
-        # แสดงทีละพิกัดตามลำดับ (ทำ Selectbox เลือกดูทีละจุด หรือแสดงสเต็ปตามเส้นทาง)
-        selected_step = st.slider("เลือกดูลำดับจุดส่งบนแผนที่", 1, max(1, len(valid_actual_custs)), 1)
-        sub_valid_custs = valid_actual_custs.iloc[:selected_step]
-        for idx, row in sub_valid_custs.iterrows():
-            folium.Marker(
-                [row['lat'], row['lon']],
-                popup=f"<b>ลำดับที่ {idx+1} ({row['cust_id']})</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
-                icon=folium.Icon(color="blue", icon="info-sign")
-            ).add_to(m)
-        st.caption(f"กำลังแสดงหมุดพิกัดตั้งแต่จุดที่ 1 ถึง {selected_step}")
-        
-    if len(act_geom) > 1:
-        folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
-        
-    st_folium(m, width="100%", height=450)
-    
-    st.markdown("### ตารางรายละเอียดลูกค้า (Actual)")
-    st.dataframe(filtered_df, use_container_width=True)
-
-with tab2:
-    st.subheader("การจัดลำดับเส้นทางใหม่ให้อธิประสิทธิภาพสูงสุด (TSP Optimized Route)")
-    st.markdown("ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด เพื่อประหยัดระยะทางและน้ำมันสูงสุด")
-    
-    valid_opt_custs = df_customers.dropna(subset=['lat', 'lon']).copy()
-    
-    if not valid_opt_custs.empty:
-        optimized_list = optimize_route_tsp(depot_lat, depot_lon, valid_opt_custs)
-        df_optimized = pd.DataFrame(optimized_list)
-        
-        opt_coords = [[depot_lon, depot_lat]]
-        for _, row in df_optimized.iterrows():
-            opt_coords.append([row['lon'], row['lat']])
+        col_f1, col_f2, col_f3 = st.columns(3)
+        with col_f1:
+            filter_status = st.multiselect("กรองตามสถานะจัดส่ง", options=df_customers["status"].unique() if not df_customers.empty else [], default=[])
+        with col_f2:
+            gps_outlier = st.checkbox("แสดงเฉพาะจุด GPS คลาดเคลื่อน > 100 เมตร")
+        with col_f3:
+            search_query = st.text_input("ค้นหารหัสหรือชื่อลูกค้า")
             
-        opt_dist, opt_dur, opt_geom = get_osrm_route(opt_coords)
+        filtered_df = df_customers.copy()
+        if filter_status:
+            filtered_df = filtered_df[filtered_df["status"].isin(filter_status)]
+        if gps_outlier:
+            filtered_df = filtered_df[filtered_df["diff_gps"] > 100]
+        if search_query:
+            filtered_df = filtered_df[filtered_df["cust_id"].str.contains(search_query, na=False) | filtered_df["cust_name"].str.contains(search_query, na=False)]
+
+        actual_coords = [[depot_lon, depot_lat]]
+        valid_actual_custs = filtered_df.dropna(subset=['lat', 'lon'])
+        for _, row in valid_actual_custs.iterrows():
+            actual_coords.append([row['lon'], row['lat']])
+            
+        act_dist, act_dur, act_geom = get_osrm_route(actual_coords)
         
-        om1, om2, om3 = st.columns(3)
-        om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_dist:.2f} กม.", delta_color="inverse")
-        om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_dur:.1f} นาที", delta_color="inverse")
-        saved_km = max(0, act_dist - opt_dist)
-        om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
+        m1_col, m2_col, m3_col = st.columns(3)
+        m1_col.metric("ยอดส่งสุทธิรวมทั้งหมด", f"{total_target_qty} ถัง")
+        m2_col.metric("ระยะทางรวม (Actual)", f"{act_dist:.2f} กม.")
+        m3_col.metric("เวลาเดินทางรวมโดยประมาณ", f"{act_dur:.1f} นาที")
+
+        # แสดงสรุปยอดแยกเที่ยว (ถ้ามี)
+        if trip_data_records:
+            st.markdown("#### 📦 สรุปยอดเบิก-คืน แยกตามเที่ยววิ่ง")
+            cols_trip = st.columns(len(trip_data_records))
+            for i, tr in enumerate(trip_data_records):
+                with cols_trip[i]:
+                    st.info(f"**เที่ยวที่ {tr['trip']}**\n\n- ยอดเบิก: {tr['issue']} ถัง\n- ยอดคืน: {tr['return']} ถัง\n- ส่งสุทธิ: {tr['net']} ถัง")
         
-        m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
-        folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m_opt)
+        # วาดแผนที่ตามโหมดที่เลือก
+        m = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
+        folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m)
         
         if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
-            for step_idx, row in df_optimized.iterrows():
+            for idx, row in valid_actual_custs.iterrows():
                 folium.Marker(
                     [row['lat'], row['lon']],
-                    popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
-                    icon=folium.Icon(color="green", icon="ok-sign")
-                ).add_to(m_opt)
+                    popup=f"<b>{row['cust_id']}</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
+                    icon=folium.Icon(color="blue", icon="info-sign")
+                ).add_to(m)
         else:
-            selected_opt_step = st.slider("เลือกดูลำดับจุดส่ง Optimized บนแผนที่", 1, max(1, len(df_optimized)), 1, key="opt_slider")
-            sub_opt_custs = df_optimized.iloc[:selected_opt_step]
-            for step_idx, row in sub_opt_custs.iterrows():
+            selected_step = st.slider("เลือกดูลำดับจุดส่งบนแผนที่", 1, max(1, len(valid_actual_custs)), 1)
+            sub_valid_custs = valid_actual_custs.iloc[:selected_step]
+            for idx, row in sub_valid_custs.iterrows():
                 folium.Marker(
                     [row['lat'], row['lon']],
-                    popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
-                    icon=folium.Icon(color="green", icon="ok-sign")
-                ).add_to(m_opt)
-            st.caption(f"กำลังแสดงหมุดพิกัด Optimized ตั้งแต่จุดที่ 1 ถึง {selected_opt_step}")
+                    popup=f"<b>ลำดับที่ {idx+1} ({row['cust_id']})</b>: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}",
+                    icon=folium.Icon(color="blue", icon="info-sign")
+                ).add_to(m)
+            st.caption(f"กำลังแสดงหมุดพิกัดตั้งแต่จุดที่ 1 ถึง {selected_step}")
             
-        if len(opt_geom) > 1:
-            folium.PolyLine(opt_geom, color="green", weight=4, opacity=0.8).add_to(m_opt)
+        if len(act_geom) > 1:
+            folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
             
-        st_folium(m_opt, width="100%", height=450)
+        st_folium(m, width="100%", height=450)
         
-        st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
-        df_optimized['optimized_seq'] = range(1, len(df_optimized) + 1)
-        display_cols = ['optimized_seq', 'cust_id', 'cust_name', 'target_qty', 'time_str', 'status']
-        st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
-    else:
-        st.warning("ไม่พบข้อมูลพิกัด GPS สำหรับคำนวณเส้นทาง Optimized")
+        st.markdown("### ตารางรายละเอียดลูกค้า (Actual)")
+        st.dataframe(filtered_df, use_container_width=True)
+
+    with tab2:
+        st.subheader("การจัดลำดับเส้นทางใหม่ให้อธิประสิทธิภาพสูงสุด (TSP Optimized Route)")
+        st.markdown("ระบบจะทำการคำนวณเรียงลำดับจุดส่งใหม่โดยอ้างอิงพิกัดระยะทางที่ใกล้ที่สุด เพื่อประหยัดระยะทางและน้ำมันสูงสุด")
+        
+        valid_opt_custs = df_customers.dropna(subset=['lat', 'lon']).copy()
+        
+        if not valid_opt_custs.empty:
+            optimized_list = optimize_route_tsp(depot_lat, depot_lon, valid_opt_custs)
+            df_optimized = pd.DataFrame(optimized_list)
+            
+            opt_coords = [[depot_lon, depot_lat]]
+            for _, row in df_optimized.iterrows():
+                opt_coords.append([row['lon'], row['lat']])
+                
+            opt_dist, opt_dur, opt_geom = get_osrm_route(opt_coords)
+            
+            om1, om2, om3 = st.columns(3)
+            om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_dist:.2f} กม.", delta_color="inverse")
+            om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_dur:.1f} นาที", delta_color="inverse")
+            saved_km = max(0, act_dist - opt_dist)
+            om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
+            
+            m_opt = folium.Map(location=[depot_lat, depot_lon], zoom_start=12)
+            folium.Marker([depot_lat, depot_lon], popup=f"คลังสินค้า: {selected_depot}", icon=folium.Icon(color="red", icon="home")).add_to(m_opt)
+            
+            if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
+                for step_idx, row in df_optimized.iterrows():
+                    folium.Marker(
+                        [row['lat'], row['lon']],
+                        popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
+                        icon=folium.Icon(color="green", icon="ok-sign")
+                    ).add_to(m_opt)
+            else:
+                selected_opt_step = st.slider("เลือกดูลำดับจุดส่ง Optimized บนแผนที่", 1, max(1, len(df_optimized)), 1, key="opt_slider")
+                sub_opt_custs = df_optimized.iloc[:selected_opt_step]
+                for step_idx, row in sub_opt_custs.iterrows():
+                    folium.Marker(
+                        [row['lat'], row['lon']],
+                        popup=f"<b>ลำดับที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
+                        icon=folium.Icon(color="green", icon="ok-sign")
+                    ).add_to(m_opt)
+                st.caption(f"กำลังแสดงหมุดพิกัด Optimized ตั้งแต่จุดที่ 1 ถึง {selected_opt_step}")
+                
+            if len(opt_geom) > 1:
+                folium.PolyLine(opt_geom, color="green", weight=4, opacity=0.8).add_to(m_opt)
+                
+            st_folium(m_opt, width="100%", height=450)
+            
+            st.markdown("### ลำดับการจัดส่งใหม่ที่แนะนำ (Optimized Sequence)")
+            df_optimized['optimized_seq'] = range(1, len(df_optimized) + 1)
+            display_cols = ['optimized_seq', 'cust_id', 'cust_name', 'target_qty', 'time_str', 'status']
+            st.dataframe(df_optimized[[c for c in display_cols if c in df_optimized.columns]], use_container_width=True)
+        else:
+            st.warning("ไม่พบข้อมูลพิกัด GPS สำหรับคำนวณเส้นทาง Optimized")
 
 st.markdown("---")
 st.caption("Sprinkle Delivery Inspector System - พัฒนาด้วย Streamlit และ OSRM Routing")
