@@ -246,12 +246,10 @@ if file_summary is not None:
             
         df_customers = pd.DataFrame(data_rows)
         if not df_customers.empty:
-            # เรียงลำดับตามเวลาจัดส่ง (จากเวลาน้อยไปมาก)
             df_customers['time_parsed'] = pd.to_datetime(df_customers['time_str'], format='%H:%M:%S', errors='coerce')
             df_customers = df_customers.sort_values(by=['time_parsed', 'orig_seq']).reset_index(drop=True)
             df_customers['seq_time'] = range(1, len(df_customers) + 1)
             
-            # ตรวจสอบรอบการส่งจากยอดสะสม (Cumulative Sum) เทียบกับโควตาแต่ละเที่ยว
             df_customers['cum_qty'] = df_customers['target_qty'].cumsum()
             
             if trip_data_records:
@@ -269,7 +267,6 @@ if file_summary is not None:
                 
                 df_customers['trip'] = df_customers['cum_qty'].apply(assign_trip)
             else:
-                # Fallback หากไม่มีข้อมูลเที่ยววิ่ง กำหนดรอบละ 10 จุด หรือ 50 ถัง
                 df_customers['trip'] = np.clip((df_customers.index // 10) + 1, 1, len(trip_colors))
             
     except Exception as e:
@@ -330,7 +327,6 @@ with tab1:
         
         max_steps = max(1, len(valid_actual_custs))
         
-        # จัดการ Session State สำหรับ Play, Pause, Replay, Reset
         if "playback_step" not in st.session_state:
             st.session_state.playback_step = max_steps
         if "is_playing" not in st.session_state:
@@ -368,36 +364,51 @@ with tab1:
                 folium.PolyLine(act_geom, color="blue", weight=4, opacity=0.7).add_to(m)
         else:
             current_display_limit = st.session_state.playback_step
-            if current_display_limit > 1 and len(act_geom) > 1:
-                sub_coords = []
-                if depot_lat is not None and depot_lon is not None:
-                    sub_coords.append([depot_lon, depot_lat])
+            # วิ่งออกจากคลัง ไปตามพิกัดทีละจุด และกลับคลังเมื่อจบรอบ
+            if current_display_limit > 0 and depot_lat is not None and depot_lon is not None:
+                sub_coords = [[depot_lon, depot_lat]]
+                current_active_trip = 1
+                
                 for idx_sub, (_, row_sub) in enumerate(valid_actual_custs.iterrows()):
                     if idx_sub + 1 <= current_display_limit:
+                        trip_num = int(row_sub.get('trip', 1))
+                        # ถ้าขึ้นรอบใหม่ ให้แวะกลับคลังก่อนเริ่มรอบถัดไป
+                        if trip_num != current_active_trip:
+                            sub_coords.append([depot_lon, depot_lat])
+                            sub_coords.append([depot_lon, depot_lat])
+                            current_active_trip = trip_num
+                        
                         sub_coords.append([row_sub['lon'], row_sub['lat']])
+                
                 if len(sub_coords) >= 2:
                     _, _, sub_geom = get_osrm_route(sub_coords)
                     folium.PolyLine(sub_geom, color="blue", weight=4, opacity=0.7).add_to(m)
 
         for idx, (i, row) in enumerate(valid_actual_custs.iterrows()):
-            if idx + 1 <= current_display_limit:
-                is_latest = (idx + 1 == current_display_limit)
+            if map_view_mode == "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)" or idx + 1 <= current_display_limit:
+                is_latest = (idx + 1 == current_display_limit) and (map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)")
                 t_idx = int(row.get('trip', 1)) - 1
                 color_name = trip_colors[t_idx % len(trip_colors)]
+                seq_num = row.get('seq_time', idx + 1)
                 
-                if is_latest and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)":
+                if is_latest:
                     icon_symbol = "star"
                     icon_color = "red"
-                    popup_text = f"<b>🚨 จุดล่าสุด (ลำดับที่ {row.get('seq_time', idx+1)})</b><br>{row['cust_id']}: {row['cust_name']}<br>เวลา: {row['time_str']}<br>รอบที่: {row.get('trip', 1)}"
+                    popup_text = f"<b>🚨 จุดล่าสุด (ลำดับที่ {seq_num})</b><br>{row['cust_id']}: {row['cust_name']}<br>เวลา: {row['time_str']}<br>รอบที่: {row.get('trip', 1)}"
                 else:
                     icon_symbol = "info-sign"
                     icon_color = color_name
-                    popup_text = f"<b>ลำดับที่ {row.get('seq_time', idx+1)} (รอบที่ {row.get('trip', 1)})</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}"
+                    popup_text = f"<b>ลำดับที่ {seq_num} (รอบที่ {row.get('trip', 1)})</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง<br>เวลา: {row['time_str']}"
+
+                # แสดงป้ายตัวเลขลำดับที่บนพิกัดแผนที่
+                div_icon = folium.DivIcon(
+                    html=f'<div style="background-color: {color_name}; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{seq_num}</div>'
+                )
 
                 folium.Marker(
                     [row['lat'], row['lon']],
                     popup=popup_text,
-                    icon=folium.Icon(color=icon_color, icon=icon_symbol)
+                    icon=div_icon
                 ).add_to(m)
         
     st_folium(m, width="100%", height=450, key="map_tab1")
@@ -441,13 +452,16 @@ with tab2:
             for step_idx, row in df_optimized.iterrows():
                 if step_idx + 1 <= selected_opt_step:
                     is_latest_opt = (step_idx + 1 == selected_opt_step)
-                    icon_col = "red" if is_latest_opt and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)" else "green"
-                    sym = "star" if is_latest_opt and map_view_mode != "แสดงพิกัดทั้งหมดไว้เลย (ทุกจุด)" else "ok-sign"
+                    opt_seq_num = step_idx + 1
+                    
+                    div_icon_opt = folium.DivIcon(
+                        html=f'<div style="background-color: green; color: white; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 11px; border: 2px solid white;">{opt_seq_num}</div>'
+                    )
                     
                     folium.Marker(
                         [row['lat'], row['lon']],
-                        popup=f"<b>ลำดับ Optimized ที่ {step_idx+1}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
-                        icon=folium.Icon(color=icon_col, icon=sym)
+                        popup=f"<b>ลำดับ Optimized ที่ {opt_seq_num}</b><br>{row['cust_id']}: {row['cust_name']}<br>ยอดส่ง: {row['target_qty']} ถัง",
+                        icon=div_icon_opt
                     ).add_to(m_opt)
                 
             if len(opt_geom) > 1:
