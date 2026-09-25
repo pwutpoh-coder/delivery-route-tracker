@@ -54,7 +54,7 @@ def get_osrm_route(coords_list):
     except Exception:
         pass
     
-    # Fallback กรณี OSRM ไม่สำเร็จ
+    # Fallback กรณีเรียก OSRM ไม่สำเร็จ
     total_dist = 0
     for i in range(len(coords_list) - 1):
         total_dist += haversine(coords_list[i][1], coords_list[i][0], coords_list[i+1][1], coords_list[i+1][0])
@@ -93,7 +93,7 @@ st.markdown("---")
 
 st.sidebar.header("⚙️ 1. ตั้งค่าคลังสินค้า (Depot)")
 
-# กำหนดรายชื่อสาขาคลังสินค้าทั้ง 18 สาขา
+# กำหนดรายชื่อสาขาคลังสินค้าทั้ง 18 สาขา พร้อมพิกัด
 depot_options = {
     "-- กรุณาเลือกสาขาต้นทาง --": {"lat": None, "lon": None},
     "สาขาบางพลี": {"lat": 13.593901, "lon": 100.80256},
@@ -314,8 +314,8 @@ with tab2:
         opt_dist, opt_dur, opt_geom = get_osrm_route(opt_coords)
         
         om1, om2, om3 = st.columns(3)
-        om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_dist:.2f} กม.", delta_inverse=True)
-        om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_dur:.1f} นาที", delta_inverse=True)
+        om1.metric("ระยะทางหลังปรับปรุง (Optimized)", f"{opt_dist:.2f} กม.", delta=f"{opt_dist - act_dist:.2f} กม.", delta_color="inverse")
+        om2.metric("เวลาเดินทางหลังปรับปรุง", f"{opt_dur:.1f} นาที", delta=f"{opt_dur - act_dur:.1f} นาที", delta_color="inverse")
         saved_km = max(0, act_dist - opt_dist)
         om3.metric("ระยะทางที่ประหยัดได้", f"{saved_km:.2f} กม.")
         
