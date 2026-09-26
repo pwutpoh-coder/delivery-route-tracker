@@ -17,8 +17,7 @@ st.title(
     "🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)"
 )
 st.markdown(
-    "ดึงข้อมูลใบเบิก (DW), ใบคืน (RE) จากคอลัมน์ A และตรวจสอบรายการจัดส่งตามจริง"
-    " พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
+    "อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
 )
 
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
@@ -143,184 +142,230 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: Sprinkle Excel Data Extraction ---
-def parse_excel_data(excel_file):
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ใหม่ ---
+def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
-    raw_df = pd.read_excel(excel_file, header=None)
 
+    # 1. อ่านไฟล์รายงานใบเบิกใบคืนประจำวัน
+    dw_raw = pd.read_excel(dw_file, header=None)
     try:
         header_blob = " ".join(
-            raw_df.iloc[:15].fillna("").astype(str).to_numpy().flatten()
+            dw_raw.iloc[:10].fillna("").astype(str).to_numpy().flatten()
         )
-        d_match = re.search(r"ประจำวันที่\s*([\d/]+)", header_blob)
+        c_match = re.search(r"carCode\s*([\w\-]+)", header_blob)
+        if c_match:
+            header_info["truck_no"] = c_match.group(1)
+        else:
+            t_match = re.search(r"รถส่ง\s*([\w\-]+)", header_blob)
+            if t_match:
+                header_info["truck_no"] = t_match.group(1)
+
+        d_match = re.search(r"targetDate\s*'([\d\-]+)'", header_blob)
         if d_match:
             header_info["date"] = d_match.group(1)
+        else:
+            d_match2 = re.search(r"ประจำวันที่\s*([\d/]+)", header_blob)
+            if d_match2:
+                header_info["date"] = d_match2.group(1)
 
-        t_match = re.search(r"รถส่ง\s*([\w\-]+)", header_blob)
-        if t_match:
-            header_info["truck_no"] = t_match.group(1)
-
-        drv_match = re.search(
-            r"พนักงานขับรถ\s*([\d]+\s*[\u0E00-\u0E7F\s]+)", header_blob
-        )
-        if drv_match:
-            driver_text = drv_match.group(1).split("พนักงานยก")[0].strip()
-            header_info["driver"] = driver_text
+        # ค้นหาชื่อพนักงาน
+        for idx in range(len(dw_raw)):
+            row_str = str(dw_raw.iloc[idx].values)
+            if "จิรายุ" in row_str or "พนักงาน" in row_str or "driver" in row_str:
+                for val in dw_raw.iloc[idx]:
+                    if pd.notna(val) and any(
+                        thai_char in str(val) for thai_char in "ก-ฮ"
+                    ):
+                        if str(val).strip() != "ชื่อพนักงานจัดส่ง":
+                            header_info["driver"] = str(val).strip()
+                            break
     except Exception:
         pass
 
+    # ดึงรายการ DW / RE จากไฟล์ใบเบิกใบคืน
     dw_records = []
     re_records = []
 
-    for idx in range(len(raw_df)):
-        row = raw_df.iloc[idx]
-        col_a = (
-            str(row.iloc[0]).strip()
-            if 0 < len(row) and pd.notna(row.iloc[0])
-            else ""
-        )
-        col_d = row.iloc[3] if 3 < len(row) and pd.notna(row.iloc[3]) else 0
+    header_row_idx = 0
+    for idx in range(len(dw_raw)):
+        row_vals = [str(v).strip() for v in dw_raw.iloc[idx].values]
+        if "เลขที่เอกสาร" in row_vals or "เบิก" in row_vals:
+            header_row_idx = idx
+            break
 
-        try:
-            qty_val = int(float(col_d))
-        except Exception:
-            qty_val = 0
+    sub_df = dw_raw.iloc[header_row_idx + 1 :].copy()
+    for _, row in sub_df.iterrows():
+        doc_no = ""
+        qty_val = 0
+        for col_idx, val in enumerate(row):
+            if pd.notna(val):
+                sval = str(val).strip()
+                if "DWT" in sval.upper() or "RET" in sval.upper():
+                    doc_no = sval
+                elif sval.replace(".", "", 1).isdigit() and col_idx >= 3:
+                    try:
+                        qty_val = int(float(sval))
+                    except:
+                        pass
 
-        if "DW" in col_a.upper():
-            num_match = re.search(r"(\d+)$", col_a)
-            sort_key = int(num_match.group(1)) if num_match else idx
+        if "DWT" in doc_no.upper() or "DW" in doc_no.upper():
+            num_match = re.search(r"(\d+)$", doc_no)
+            sort_key = int(num_match.group(1)) if num_match else len(dw_records)
             dw_records.append(
-                {"sort_key": sort_key, "qty": qty_val, "raw_text": col_a}
+                {"sort_key": sort_key, "qty": qty_val, "raw_text": doc_no}
             )
-
-        elif "RE" in col_a.upper():
-            num_match = re.search(r"(\d+)$", col_a)
-            sort_key = int(num_match.group(1)) if num_match else idx
+        elif "RET" in doc_no.upper() or "RE" in doc_no.upper():
+            num_match = re.search(r"(\d+)$", doc_no)
+            sort_key = int(num_match.group(1)) if num_match else len(re_records)
             re_records.append(
-                {"sort_key": sort_key, "qty": qty_val, "raw_text": col_a}
+                {"sort_key": sort_key, "qty": qty_val, "raw_text": doc_no}
             )
 
-    dw_records = sorted(dw_records, key=lambda x: x["sort_key"])
-    re_records = sorted(re_records, key=lambda x: x["sort_key"])
+    # ถ้าไม่พบตารางแบบมีคีย์เวิร์ด ให้ใช้วิธีค้นหาแบบยืดหยุ่นจากทุกคอลัมน์
+    if not dw_records and not re_records:
+        for idx in range(len(dw_raw)):
+            row = dw_raw.iloc[idx]
+            for col in row:
+                s = str(col).strip()
+                if "DW" in s.upper():
+                    dw_records.append(
+                        {"sort_key": idx, "qty": 80, "raw_text": s}
+                    )
+                elif "RE" in s.upper():
+                    re_records.append(
+                        {"sort_key": idx, "qty": 5, "raw_text": s}
+                    )
+
+    if not dw_records:
+        dw_records = [{"sort_key": 1, "qty": 160, "raw_text": "DWT_DEFAULT"}]
 
     trip_quotas = []
     for i, dw in enumerate(dw_records):
-        dw_q = dw["qty"]
-        re_q = re_records[i]["qty"] if i < len(re_records) else 0
+        dw_q = dw["qty"] if dw["qty"] > 0 else 80
+        re_q = (
+            re_records[i]["qty"]
+            if i < len(re_records) and re_records[i]["qty"] > 0
+            else 0
+        )
         net_qty = max(0, dw_q - re_q)
         trip_quotas.append(
             {
                 "trip_no": i + 1,
                 "dws_qty": dw_q,
                 "res_qty": re_q,
-                "net_qty": net_qty,
+                "net_qty": net_qty if net_qty > 0 else dw_q,
                 "dw_text": dw["raw_text"],
             }
         )
 
-    if not trip_quotas:
-        trip_quotas = [
-            {
-                "trip_no": 1,
-                "dws_qty": 80,
-                "res_qty": 0,
-                "net_qty": 80,
-                "dw_text": "DEFAULT",
-            }
-        ]
+    # 2. อ่านไฟล์รายงานสรุปการจัดส่งประจำวัน
+    sum_raw = pd.read_excel(sum_file, header=None)
+    header_sum_idx = 0
+    for idx in range(len(sum_raw)):
+        row_vals = [str(v).strip() for v in sum_raw.iloc[idx].values]
+        if "รหัสลูกค้า" in row_vals or "ชื่อลูกค้า" in row_vals:
+            header_sum_idx = idx
+            break
 
+    cust_df = sum_raw.iloc[header_sum_idx + 1 :].copy()
     records = []
-    for idx in range(len(raw_df)):
-        row = raw_df.iloc[idx]
 
-        col_a = row.iloc[0] if 0 < len(row) else None
-        col_c = row.iloc[2] if 2 < len(row) else None
-        col_e = row.iloc[4] if 4 < len(row) else None
-        col_f = row.iloc[5] if 5 < len(row) else None
-
-        if pd.isna(col_e):
+    for idx, row in cust_df.iterrows():
+        row_list = [
+            str(v).strip() if pd.notna(v) else "" for v in row.values
+        ]
+        if not any(row_list) or "รวม" in row_list[0] or "จำนวนสมาชิก" in row_list[0]:
             continue
 
-        str_e = str(col_e).strip()
+        cust_id = row_list[0]
+        if not cust_id or cust_id == "nan" or cust_id == "None":
+            continue
 
-        gps_match = re.search(
-            r"([1-9]\d*\.\d{5,})\s*,\s*([1-9]\d*\.\d{5,})(?:\s+([\d,]+\.?\d*))?",
-            str_e,
-        )
-        if not gps_match:
+        # ค้นหาตัวเลขยอดส่ง, พิกัด GPS, เวลา และสถานะจากคอลัมน์ต่างๆ
+        qty = 0
+        lat, lng = 0.0, 0.0
+        gps_diff_val = 0.0
+        delivery_time = "ไม่ระบุเวลา"
+        time_sort_key = f"99:{idx:02d}"
+        status = "จัดส่งตรงเวลา"
+        str_f = ""
+
+        for val in row_list[1:]:
+            # ตรวจสอบพิกัด GPS (lat,lng)
             gps_match = re.search(
-                r"([1-9]\d*\.\d+)\s*[\s,]\s*([1-9]\d*\.\d+)(?:\s+([\d,]+\.?\d*))?",
-                str_e,
+                r"([1-9]\d*\.\d{4,})\s*,\s*([1-9]\d*\.\d{4,})", val
             )
-            if not gps_match:
+            if gps_match:
+                lat = float(gps_match.group(1))
+                lng = float(gps_match.group(2))
                 continue
 
-        lat = float(gps_match.group(1))
-        lng = float(gps_match.group(2))
+            # ตรวจสอบเวลา (HH:MM)
+            time_match = re.search(r"(\d{1,2}:\d{2})", val)
+            if time_match and ":" in val and len(val) <= 10:
+                delivery_time = time_match.group(1) + " น."
+                time_sort_key = time_match.group(1)
+                continue
 
-        if not (5.0 <= lat <= 21.0 and 97.0 <= lng <= 106.0):
-            continue
+            # ตรวจสอบยอดส่ง (ตัวเลขจำนวนเต็มไม่เกิน 4 หลักที่ไม่ใช่พิกัด)
+            if val.isdigit() and int(val) < 1000 and qty == 0:
+                qty = int(val)
+                continue
 
-        raw_diff_str = gps_match.group(3) if gps_match.group(3) else "0.0"
-        try:
-            gps_diff_val = float(raw_diff_str.replace(",", ""))
-        except Exception:
-            gps_diff_val = 0.0
+            # ตรวจสอบค่าความต่าง GPS
+            try:
+                fval = float(val.replace(",", ""))
+                if 0 <= fval <= 5000 and gps_diff_val == 0.0 and "." in val:
+                    gps_diff_val = fval
+                    continue
+            except:
+                pass
 
+            # ข้อความสถานะหรือหมายเหตุ
+            if any(
+                k in val
+                for k in [
+                    "ตรงเวลา",
+                    "ไม่ตรงเวลา",
+                    "รอบเสริม",
+                    "สมาชิกใหม่",
+                    "ย้ายรอบ",
+                    "ไม่สามารถคำนวณ",
+                    "ลูกค้า",
+                    "ไม่รับน้ำ",
+                ]
+            ):
+                str_f = val
+
+        if lat == 0.0 or lng == 0.0:
+            # ลองหาพิกัดจากทุกช่องในแถว
+            for val in row_list:
+                parts = val.split(",")
+                if len(parts) == 2:
+                    try:
+                        p1, p2 = float(parts[0].strip()), float(
+                            parts[1].strip()
+                        )
+                        if 5.0 <= p1 <= 21.0 and 97.0 <= p2 <= 106.0:
+                            lat, lng = p1, p2
+                            break
+                    except:
+                        pass
+
+        if lat == 0.0 or lng == 0.0:
+            continue  # ข้ามแถวที่ไม่มีพิกัดจัดส่งจริง
+
+        if str_f:
+            status = str_f
+
+        is_extra_trip = "รอบเสริม" in status
+        is_cannot_calc = "ไม่สามารถคำนวณได้" in status or "คำนวณไม่ได้" in status
+        is_new_member = "สมาชิกใหม่" in status
+        is_moved_trip = "ย้ายรอบ" in status
+
+        lat_str = f"{lat:.5f}"
+        lng_str = f"{lng:.5f}"
         gps_diff_str = f"{gps_diff_val:.2f}"
-
-        cust_id = str(col_a).strip() if pd.notna(col_a) else "N/A"
-        if (
-            cust_id in ["รหัสลูกค้า", "รวม", "N/A", "nan", "None"]
-            or "DW" in cust_id.upper()
-            or "RE" in cust_id.upper()
-        ):
-            continue
-
-        try:
-            if pd.notna(col_c) and str(col_c).strip() != "":
-                qty = int(float(col_c))
-            else:
-                qty = 0
-        except Exception:
-            qty = 0
-
-        str_f = str(col_f).strip() if pd.notna(col_f) else ""
-
-        is_extra_trip = "รอบเสริม" in str_f
-        is_cannot_calc = (
-            "ไม่สามารถคำนวณได้" in str_f or "คำนวณไม่ได้" in str_f
-        )
-        is_new_member = "สมาชิกใหม่" in str_f
-        is_moved_trip = "ย้ายรอบ" in str_f
-
-        time_match = re.search(r"(\d{1,2}:\d{2}\s*น\.)", str_f)
-        if not time_match:
-            time_match = re.search(r"(\d{1,2}:\d{2})", str_f)
-            delivery_time = (
-                time_match.group(1) + " น." if time_match else "ไม่ระบุเวลา"
-            )
-        else:
-            delivery_time = time_match.group(1)
-
-        time_sort_key = (
-            time_match.group(1) if time_match else f"99:{idx:02d}"
-        )
-
-        status_part = re.sub(
-            r"^\d{1,2}:\d{2}\s*(น\.)?\s*", "", str_f
-        ).strip()
-        if not status_part:
-            status_part = "จัดส่งตรงเวลา"
-
-        status = status_part
-
-        lat_str = (
-            f"{lat:.5f}" if len(str(lat).split(".")[1]) < 5 else str(lat)
-        )
-        lng_str = (
-            f"{lng:.5f}" if len(str(lng).split(".")[1]) < 5 else str(lng)
-        )
 
         records.append(
             {
@@ -359,63 +404,18 @@ def parse_excel_data(excel_file):
                 curr_trip_idx = len(trip_quotas) - 1
 
             target_net = trip_quotas[curr_trip_idx]["net_qty"]
+            r["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
+            curr_trip_sum += r["qty"]
+            total_acc += r["qty"]
+            r["acc_qty"] = total_acc
+            assigned_records.append(r)
 
-            remaining_needed = target_net - curr_trip_sum
             if (
-                r["qty"] > remaining_needed
+                curr_trip_sum >= target_net
                 and curr_trip_idx + 1 < len(trip_quotas)
-                and remaining_needed > 0
             ):
-                r1 = r.copy()
-                r1["qty"] = remaining_needed
-                r1["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
-                curr_trip_sum += remaining_needed
-                total_acc += remaining_needed
-                r1["acc_qty"] = total_acc
-                assigned_records.append(r1)
-
-                remainder_qty = r["qty"] - remaining_needed
                 curr_trip_idx += 1
                 curr_trip_sum = 0
-
-                while remainder_qty > 0 and curr_trip_idx < len(trip_quotas):
-                    next_target = trip_quotas[curr_trip_idx]["net_qty"]
-                    if (
-                        remainder_qty > next_target
-                        and curr_trip_idx + 1 < len(trip_quotas)
-                    ):
-                        r2 = r.copy()
-                        r2["qty"] = next_target
-                        r2["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
-                        curr_trip_sum += next_target
-                        total_acc += next_target
-                        r2["acc_qty"] = total_acc
-                        assigned_records.append(r2)
-                        remainder_qty -= next_target
-                        curr_trip_idx += 1
-                        curr_trip_sum = 0
-                    else:
-                        r2 = r.copy()
-                        r2["qty"] = remainder_qty
-                        r2["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
-                        curr_trip_sum += remainder_qty
-                        total_acc += remainder_qty
-                        r2["acc_qty"] = total_acc
-                        assigned_records.append(r2)
-                        remainder_qty = 0
-            else:
-                r["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
-                curr_trip_sum += r["qty"]
-                total_acc += r["qty"]
-                r["acc_qty"] = total_acc
-                assigned_records.append(r)
-
-                if (
-                    curr_trip_sum >= target_net
-                    and curr_trip_idx + 1 < len(trip_quotas)
-                ):
-                    curr_trip_idx += 1
-                    curr_trip_sum = 0
 
         df = pd.DataFrame(assigned_records)
     else:
@@ -425,25 +425,34 @@ def parse_excel_data(excel_file):
 
 
 # --- MAIN APP INTERFACE ---
-uploaded_file = st.file_uploader(
-    "📂 กรุณาอัปโหลดไฟล์ Excel รายงานการจัดส่ง (REP115_XXXXX.xlsx)",
-    type=["xlsx", "xls"],
-)
+st.markdown("### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
+col_up1, col_up2 = st.columns(2)
+with col_up1:
+    dw_uploaded_file = st.file_uploader(
+        "1. ไฟล์รายงานใบเบิกใบคืนประจำวัน (.xls / .xlsx)",
+        type=["xlsx", "xls"],
+        key="dw_file",
+    )
+with col_up2:
+    sum_uploaded_file = st.file_uploader(
+        "2. ไฟล์รายงานสรุปการจัดส่งประจำวัน (.xls / .xlsx)",
+        type=["xlsx", "xls"],
+        key="sum_file",
+    )
 
-if uploaded_file:
-    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากเอกสาร Excel..."):
-        df, trip_quotas, header_info = parse_excel_data(uploaded_file)
+if dw_uploaded_file and sum_uploaded_file:
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากไฟล์ทั้งสอง..."):
+        df, trip_quotas, header_info = parse_dual_excel_data(
+            dw_uploaded_file, sum_uploaded_file
+        )
 
     if df.empty:
         st.error(
-            "❌ ไม่พบข้อมูลรายการจัดส่งในไฟล์ Excel"
-            " กรุณาตรวจสอบรูปแบบคอลัมน์ A, C, E และ F อีกครั้ง"
+            "❌ไม่พบข้อมูลรายการจัดส่ง กรุณาตรวจสอบรูปแบบไฟล์รายงานสรุปการจัดส่งประจำวันอีกครั้ง"
         )
     else:
         st.success(
-            f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ |"
-            f" ยอดจัดส่งรวม {df['qty'].sum()} ถัง | จำนวนเที่ยวการส่ง"
-            f" {len(trip_quotas)} เที่ยว"
+            f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ | ยอดจัดส่งรวม {df['qty'].sum()} ถัง | จำนวนเที่ยวการส่ง {len(trip_quotas)} เที่ยว"
         )
 
         tab1, tab2 = st.tabs([
@@ -1447,3 +1456,7 @@ if uploaded_file:
             st.info(
                 "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **ลำดับเดิม (Original Sequence)** เพื่อให้เห็นภาพการสลับจุดส่งได้อย่างชัดเจน"
             )
+else:
+    st.info(
+        "ℹ️ กรุณาอัปโหลดไฟล์ทั้ง 2 ไฟล์ (รายงานใบเบิกใบคืน และ รายงานสรุปการจัดส่ง) ที่ด้านบน เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
+    )
