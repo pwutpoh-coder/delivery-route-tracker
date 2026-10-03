@@ -276,6 +276,9 @@ def parse_dual_excel_data(dw_file, sum_file):
         if not cust_id or cust_id == "nan" or cust_id == "None":
             continue
 
+        # ดึงข้อมูลชื่อลูกค้าจากคอลัมน์ B (index 1)
+        cust_name = row_list[1] if len(row_list) > 1 and row_list[1] != "" else "-"
+
         qty = 0
         if len(row_list) > 2 and row_list[2] != "":
             try:
@@ -363,6 +366,7 @@ def parse_dual_excel_data(dw_file, sum_file):
             {
                 "excel_idx": idx,
                 "cust_id": cust_id,
+                "cust_name": cust_name,
                 "qty": qty,
                 "lat": lat,
                 "lng": lng,
@@ -547,6 +551,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         else:
                             info = {
                                 "cust_id": "WH-001",
+                                "cust_name": "คลังสินค้า",
                                 "time": "จบเที่ยววิ่ง",
                                 "qty": 0,
                                 "gps_diff": "0.00",
@@ -622,6 +627,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 "inc_time",
                 "trip",
                 "cust_id",
+                "cust_name",
                 "qty",
                 "acc_qty",
                 "inc_dist",
@@ -639,19 +645,20 @@ if dw_uploaded_file and sum_uploaded_file:
             disp_df.columns = [
                 "ลำดับ",
                 "เวลาส่ง",
-                "เวลาจากจุดก่อนหน้า",
-                "เที่ยวส่ง",
-                "รหัสสมาชิก",
+                "ช่วงเวลา",
+                "เที่ยว",
+                "รหัสลูกค้า",
+                "ชื่อลูกค้า",
                 "ยอดส่ง (ถัง)",
-                "ยอดส่งสะสม",
-                "ระยะทางจากจุดก่อนหน้า (กม.)",
-                "สถานะการส่ง",
-                "จัดส่งตรงเวลา (คอลัมน์ G)",
-                "เหตุขาดส่ง (คอลัมน์ H)",
-                "Latitude",
-                "Longitude",
-                "ค่าความต่าง GPS",
-                "สรุปการแจ้งเตือน",
+                "ยอดสะสม",
+                "ระยะทาง (กม.)",
+                "สถานะ",
+                "ตรงเวลา (G)",
+                "เหตุขาดส่ง (H)",
+                "Lat",
+                "Lng",
+                "ผลต่าง GPS",
+                "หมายเหตุ",
             ]
 
             st.dataframe(
@@ -989,7 +996,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#7F8C8D;">คำนวณไม่ได้</span>`);
                         if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#D35400;">ย้ายรอบ</span>`);
 
-                        return `<div style="font-family:sans-serif; font-size:12px;"><b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>${{badgesHtml.join(' ')}}<br><b>เวลา:</b> ${{info.time}}<br><b>รหัส:</b> ${{info.cust_id}}<br><b>ยอดส่ง:</b> ${{info.qty}} ถัง<br><b>คอลัมน์ G:</b> ${{info.on_time_col || '-'}}<br><b>คอลัมน์ H (เหตุขาดส่ง):</b> ${{info.short_reason_col || '-'}}</div>`;
+                        return `<div style="font-family:sans-serif; font-size:12px;"><b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>${{badgesHtml.join(' ')}}<br><b>เวลา:</b> ${{info.time}}<br><b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})<br><b>ยอดส่ง:</b> ${{info.qty}} ถัง<br><b>ตรงเวลา (G):</b> ${{info.on_time_col || '-'}}<br><b>เหตุขาดส่ง (H):</b> ${{info.short_reason_col || '-'}}</div>`;
                     }}
 
                     function createMarkerIcon(seqNum, color, ptInfo) {{
@@ -1017,9 +1024,8 @@ if dw_uploaded_file and sum_uploaded_file:
                                 let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
                                 let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }});
                                 
-                                // ถ้าเลือกแบบที่ 2 และจุดนี้เกินกว่าขั้นตอนปัจจุบัน ให้ซ่อนหมุดไว้ก่อน
                                 if (!isMode1 && idx > currentStep) {{
-                                    // ไม่เพิ่มลง map ทันที จะเพิ่มเฉพาะจุดที่ผ่านมาแล้ว
+                                    // ซ่อนไว้ก่อน
                                 }} else {{
                                     marker.addTo(map);
                                 }}
@@ -1111,15 +1117,16 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         let timeLabel = info.time || '-';
                         let custIdLabel = info.cust_id || '-';
+                        let custNameLabel = info.cust_name || '-';
                         let qtyLabel = info.qty !== undefined ? info.qty : 0;
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
                         document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | รหัสลูกค้า: <span style="color:#64ffda;">${{custIdLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | พิกัด: ${{info.lat_display}}, ${{info.lng_display}} | สถานะ: ${{info.status}}
+                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | สถานะ: ${{info.status}}
                         `;
 
-                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - รหัส: <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}} | ยอด ${{qtyLabel}} ถัง)`;
+                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - ลูกค้า: <span style="color:#0055FF;">${{custIdLabel}} (${{custNameLabel}})</span> (จุด ${{pointNumText}})`;
 
                         activePolylines.forEach(p => map.removeLayer(p));
                         activePolylines = [];
@@ -1133,7 +1140,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             activePolylines.push(polyline);
                         }}
 
-                        // หากเป็นแบบที่ 2 ให้จัดการเพิ่ม/ลบหมุดบนแผนที่ตามขั้นตอนปัจจุบันทันที
                         if (!isMode1) {{
                             allMarkers.forEach((marker, mIdx) => {{
                                 if (marker) {{
@@ -1152,9 +1158,9 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         document.getElementById('info-box').innerHTML = `
                             <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
-                            <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 รหัสสมาชิก:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}}</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
-                            <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                            <b>📝 เหตุขาดส่ง (คอลัมน์ H):</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
+                            <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span><br>
+                            <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
+                            <b>📝 เหตุขาดส่ง (H):</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
                             <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
                         `;
 
@@ -1180,7 +1186,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function startAnimation() {{
                         if (isPlaying) return;
                         isPlaying = true;
-                        document.getElementById('status-text').innerText = "▶️ กำลังวิ่งจำลองเส้นทาง...";
+                        document.getElementById('status-text').innerText = "▶️️ กำลังวิ่งจำลองเส้นทาง...";
                         updateStep(currentStep);
                         animTimer = setInterval(nextStep, currentSpeedMs);
                     }}
@@ -1188,7 +1194,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function pauseAnimation() {{
                         isPlaying = false;
                         if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
-                        document.getElementById('status-text').innerText = "⏸️️ หยุดพักการจำลอง";
+                        document.getElementById('status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
                     function resetAnimation() {{
@@ -1302,6 +1308,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     detailed_swap_records.append({
                         "เที่ยวส่ง": trip_name,
                         "รหัสลูกค้า": opt_item["cust_id"],
+                        "ชื่อลูกค้า": opt_item["cust_name"],
                         "ลำดับเดิม": orig_idx + 1,
                         "ลำดับใหม่ (Optimized)": idx + 1,
                         "สถานะการสลับ": (
@@ -1343,6 +1350,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         if i < len(opt_records)
                         else {
                             "cust_id": "WH-001",
+                            "cust_name": "คลังสินค้า",
                             "time": "จบเที่ยววิ่ง",
                             "qty": 0,
                             "status": "เข้าคลัง",
@@ -1487,7 +1495,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             }});
 
                             L.marker(lastPt, {{icon: customIcon}}).addTo(optMap)
-                                .bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}}<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
+                                .bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
                         }}
                     }});
                 </script>
