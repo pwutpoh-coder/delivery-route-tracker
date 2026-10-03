@@ -146,7 +146,6 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
 
-    # 1. อ่านไฟล์รายงานใบเบิกใบคืนประจำวัน
     dw_raw = pd.read_excel(dw_file, header=None)
     try:
         header_blob = " ".join(
@@ -255,7 +254,6 @@ def parse_dual_excel_data(dw_file, sum_file):
             }
         )
 
-    # 2. อ่านไฟล์รายงานสรุปการจัดส่งประจำวัน
     sum_raw = pd.read_excel(sum_file, header=None)
     header_sum_idx = 0
     for idx in range(len(sum_raw)):
@@ -278,7 +276,6 @@ def parse_dual_excel_data(dw_file, sum_file):
         if not cust_id or cust_id == "nan" or cust_id == "None":
             continue
 
-        # ใช้ข้อมูลคอลัมน์ C (index 2) สำหรับยอดส่งของลูกค้าแต่ละราย (ถ้าเป็น 0 หรือว่าง ให้ใช้ 0)
         qty = 0
         if len(row_list) > 2 and row_list[2] != "":
             try:
@@ -916,6 +913,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     const segments = {segments_json};
                     const warehouse = {wh_json};
                     let currentSpeedMs = {anim_speed_ms};
+                    const isMode1 = {str(is_mode_1).lower()};
 
                     let currentFilter = 'ALL';
                     let currentStatusFilter = null;
@@ -930,7 +928,6 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     let allMarkers = [];
                     let activePolylines = [];
-                    let stepMarkers = [];
                     let currentStep = 0;
                     let animTimer = null;
                     let isPlaying = false;
@@ -1018,7 +1015,15 @@ if dw_uploaded_file and sum_uploaded_file:
                             if (pointMatchesFilter(pt)) {{
                                 let seqNumber = idx + 1;
                                 let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
-                                let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }}).addTo(map);
+                                let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }});
+                                
+                                // ถ้าเลือกแบบที่ 2 และจุดนี้เกินกว่าขั้นตอนปัจจุบัน ให้ซ่อนหมุดไว้ก่อน
+                                if (!isMode1 && idx > currentStep) {{
+                                    // ไม่เพิ่มลง map ทันที จะเพิ่มเฉพาะจุดที่ผ่านมาแล้ว
+                                }} else {{
+                                    marker.addTo(map);
+                                }}
+                                
                                 marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
                                 allMarkers[idx] = marker;
                             }}
@@ -1128,6 +1133,21 @@ if dw_uploaded_file and sum_uploaded_file:
                             activePolylines.push(polyline);
                         }}
 
+                        // หากเป็นแบบที่ 2 ให้จัดการเพิ่ม/ลบหมุดบนแผนที่ตามขั้นตอนปัจจุบันทันที
+                        if (!isMode1) {{
+                            allMarkers.forEach((marker, mIdx) => {{
+                                if (marker) {{
+                                    let ptInfo = points[mIdx];
+                                    let matches = pointMatchesFilter(ptInfo);
+                                    if (matches && mIdx <= currentStep) {{
+                                        if (!map.hasLayer(marker)) marker.addTo(map);
+                                    }} else {{
+                                        if (map.hasLayer(marker)) map.removeLayer(marker);
+                                    }}
+                                }}
+                            }});
+                        }}
+
                         highlightMarkerByInfo(info);
 
                         document.getElementById('info-box').innerHTML = `
@@ -1168,7 +1188,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function pauseAnimation() {{
                         isPlaying = false;
                         if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
-                        document.getElementById('status-text').innerText = "⏸️ หยุดพักการจำลอง";
+                        document.getElementById('status-text').innerText = "⏸️️ หยุดพักการจำลอง";
                     }}
 
                     function resetAnimation() {{
