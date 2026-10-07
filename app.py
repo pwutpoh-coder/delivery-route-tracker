@@ -156,7 +156,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
 
 # --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (รองรับ Split บรรทัด และ 0 ถังคาบเกี่ยว) ---
 def parse_dual_excel_data(dw_file, sum_file):
-    header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
+    header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ"}
 
     dw_raw = pd.read_excel(dw_file, header=None)
     try:
@@ -178,17 +178,6 @@ def parse_dual_excel_data(dw_file, sum_file):
             d_match2 = re.search(r"ประจำวันที่\s*([\d/]+)", header_blob)
             if d_match2:
                 header_info["date"] = d_match2.group(1)
-
-        for idx in range(len(dw_raw)):
-            row_str = str(dw_raw.iloc[idx].values)
-            if "จิรายุ" in row_str or "พนักงาน" in row_str or "driver" in row_str:
-                for val in dw_raw.iloc[idx]:
-                    if pd.notna(val) and any(
-                        thai_char in str(val) for thai_char in "ก-ฮ"
-                    ):
-                        if str(val).strip() != "ชื่อพนักงานจัดส่ง":
-                            header_info["driver"] = str(val).strip()
-                            break
     except Exception:
         pass
 
@@ -566,10 +555,10 @@ if dw_uploaded_file and sum_uploaded_file:
 
         with tab1:
             st.subheader("📌 ข้อมูลสรุปการปฏิบัติงานตามเวลาจริง")
-            c1, c2, c3, c4 = st.columns(4)
+            # ปรับเป็น 3 คอลัมน์ (เอาส่วนพนักงานขับรถออก)[cite: 4]
+            c1, c2, c3 = st.columns(3)
             c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
             c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
-            c3.info(f"👨‍✈️ **พนักงานขับรถ:** {header_info['driver']}")
 
             trip_colors = {
                 "เที่ยวที่ 1": "#0055FF",
@@ -686,7 +675,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 total_day_distance = round(sum(trip_distances.values()), 2)
 
-            c4.success(
+            c3.success(
                 f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม."
             )
 
@@ -1530,7 +1519,7 @@ if dw_uploaded_file and sum_uploaded_file:
             st.info(
                 f"""
 **สรุปผลการวิเคราะห์โครงสร้างเส้นทาง:**
-1. **การลดปัญหาการวิ่งย้อนกลับ (Backtracking):** ในลำดับตามเวลาจริง (เดิม) พนักงานมักจัดส่งตามเวลาที่ลูกค้าสะดวกหรือตามคิวเอกสาร ซึ่งทำให้รถต้องวิ่งผ่านจุดที่อยู่ไกลก่อน แล้วค่อยย้อนกลับมาส่งจุดที่อยู่ใกล้คลังสินค้าในภายหลัง เมื่อระบบจัดเรียงใหม่ด้วยวิธีเลือกจุดที่ใกล้ที่สุดถัดไป (Nearest Neighbor) จึงตัดรอบการวิ่งซ้ำซ้อนบนถนนเส้นเดิมออกไปได้
+1. **การลดปัญหาการวิ่งย้อนกลับ (Backtracking):** ในลำดับตามเวลาจริง (เดิม) พนักงานมักจัดส่งตามเวลาที่ลูกค้าสะดวกหรือตามคิวเอกสาร ทำให้รถต้องวิ่งผ่านจุดที่อยู่ไกลก่อน แล้วค่อยย้อนกลับมาส่งจุดที่อยู่ใกล้คลังสินค้าในภายหลัง เมื่อระบบจัดเรียงใหม่ด้วยวิธีเลือกจุดที่ใกล้ที่สุดถัดไป (Nearest Neighbor) จึงตัดรอบการวิ่งซ้ำซ้อนบนถนนเส้นเดิมออกไปได้
 2. **การจัดกลุ่มเชิงพื้นที่ (Spatial Clustering):** พิกัดที่มีระยะทางทางภูมิศาสตร์ใกล้เคียงกันถูกร้อยเรียงเป็นเส้นทางต่อเนื่องกันทันที ทำให้ระยะห่างระหว่างจุดส่งในแต่ละช่วงสั้นลงอย่างเห็นได้ชัด
 3. **ผลลัพธ์เชิงตัวเลข:** สามารถลดระยะทางรวมลงได้ **{total_dist_diff:.2f} กม.** (คิดเป็น **{total_pct_saving:.2f}%**) โดยมีการปรับสลับตำแหน่งเพียง **{total_swapped_points} จาก {total_points_count} จุด** ซึ่งช่วยรักษาโครงสร้างเวลาเดิมไว้ได้ใกล้เคียงที่สุดแต่ประหยัดน้ำมันและเวลาขนส่งมากกว่าเดิม
             """
