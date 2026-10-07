@@ -1412,4 +1412,134 @@ if dw_uploaded_file and sum_uploaded_file:
                 else 0.0
             )
 
-            st.markdown("### 📊 3. สรุปเปรียบเทียบระยะทางและลำดับ (แบบที่
+            st.markdown("### 📊 3. สรุปเปรียบเทียบระยะทางและลำดับ (แบบที่ 1 vs แบบที่ 2)")
+            col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+            col_a1.metric(
+                "ระยะทางเดิมรวม (แบบที่ 1)", f"{total_orig_dist_all:.2f} กม."
+            )
+            col_a2.metric(
+                "ระยะทางหลังปรับปรุง (แบบที่ 2)",
+                f"{total_opt_dist_all:.2f} กม.",
+                delta=f"-{total_dist_diff:.2f} กม.",
+                delta_color="inverse",
+            )
+            col_a3.metric("ประสิทธิภาพการประหยัด", f"{total_pct_saving:.2f}%")
+            col_a4.metric(
+                "การสลับลำดับรวม",
+                f"{total_swapped_points} / {total_points_count} จุด",
+                delta=f"{(total_swapped_points/total_points_count*100):.1f}% ของจุดทั้งหมด",
+            )
+
+            st.markdown("#### 📋 ตารางเปรียบเทียบระยะทางแยกตามเที่ยวการส่ง")
+            st.table(pd.DataFrame(optimized_comparison_data))
+
+            st.markdown(
+                "#### 🔄 ตารางเปรียบเทียบการสลับลำดับจุดส่ง (เทียบแบบที่ 2 กับ แบบที่ 1)"
+            )
+            st.dataframe(
+                pd.DataFrame(detailed_swap_records),
+                use_container_width=True,
+                height=300,
+                hide_index=True,
+            )
+
+            st.markdown("### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map)")
+            opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
+
+            opt_map_html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8" />
+                <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                <style>
+                    #opt-map {{ width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                    .opt-legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; }}
+                    .opt-color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                    
+                    .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
+                    .opt-marker-container {{ position: relative; width: 32px; height: 32px; }}
+
+                    .opt-number-icon {{
+                        color: #FFFFFF !important;
+                        border: 2px solid #FFFFFF !important;
+                        border-radius: 50% !important;
+                        text-align: center !important;
+                        font-weight: bold !important;
+                        font-size: 12px !important;
+                        line-height: 26px !important;
+                        width: 30px !important;
+                        height: 30px !important;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.6) !important;
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        box-sizing: border-box !important;
+                    }}
+
+                    .opt-orig-badge {{
+                        position: absolute; top: -8px; right: -12px;
+                        background-color: #333333; color: #FFD700; border: 1.5px solid white;
+                        border-radius: 10px; padding: 0 4px; font-size: 9px; font-weight: bold;
+                        box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
+                        white-space: nowrap;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="opt-legend">
+                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#0055FF;"></span> เที่ยว 1 (Optimized)</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#FF0055;"></span> เที่ยว 2 (Optimized)</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#00AA44;"></span> เที่ยว 3 (Optimized)</div>
+                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาของหมุดคือ <b>"ลำดับเดิม"</b> จากแผนที่แรก</div>
+                </div>
+                <div id="opt-map"></div>
+                <script>
+                    const optWarehouse = {wh_json};
+                    const optSegments = {opt_segments_json};
+
+                    const optMap = L.map('opt-map').setView([optWarehouse[0], optWarehouse[1]], 13);
+                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                        attribution: '© OpenStreetMap contributors'
+                    }}).addTo(optMap);
+
+                    L.marker(optWarehouse).addTo(optMap)
+                        .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
+
+                    optSegments.forEach(seg => {{
+                        if (seg.path && seg.path.length > 1) {{
+                            L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                        }}
+                        let lastPt = seg.path[Math.floor(seg.path.length / 2)];
+                        if (lastPt && seg.info && seg.info.cust_id && seg.info.cust_id !== "WH-001") {{
+                            let optSeq = seg.opt_seq;
+                            let origSeq = seg.orig_seq;
+                            
+                            let origBadgeHtml = `<div class="opt-orig-badge">เดิม: ${{origSeq}}</div>`;
+                            let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
+                            
+                            let customIcon = L.divIcon({{
+                                className: '',
+                                html: innerHtml,
+                                iconSize: [32, 32], iconAnchor: [16, 16]
+                            }});
+
+                            L.marker(lastPt, {{icon: customIcon}}).addTo(optMap)
+                                .bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
+                        }}
+                    }});
+                </script>
+            </body>
+            </html>
+            """
+
+            st.components.v1.html(opt_map_html, height=550, scrolling=False)
+
+            st.info(
+                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **ลำดับเดิม (Original Sequence)** โดยอัลกอริทึมได้ทำการประมวลผลจากเส้นทางจริงและปรับลดระยะทางให้สั้นกว่าเดิมโดยสลับลำดับเวลาน้อยที่สุด"
+            )
+else:
+    st.info(
+        "ℹ️ กรุณาอัปโหลดไฟล์ทั้ง 2 ไฟล์ (รายงานใบเบิกใบคืน และ รายงานสรุปการจัดส่ง) ที่ด้านบน เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
+    )
