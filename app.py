@@ -1240,6 +1240,7 @@ if dw_uploaded_file and sum_uploaded_file:
             grouped_opt = df.groupby("trip", sort=False)
             opt_segments_data = []
             all_opt_points_flat = []
+
             global_opt_seq_counter = 1
 
             for trip_name, group in grouped_opt:
@@ -1315,8 +1316,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         "รหัสลูกค้า": opt_item["cust_id"],
                         "ชื่อลูกค้า": opt_item["cust_name"],
                         "ลำดับเดิม": orig_idx + 1,
-                        "ลำดับใหม่ (Optimized)": global_opt_seq_counter
-                        + idx,  # แสดงลำดับภาพรวมหรือลำดับในเที่ยว
+                        "ลำดับใหม่ (Optimized)": global_opt_seq_counter,
                         "สถานะการสลับ": (
                             "🔄 สลับตำแหน่ง"
                             if idx != orig_idx
@@ -1419,13 +1419,17 @@ if dw_uploaded_file and sum_uploaded_file:
                 delta=f"{(total_swapped_points/total_points_count*100):.1f}% ของจุดทั้งหมด",
             )
 
-            # --- เพิ่มกล่องสรุปสาเหตุที่แนะนำเส้นทางใหม่สั้นลง ---
+            # --- เพิ่มส่วนสรุปสาเหตุเชิงรูปธรรม (ไม่ใช่นามธรรม) ---
             st.markdown(
-                """
-                > 💡 **สรุปสาเหตุที่เส้นทางแนะนำ (แบบที่ 2) มีระยะทางสั้นลง:**
-                > 1. **ลดการวิ่งวกวนและข้ามโซน (Cross-zone Reduction):** การจัดเรียงตามลำดับเวลาจริง (แบบที่ 1) มักทำให้รถต้องวิ่งย้อนกลับไปมาตามช่วงเวลาที่ลูกค้าโทรสั่งหรือเวลาบันทึก แต่วิธีนี้ช่วยจัดกลุ่มจุดส่งที่อยู่ใกล้กันให้อยู่ในเส้นทางเดียวกันต่อเนื่องทันที
-                > 2. **อัลกอริทึมเลือกจุดใกล้สุดถัดไป (Nearest Neighbor Heuristic):** คำนวณระยะทางแบบจุดต่อจุดจากพิกัดจริง ทำให้หลีกเลี่ยงการหักเลี้ยวหรือการขับผ่านเส้นทางซ้ำซ้อน ส่งผลให้ประหยัดระยะทางรวมและน้ำมันเชื้อเพลิงได้อย่างมีประสิทธิภาพ
-                """
+                "#### 🔍 วิเคราะห์สาเหตุและเหตุผลเชิงรูปธรรม (ทำไมเส้นทางใหม่ถึงสั้นลง?)"
+            )
+            st.info(
+                f"""
+**สรุปผลการวิเคราะห์โครงสร้างเส้นทาง:**
+1. **การลดปัญหาการวิ่งย้อนกลับ (Backtracking):** ในลำดับตามเวลาจริง (เดิม) พนักงานมักจัดส่งตามเวลาที่ลูกค้าสะดวกหรือตามคิวเอกสาร ซึ่งทำให้รถต้องวิ่งผ่านจุดที่อยู่ไกลก่อน แล้วค่อยย้อนกลับมาส่งจุดที่อยู่ใกล้คลังสินค้าในภายหลัง เมื่อระบบจัดเรียงใหม่ด้วยวิธีเลือกจุดที่ใกล้ที่สุดถัดไป (Nearest Neighbor) จึงตัดรอบการวิ่งซ้ำซ้อนบนถนนเส้นเดิมออกไปได้
+2. **การจัดกลุ่มเชิงพื้นที่ (Spatial Clustering):** พิกัดที่มีระยะทางทางภูมิศาสตร์ใกล้เคียงกันถูกร้อยเรียงเป็นเส้นทางต่อเนื่องกันทันที ทำให้ระยะห่างระหว่างจุดส่ง (Euclidean & Network Distance) ในแต่ละช่วงสั้นลงอย่างเห็นได้ชัด
+3. **ผลลัพธ์เชิงตัวเลข:** สามารถลดระยะทางรวมลงได้ **{total_dist_diff:.2f} กม.** (คิดเป็น **{total_pct_saving:.2f}%**) โดยมีการปรับสลับตำแหน่งเพียง **{total_swapped_points} จาก {total_points_count} จุด** ซึ่งช่วยรักษาโครงสร้างเวลาเดิมไว้ได้ใกล้เคียงที่สุดแต่ประหยัดน้ำมันและเวลาขนส่งมากกว่าเดิม
+            """
             )
 
             st.markdown("#### 📋 ตารางเปรียบเทียบระยะทางแยกตามเที่ยวการส่ง")
@@ -1525,7 +1529,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
                     <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
                     <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
-                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาแสดง <b>"ลำดับเดิม (ตัวเลขล้วน)"</b></div>
+                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาคือ <b>"ลำดับเดิม"</b></div>
                 </div>
 
                 <div class="opt-controls">
@@ -1574,7 +1578,6 @@ if dw_uploaded_file and sum_uploaded_file:
                                 let optSeq = seg.opt_seq;
                                 let origSeq = seg.orig_seq;
                                 
-                                // ป้ายสีดำแสดงเฉพาะตัวเลขลำดับเดิม
                                 let origBadgeHtml = `<div class="opt-orig-badge">${{origSeq}}</div>`;
                                 let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
                                 
@@ -1705,7 +1708,7 @@ if dw_uploaded_file and sum_uploaded_file:
             st.components.v1.html(opt_map_html, height=620, scrolling=False)
 
             st.info(
-                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** วิ่งต่อเนื่องตั้งแต่ต้นจนจบ และป้ายสีดำมุมบนขวาแสดง **ลำดับเดิมที่เป็นตัวเลขล้วน** พร้อมปุ่มจำลองการทำงานครบถ้วน"
+                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องข้ามเที่ยวตั้งแต่ต้นจนจบ และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **เฉพาะตัวเลขลำดับเดิม** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
             )
 else:
     st.info(
