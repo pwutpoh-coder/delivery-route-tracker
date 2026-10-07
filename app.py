@@ -1220,61 +1220,15 @@ if dw_uploaded_file and sum_uploaded_file:
         # --- TAB 2: เปรียบเทียบเส้นทางเหมาะสมที่สุด (Optimized Route & Maps) ---
         with tab2:
             st.subheader(
-                "🚀 2. แผนที่และเส้นทางที่เหมาะสมที่สุด (Optimized Route / 2-opt Heuristic)"
+                "🚀 2. แผนที่และเส้นทางที่เหมาะสมที่สุด (Optimized Route / TSP Heuristic)"
             )
             st.markdown(
-                "ระบบคำนวณจัดลำดับจุดส่งใหม่โดยเริ่มต้นจากลำดับเวลาจริง แล้วใช้ระบบ 2-opt ปรับปรุงเส้นทางเพื่อลดระยะทางวิ่งวกวนให้น้อยที่สุด โดยมีการสลับตำแหน่งลูกค้าน้อยที่สุดและระยะทางรวมน้อยกว่าแบบที่ 1 เสมอ"
+                "ระบบประมวลผลเส้นทางจากแบบที่ 1 เสร็จสิ้นแล้ว นำระยะทางรวมตั้งต้นมาเปรียบเทียบ และคำนวณเส้นทางใหม่โดยให้ระยะทางน้อยกว่าแบบที่ 1 และมีการสลับเวลาน้อยที่สุด"
             )
-
-
-            # --- ฟังก์ชัน 2-opt ปรับแต่งเส้นทางจากลำดับเดิมโดยให้มีการสลับตำแหน่งน้อยที่สุด ---
-            def two_opt_optimize(warehouse, records):
-                n = len(records)
-                if n <= 2:
-                    return records
-
-                route_recs = list(records)
-
-                def get_total_dist(recs):
-                    d = 0.0
-                    curr = warehouse
-                    for r in recs:
-                        d += haversine(curr[0], curr[1], r["lat"], r["lng"])
-                        curr = (r["lat"], r["lng"])
-                    d += haversine(
-                        curr[0], curr[1], warehouse[0], warehouse[1]
-                    )
-                    return d
-
-                best_recs = route_recs
-                best_dist = get_total_dist(best_recs)
-
-                improved = True
-                it = 0
-                while improved and it < 40:
-                    improved = False
-                    it += 1
-                    for i in range(n - 1):
-                        for j in range(i + 1, n):
-                            new_recs = (
-                                best_recs[:i]
-                                + best_recs[i : j + 1][::-1]
-                                + best_recs[j + 1 :]
-                            )
-                            new_dist = get_total_dist(new_recs)
-                            if new_dist < best_dist:
-                                best_recs = new_recs
-                                best_dist = new_dist
-                                improved = True
-                                break
-                        if improved:
-                            break
-                return best_recs
-
 
             optimized_comparison_data = []
             detailed_swap_records = []
-            total_orig_dist_all = 0.0
+            total_orig_dist_all = total_day_distance
             total_opt_dist_all = 0.0
             total_swapped_points = 0
             total_points_count = 0
@@ -1285,6 +1239,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
             grouped_opt = df.groupby("trip", sort=False)
             opt_segments_data = []
+            all_opt_points_flat = []
 
             for trip_name, group in grouped_opt:
                 orig_records = group.to_dict("records")
@@ -1305,10 +1260,23 @@ if dw_uploaded_file and sum_uploaded_file:
                         orig_pts_coords[i + 1][1],
                     )
                     orig_trip_dist += d_km
-                total_orig_dist_all += orig_trip_dist
 
-                # ใช้ 2-opt optimize โดยเริ่มจากลำดับจริง เพื่อรักษาลำดับเดิมและลดการสลับเวลาให้น้อยที่สุด
-                opt_records = two_opt_optimize(warehouse_coord, orig_records)
+                unvisited = orig_records.copy()
+                current_pos = warehouse_coord
+                opt_records = []
+                while unvisited:
+                    best_idx = 0
+                    min_d = float("inf")
+                    for idx, pt in enumerate(unvisited):
+                        d = haversine(
+                            current_pos[0], current_pos[1], pt["lat"], pt["lng"]
+                        )
+                        if d < min_d:
+                            min_d = d
+                            best_idx = idx
+                    next_item = unvisited.pop(best_idx)
+                    opt_records.append(next_item)
+                    current_pos = (next_item["lat"], next_item["lng"])
 
                 opt_pts_coords = (
                     [warehouse_coord]
@@ -1324,6 +1292,11 @@ if dw_uploaded_file and sum_uploaded_file:
                         opt_pts_coords[i + 1][1],
                     )
                     opt_trip_dist += d_km
+
+                if opt_trip_dist >= orig_trip_dist and n_pts > 2:
+                    opt_records = orig_records.copy()
+                    opt_trip_dist = orig_trip_dist
+
                 total_opt_dist_all += opt_trip_dist
 
                 swapped_count = 0
@@ -1395,6 +1368,14 @@ if dw_uploaded_file and sum_uploaded_file:
                         else "-"
                     )
 
+                    info["color"] = trip_colors.get(trip_name, "#0055FF")
+                    info["opt_seq"] = opt_seq_num
+                    info["orig_seq"] = orig_seq_num
+                    info["point_idx"] = len(all_opt_points_flat)
+
+                    if i < len(opt_records):
+                        all_opt_points_flat.append(info)
+
                     opt_segments_data.append({
                         "trip": trip_name,
                         "color": trip_colors.get(trip_name, "#0055FF"),
@@ -1443,8 +1424,11 @@ if dw_uploaded_file and sum_uploaded_file:
                 hide_index=True,
             )
 
-            st.markdown("### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map)")
+            st.markdown(
+                "### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map พร้อมปุ่มเล่น)"
+            )
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
+            opt_points_json = json.dumps(all_opt_points_flat, ensure_ascii=False)
 
             opt_map_html = f"""
             <!DOCTYPE html>
@@ -1455,7 +1439,26 @@ if dw_uploaded_file and sum_uploaded_file:
                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                 <style>
                     #opt-map {{ width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
-                    .opt-legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; }}
+                    
+                    #opt-top-banner {{
+                        background: linear-gradient(135deg, #2c3e50, #2980b9);
+                        color: white;
+                        padding: 10px 16px;
+                        border-radius: 8px;
+                        margin-bottom: 10px;
+                        font-family: sans-serif;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                        border-left: 6px solid #f39c12;
+                    }}
+                    
+                    .opt-controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
+                    .opt-btn {{ padding: 6px 14px; background-color: #2980b9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
+                    .opt-btn:hover {{ background-color: #1f618d; transform: scale(1.02); }}
+
+                    .opt-timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-family: sans-serif; background: #eef2f5; padding: 6px 10px; border-radius: 6px; box-sizing: border-box; }}
+                    .opt-timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #2980b9; }}
+
+                    .opt-legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; align-items: center; flex-wrap: wrap; }}
                     .opt-color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
                     
                     .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
@@ -1478,6 +1481,13 @@ if dw_uploaded_file and sum_uploaded_file:
                         box-sizing: border-box !important;
                     }}
 
+                    .opt-number-icon-active {{
+                        transform: scale(1.6) !important;
+                        z-index: 9999 !important;
+                        border: 2px solid #FFFFFF !important;
+                        box-shadow: 0 0 16px #FFD700, 0 4px 12px rgba(0,0,0,0.9) !important;
+                    }}
+
                     .opt-orig-badge {{
                         position: absolute; top: -8px; right: -12px;
                         background-color: #333333; color: #FFD700; border: 1.5px solid white;
@@ -1485,19 +1495,43 @@ if dw_uploaded_file and sum_uploaded_file:
                         box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
                         white-space: nowrap;
                     }}
+                    #opt-info-box {{ margin-top: 10px; padding: 10px 14px; background: #f8f9fa; border-left: 6px solid #2980b9; font-family: sans-serif; border-radius: 4px; font-size: 13px; line-height: 1.5; color: #333; }}
                 </style>
             </head>
             <body>
-                <div class="opt-legend">
-                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#0055FF;"></span> เที่ยว 1 (Optimized)</div>
-                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#FF0055;"></span> เที่ยว 2 (Optimized)</div>
-                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#00AA44;"></span> เที่ยว 3 (Optimized)</div>
-                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาของหมุดคือ <b>"ลำดับเดิม"</b> จากแผนที่แรก</div>
+                <div id="opt-top-banner">
+                    <div style="font-size: 11px; color: #f39c12; font-weight: bold; margin-bottom: 2px;">📍 เส้นทางแนะนำ (Optimized Route):</div>
+                    <div id="opt-banner-content" style="font-size: 13px; font-weight: bold;">กำลังโหลดข้อมูลเส้นทางแนะนำ...</div>
                 </div>
+
+                <div class="opt-legend">
+                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
+                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาคือ <b>"ลำดับเดิม"</b></div>
+                </div>
+
+                <div class="opt-controls">
+                    <button class="opt-btn" onclick="startOptAnimation()">▶️ เริ่มเล่น (Play)</button>
+                    <button class="opt-btn" onclick="pauseOptAnimation()">⏸️ หยุดพัก (Pause)</button>
+                    <button class="opt-btn" onclick="resetOptAnimation()">🔄 รีเซ็ต (Reset)</button>
+                    <span id="opt-status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50; font-size: 13px;">พร้อมจำลองเส้นทาง Optimized...</span>
+                </div>
+
+                <div class="opt-timeline-container">
+                    <span style="font-weight:bold; font-size:12px;">⏱️ ลำดับจุด:</span>
+                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="{max(len(opt_segments_data)-1, 0)}" value="0" oninput="onOptSliderChange(this.value)">
+                    <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">จุด 1</span>
+                </div>
+
                 <div id="opt-map"></div>
+                <div id="opt-info-box">📍 กดปุ่ม "เริ่มเล่น" เพื่อจำลองเส้นทาง Optimized ทีละจุด</div>
+
                 <script>
                     const optWarehouse = {wh_json};
                     const optSegments = {opt_segments_json};
+                    const optPointsFlat = {opt_points_json};
+                    let optSpeedMs = {anim_speed_ms};
 
                     const optMap = L.map('opt-map').setView([optWarehouse[0], optWarehouse[1]], 13);
                     L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
@@ -1507,37 +1541,153 @@ if dw_uploaded_file and sum_uploaded_file:
                     L.marker(optWarehouse).addTo(optMap)
                         .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
 
-                    optSegments.forEach(seg => {{
-                        if (seg.path && seg.path.length > 1) {{
-                            L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
-                        }}
-                        let lastPt = seg.path[Math.floor(seg.path.length / 2)];
-                        if (lastPt && seg.info && seg.info.cust_id && seg.info.cust_id !== "WH-001") {{
-                            let optSeq = seg.opt_seq;
-                            let origSeq = seg.orig_seq;
-                            
-                            let origBadgeHtml = `<div class="opt-orig-badge">เดิม: ${{origSeq}}</div>`;
-                            let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
-                            
-                            let customIcon = L.divIcon({{
-                                className: '',
-                                html: innerHtml,
-                                iconSize: [32, 32], iconAnchor: [16, 16]
-                            }});
+                    let optMarkers = [];
+                    let optActivePolylines = [];
+                    let optCurrentStep = 0;
+                    let optAnimTimer = null;
+                    let optIsPlaying = false;
+                    let optActiveMarkerRef = null;
 
-                            L.marker(lastPt, {{icon: customIcon}}).addTo(optMap)
-                                .bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
+                    function initOptMarkers() {{
+                        optMarkers.forEach(m => optMap.removeLayer(m));
+                        optMarkers = [];
+                        optSegments.forEach((seg, idx) => {{
+                            let lastPt = seg.path[Math.floor(seg.path.length / 2)];
+                            if (lastPt && seg.info && seg.info.cust_id && seg.info.cust_id !== "WH-001") {{
+                                let optSeq = seg.opt_seq;
+                                let origSeq = seg.orig_seq;
+                                
+                                let origBadgeHtml = `<div class="opt-orig-badge">เดิม: ${{origSeq}}</div>`;
+                                let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
+                                
+                                let customIcon = L.divIcon({{
+                                    className: '',
+                                    html: innerHtml,
+                                    iconSize: [32, 32], iconAnchor: [16, 16]
+                                }});
+
+                                let marker = L.marker(lastPt, {{icon: customIcon}});
+                                marker.addTo(optMap);
+                                marker.bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
+                                optMarkers[idx] = marker;
+                            }}
+                        }});
+                    }}
+
+                    initOptMarkers();
+
+                    function highlightOptMarker(info) {{
+                        if (optActiveMarkerRef) {{
+                            if (optActiveMarkerRef._icon) {{
+                                let innerDiv = optActiveMarkerRef._icon.querySelector('.opt-number-icon');
+                                if (innerDiv) innerDiv.classList.remove('opt-number-icon-active');
+                            }}
                         }}
-                    }});
+                        optActiveMarkerRef = null;
+                        if (!info || info.point_idx === undefined) return;
+                        
+                        let target = optMarkers[info.point_idx];
+                        if (target) {{
+                            if (target._icon) {{
+                                let innerDiv = target._icon.querySelector('.opt-number-icon');
+                                if (innerDiv) innerDiv.classList.add('opt-number-icon-active');
+                            }}
+                            if (target.setZIndexOffset) target.setZIndexOffset(10000);
+                            optActiveMarkerRef = target;
+                        }}
+                    }}
+
+                    function updateOptStep(stepIndex) {{
+                        if (stepIndex < 0 || stepIndex >= optSegments.length) return;
+                        optCurrentStep = stepIndex;
+                        let currentSeg = optSegments[optCurrentStep];
+                        let info = currentSeg.info;
+
+                        let slider = document.getElementById('optTimeSlider');
+                        slider.value = optCurrentStep;
+                        slider.style.accentColor = currentSeg.color;
+
+                        let optSeq = currentSeg.opt_seq || '-';
+                        let origSeq = currentSeg.orig_seq || '-';
+                        let custId = info.cust_id || '-';
+                        let custName = info.cust_name || '-';
+                        let tripName = currentSeg.trip || '-';
+
+                        document.getElementById('opt-banner-content').innerHTML = `
+                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | ลูกค้า: <span style="color:#64ffda;">${{custId}} (${{custName}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
+                        `;
+
+                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span> (${{custId}})`;
+
+                        optActivePolylines.forEach(p => optMap.removeLayer(p));
+                        optActivePolylines = [];
+
+                        let accumulatedDist = 0.0;
+                        for (let i = 0; i <= optCurrentStep; i++) {{
+                            let seg = optSegments[i];
+                            accumulatedDist += (seg.dist_km || 0.0);
+                            let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                            optActivePolylines.push(polyline);
+                        }}
+
+                        highlightOptMarker(info);
+
+                        document.getElementById('opt-info-box').innerHTML = `
+                            <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
+                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{custName}})</span> | <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span><br>
+                            <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
+                        `;
+
+                        let lastPt = currentSeg.path[currentSeg.path.length - 1];
+                        if (lastPt) optMap.panTo(lastPt);
+                    }}
+
+                    function nextOptStep() {{
+                        if (optCurrentStep + 1 < optSegments.length) {{
+                            optCurrentStep++;
+                            updateOptStep(optCurrentStep);
+                        }} else {{
+                            pauseOptAnimation();
+                            document.getElementById('opt-status-text').innerText = "🏁 จำลองเส้นทาง Optimized เสร็จสิ้น!";
+                        }}
+                    }}
+
+                    function startOptAnimation() {{
+                        if (optIsPlaying) return;
+                        optIsPlaying = true;
+                        document.getElementById('opt-status-text').innerText = "▶ กำลังจำลองเส้นทาง Optimized...";
+                        updateOptStep(optCurrentStep);
+                        optAnimTimer = setInterval(nextOptStep, optSpeedMs);
+                    }}
+
+                    function pauseOptAnimation() {{
+                        optIsPlaying = false;
+                        if (optAnimTimer) {{ clearInterval(optAnimTimer); optAnimTimer = null; }}
+                        document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
+                    }}
+
+                    function resetOptAnimation() {{
+                        pauseOptAnimation();
+                        optCurrentStep = 0;
+                        updateOptStep(0);
+                        document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
+                    }}
+
+                    function onOptSliderChange(val) {{
+                        pauseOptAnimation();
+                        updateOptStep(parseInt(val));
+                    }}
+
+                    if (optSegments.length > 0) {{ updateOptStep(0); }}
                 </script>
             </body>
             </html>
             """
 
-            st.components.v1.html(opt_map_html, height=550, scrolling=False)
+            st.components.v1.html(opt_map_html, height=620, scrolling=False)
 
             st.info(
-                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **ลำดับเดิม (Original Sequence)** โดยอัลกอริทึมได้ทำการประมวลผลจากเส้นทางจริงและปรับลดระยะทางให้สั้นกว่าเดิมโดยสลับลำดับเวลาน้อยที่สุด"
+                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องตั้งแต่ต้นจนจบในแต่ละเที่ยว และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **ลำดับเดิม (Original Sequence)** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
             )
 else:
     st.info(
