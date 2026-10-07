@@ -122,6 +122,18 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * r * asin(sqrt(a))
 
 
+# --- FUNCTION: แปลงเวลาเป็นนาทีสำหรับเทียบช่วงเวลา ---
+def time_to_mins(t_str):
+    try:
+        t_clean = re.sub(r"[^\d:]", "", str(t_str))
+        parts = t_clean.split(":")
+        if len(parts) >= 2:
+            return int(parts[0]) * 60 + int(parts[1])
+    except:
+        pass
+    return 0
+
+
 # --- FUNCTION: ดึงเส้นทางถนนจริงและระยะทางจาก OSRM ---
 @st.cache_data(show_spinner=False)
 def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
@@ -142,7 +154,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ใหม่ (รองรับ DW/RE ตามโจทย์) ---
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (รองรับ Split บรรทัด และ 0 ถังคาบเกี่ยว) ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
 
@@ -250,7 +262,6 @@ def parse_dual_excel_data(dw_file, sum_file):
                 except:
                     pass
 
-            # ถ้ายอดรวม E+F เป็นค่าวาง (0 หรือว่าง) ให้คิดเป็นคืน 0 ตามเงื่อนไข
             total_re = int(e_val + f_val)
 
             num_match = re.search(r"(\d{3,})$", doc_no)
@@ -263,7 +274,6 @@ def parse_dual_excel_data(dw_file, sum_file):
                 "raw_text": doc_no,
             })
 
-    # เรียงลำดับจากเลขน้อยไปมาก (เลขน้อยคือเที่ยวที่ 1)
     dw_records = sorted(dw_records, key=lambda x: x["sort_key"])
     re_records = sorted(re_records, key=lambda x: x["sort_key"])
 
@@ -278,7 +288,6 @@ def parse_dual_excel_data(dw_file, sum_file):
             if i < len(re_records) and re_records[i]["qty"] >= 0
             else 0
         )
-        # หักล้างกันเป็นยอดส่งในรอบหรือเที่ยวนั้นๆ
         net_qty = max(0, dw_q - re_q)
         trip_quotas.append(
             {
@@ -434,11 +443,68 @@ def parse_dual_excel_data(dw_file, sum_file):
         curr_trip_sum = 0
         total_acc = 0
 
-        for r in df_raw.to_dict("records"):
+        raw_records = df_raw.to_dict("records")
+        i = 0
+        while i < len(raw_records):
+            r = raw_records[i].copy()
             if curr_trip_idx >= len(trip_quotas):
                 curr_trip_idx = len(trip_quotas) - 1
 
             target_net = trip_quotas[curr_trip_idx]["net_qty"]
+            rem_quota = target_net - curr_trip_sum
+
+            # เงื่อนไขที่ 1: แตกบรรทัด (Split) หากยอดส่งของลูกค้าคาบเกี่ยวระหว่างรอบ
+            if (
+                r["qty"] > rem_quota
+                and rem_quota > 0
+                and curr_trip_idx + 1 < len(trip_quotas)
+            ):
+                r1 = r.copy()
+                r2 = r.copy()
+
+                r1["qty"] = rem_quota
+                curr_trip_sum += rem_quota
+                total_acc += rem_quota
+                r1["acc_qty"] = total_acc
+                r1["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
+                assigned_records.append(r1)
+
+                curr_trip_idx += 1
+                curr_trip_sum = 0
+
+                r2["qty"] = r["qty"] - rem_quota
+                raw_records[i] = r2
+                continue
+
+            # เงื่อนไขที่ 2: กรณีรายการ 0 ถัง อยู่ตรงสุดท้ายของรอบ พิจารณาเวลาใกล้เคียง
+            if (
+                r["qty"] == 0
+                and curr_trip_sum >= target_net
+                and curr_trip_idx + 1 < len(trip_quotas)
+            ):
+                curr_time_mins = time_to_mins(r.get("time", ""))
+                last_curr_time_mins = curr_time_mins
+                if assigned_records:
+                    last_curr_time_mins = time_to_mins(
+                        assigned_records[-1].get("time", "")
+                    )
+
+                next_trip_first_time_mins = curr_time_mins
+                for j in range(i + 1, len(raw_records)):
+                    if raw_records[j]["qty"] > 0:
+                        next_trip_first_time_mins = time_to_mins(
+                            raw_records[j].get("time", "")
+                        )
+                        break
+
+                diff_prev = abs(curr_time_mins - last_curr_time_mins)
+                diff_next = abs(curr_time_mins - next_trip_first_time_mins)
+
+                if diff_next < diff_prev:
+                    curr_trip_idx += 1
+                    curr_trip_sum = 0
+                    target_net = trip_quotas[curr_trip_idx]["net_qty"]
+
             r["trip"] = f"เที่ยวที่ {curr_trip_idx + 1}"
             curr_trip_sum += r["qty"]
             total_acc += r["qty"]
@@ -448,9 +514,12 @@ def parse_dual_excel_data(dw_file, sum_file):
             if (
                 curr_trip_sum >= target_net
                 and curr_trip_idx + 1 < len(trip_quotas)
+                and r["qty"] > 0
             ):
                 curr_trip_idx += 1
                 curr_trip_sum = 0
+
+            i += 1
 
         df = pd.DataFrame(assigned_records)
     else:
