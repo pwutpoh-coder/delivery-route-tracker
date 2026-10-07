@@ -142,7 +142,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ใหม่ ---
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ใหม่ (รองรับ DW/RE ตามโจทย์) ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ", "driver": "ไม่ระบุ"}
 
@@ -186,63 +186,99 @@ def parse_dual_excel_data(dw_file, sum_file):
     header_row_idx = 0
     for idx in range(len(dw_raw)):
         row_vals = [str(v).strip() for v in dw_raw.iloc[idx].values]
-        if "เลขที่เอกสาร" in row_vals or "เบิก" in row_vals:
+        if (
+            "เลขที่เอกสาร" in row_vals
+            or "เบิก" in row_vals
+            or "คอลัมน์" in row_vals
+        ):
             header_row_idx = idx
             break
 
     sub_df = dw_raw.iloc[header_row_idx + 1 :].copy()
     for _, row in sub_df.iterrows():
-        doc_no = ""
-        qty_val = 0
-        for col_idx, val in enumerate(row):
-            if pd.notna(val):
-                sval = str(val).strip()
-                if "DWT" in sval.upper() or "RET" in sval.upper():
-                    doc_no = sval
-                elif sval.replace(".", "", 1).isdigit() and col_idx >= 3:
-                    try:
-                        qty_val = int(float(sval))
-                    except:
-                        pass
+        row_list = [
+            str(v).strip() if pd.notna(v) else "" for v in row.values
+        ]
+        if not any(row_list):
+            continue
 
-        if "DWT" in doc_no.upper() or "DW" in doc_no.upper():
-            num_match = re.search(r"(\d+)$", doc_no)
+        doc_no = row_list[2] if len(row_list) > 2 else ""
+        if not doc_no or doc_no == "nan":
+            for val in row_list:
+                if (
+                    "DW" in val.upper()
+                    or "RE" in val.upper()
+                    or "DWT" in val.upper()
+                    or "RET" in val.upper()
+                ):
+                    doc_no = val
+                    break
+
+        if not doc_no:
+            continue
+
+        upper_doc = doc_no.upper()
+        if "DW" in upper_doc:
+            qty_val = 0
+            if len(row_list) > 3 and row_list[3] != "":
+                try:
+                    qty_val = int(float(row_list[3].replace(",", "")))
+                except:
+                    pass
+
+            num_match = re.search(r"(\d{3,})$", doc_no)
+            if not num_match:
+                num_match = re.search(r"(\d+)", doc_no)
             sort_key = int(num_match.group(1)) if num_match else len(dw_records)
-            dw_records.append(
-                {"sort_key": sort_key, "qty": qty_val, "raw_text": doc_no}
-            )
-        elif "RET" in doc_no.upper() or "RE" in doc_no.upper():
-            num_match = re.search(r"(\d+)$", doc_no)
-            sort_key = int(num_match.group(1)) if num_match else len(re_records)
-            re_records.append(
-                {"sort_key": sort_key, "qty": qty_val, "raw_text": doc_no}
-            )
+            dw_records.append({
+                "sort_key": sort_key,
+                "qty": qty_val,
+                "raw_text": doc_no,
+            })
 
-    if not dw_records and not re_records:
-        for idx in range(len(dw_raw)):
-            row = dw_raw.iloc[idx]
-            for col in row:
-                s = str(col).strip()
-                if "DW" in s.upper():
-                    dw_records.append(
-                        {"sort_key": idx, "qty": 80, "raw_text": s}
-                    )
-                elif "RE" in s.upper():
-                    re_records.append(
-                        {"sort_key": idx, "qty": 5, "raw_text": s}
-                    )
+        elif "RE" in upper_doc:
+            e_val = 0
+            f_val = 0
+            if len(row_list) > 4 and row_list[4] != "":
+                try:
+                    e_val = float(row_list[4].replace(",", ""))
+                except:
+                    pass
+            if len(row_list) > 5 and row_list[5] != "":
+                try:
+                    f_val = float(row_list[5].replace(",", ""))
+                except:
+                    pass
+
+            # ถ้ายอดรวม E+F เป็นค่าวาง (0 หรือว่าง) ให้คิดเป็นคืน 0 ตามเงื่อนไข
+            total_re = int(e_val + f_val)
+
+            num_match = re.search(r"(\d{3,})$", doc_no)
+            if not num_match:
+                num_match = re.search(r"(\d+)", doc_no)
+            sort_key = int(num_match.group(1)) if num_match else len(re_records)
+            re_records.append({
+                "sort_key": sort_key,
+                "qty": total_re,
+                "raw_text": doc_no,
+            })
+
+    # เรียงลำดับจากเลขน้อยไปมาก (เลขน้อยคือเที่ยวที่ 1)
+    dw_records = sorted(dw_records, key=lambda x: x["sort_key"])
+    re_records = sorted(re_records, key=lambda x: x["sort_key"])
 
     if not dw_records:
-        dw_records = [{"sort_key": 1, "qty": 160, "raw_text": "DWT_DEFAULT"}]
+        dw_records = [{"sort_key": 1, "qty": 160, "raw_text": "DW_DEFAULT"}]
 
     trip_quotas = []
     for i, dw in enumerate(dw_records):
         dw_q = dw["qty"] if dw["qty"] > 0 else 80
         re_q = (
             re_records[i]["qty"]
-            if i < len(re_records) and re_records[i]["qty"] > 0
+            if i < len(re_records) and re_records[i]["qty"] >= 0
             else 0
         )
+        # หักล้างกันเป็นยอดส่งในรอบหรือเที่ยวนั้นๆ
         net_qty = max(0, dw_q - re_q)
         trip_quotas.append(
             {
@@ -1419,7 +1455,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 delta=f"{(total_swapped_points/total_points_count*100):.1f}% ของจุดทั้งหมด",
             )
 
-            # --- เพิ่มส่วนสรุปสาเหตุเชิงรูปธรรม (ไม่ใช่นามธรรม) ---
             st.markdown(
                 "#### 🔍 วิเคราะห์สาเหตุและเหตุผล (ทำไมเส้นทางใหม่ถึงสั้นลง?)"
             )
@@ -1427,7 +1462,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 f"""
 **สรุปผลการวิเคราะห์โครงสร้างเส้นทาง:**
 1. **การลดปัญหาการวิ่งย้อนกลับ (Backtracking):** ในลำดับตามเวลาจริง (เดิม) พนักงานมักจัดส่งตามเวลาที่ลูกค้าสะดวกหรือตามคิวเอกสาร ซึ่งทำให้รถต้องวิ่งผ่านจุดที่อยู่ไกลก่อน แล้วค่อยย้อนกลับมาส่งจุดที่อยู่ใกล้คลังสินค้าในภายหลัง เมื่อระบบจัดเรียงใหม่ด้วยวิธีเลือกจุดที่ใกล้ที่สุดถัดไป (Nearest Neighbor) จึงตัดรอบการวิ่งซ้ำซ้อนบนถนนเส้นเดิมออกไปได้
-2. **การจัดกลุ่มเชิงพื้นที่ (Spatial Clustering):** พิกัดที่มีระยะทางทางภูมิศาสตร์ใกล้เคียงกันถูกร้อยเรียงเป็นเส้นทางต่อเนื่องกันทันที ทำให้ระยะห่างระหว่างจุดส่ง (Euclidean & Network Distance) ในแต่ละช่วงสั้นลงอย่างเห็นได้ชัด
+2. **การจัดกลุ่มเชิงพื้นที่ (Spatial Clustering):** พิกัดที่มีระยะทางทางภูมิศาสตร์ใกล้เคียงกันถูกร้อยเรียงเป็นเส้นทางต่อเนื่องกันทันที ทำให้ระยะห่างระหว่างจุดส่งในแต่ละช่วงสั้นลงอย่างเห็นได้ชัด
 3. **ผลลัพธ์เชิงตัวเลข:** สามารถลดระยะทางรวมลงได้ **{total_dist_diff:.2f} กม.** (คิดเป็น **{total_pct_saving:.2f}%**) โดยมีการปรับสลับตำแหน่งเพียง **{total_swapped_points} จาก {total_points_count} จุด** ซึ่งช่วยรักษาโครงสร้างเวลาเดิมไว้ได้ใกล้เคียงที่สุดแต่ประหยัดน้ำมันและเวลาขนส่งมากกว่าเดิม
             """
             )
