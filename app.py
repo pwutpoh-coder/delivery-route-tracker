@@ -561,11 +561,14 @@ if dw_uploaded_file and sum_uploaded_file:
             c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
             c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
 
+            # รองรับสีสูงสุด 6 เที่ยว
             trip_colors = {
                 "เที่ยวที่ 1": "#0055FF",
                 "เที่ยวที่ 2": "#FF0055",
                 "เที่ยวที่ 3": "#00AA44",
                 "เที่ยวที่ 4": "#AA00FF",
+                "เที่ยวที่ 5": "#FF8800",
+                "เที่ยวที่ 6": "#00CCCC",
             }
 
             with st.spinner(
@@ -865,6 +868,19 @@ if dw_uploaded_file and sum_uploaded_file:
             wh_json = json.dumps(warehouse_coord)
             is_mode_1 = "แบบที่ 1" in play_mode
 
+            # สร้าง HTML Legend อัตโนมัติตามจำนวนเที่ยวจริง (สูงสุด 6 เที่ยว)
+            legend_html_items = ""
+            for t_info in trip_quotas:
+                t_name = f"เที่ยวที่ {t_info['trip_no']}"
+                t_color = trip_colors.get(t_name, "#0055FF")
+                legend_html_items += f'<div class="legend-item"><span class="color-box" style="background:{t_color};"></span> {t_name}</div>\n'
+
+            # สร้างปุ่มตัวกรองเที่ยวอัตโนมัติตามจำนวนเที่ยวจริง
+            trip_filter_buttons = '<button class="filter-btn active" id="btn-all" onclick="setTripFilter(\'ALL\')">แสดงทั้งหมด</button>\n'
+            for t_info in trip_quotas:
+                t_name = f"เที่ยวที่ {t_info['trip_no']}"
+                trip_filter_buttons += f'<button class="filter-btn" id="btn-trip{t_info["trip_no"]}" onclick="setTripFilter(\'{t_name}\')">{t_name}</button>\n'
+
             map_html = f"""
             <!DOCTYPE html>
             <html>
@@ -976,17 +992,12 @@ if dw_uploaded_file and sum_uploaded_file:
                 </div>
 
                 <div class="legend">
-                    <div class="legend-item"><span class="color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
-                    <div class="legend-item"><span class="color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
-                    <div class="legend-item"><span class="color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
+                    {legend_html_items}
                 </div>
 
                 <div class="filter-bar">
                     <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองเที่ยว:</span>
-                    <button class="filter-btn active" id="btn-all" onclick="setTripFilter('ALL')">แสดงทั้งหมด</button>
-                    <button class="filter-btn" id="btn-trip1" onclick="setTripFilter('เที่ยวที่ 1')">เที่ยวที่ 1</button>
-                    <button class="filter-btn" id="btn-trip2" onclick="setTripFilter('เที่ยวที่ 2')">เที่ยวที่ 2</button>
-                    <button class="filter-btn" id="btn-trip3" onclick="setTripFilter('เที่ยวที่ 3')">เที่ยวที่ 3</button>
+                    {trip_filter_buttons}
                 </div>
 
                 <div class="filter-bar" style="background: #faf2f2;">
@@ -1096,7 +1107,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#7F8C8D;">คำนวณไม่ได้</span>`);
                         if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#D35400;">ย้ายรอบ</span>`);
 
-                        // กำหนดความกว้างประมาณ 4.00 ซม. (ประมาณ 150px) และบังคับตัดคำ/ตัดบรรทัดเพื่อไม่ให้ล้นออกนอกกรอบ และไม่เอาแขวง/เขตมาแสดง
                         let addrInfo = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '';
                         let fullAddressText = addrInfo ? `<br><b>ที่อยู่:</b> ${{addrInfo}}` : '';
 
@@ -1155,14 +1165,25 @@ if dw_uploaded_file and sum_uploaded_file:
                     function setTripFilter(filterName) {{
                         pauseAnimation();
                         currentFilter = filterName;
-                        ['btn-all', 'btn-trip1', 'btn-trip2', 'btn-trip3'].forEach(id => {{
-                            let el = document.getElementById(id);
-                            if (el) el.classList.remove('active');
+                        
+                        // ปรับการลบและใส่คลาส active สำหรับปุ่มตัวกรองเที่ยวทั้งหมดแบบยืดหยุ่น
+                        document.querySelectorAll('.filter-btn').forEach(el => {{
+                            if (el.id.startsWith('btn-trip') || el.id === 'btn-all') {{
+                                el.classList.remove('active');
+                            }}
                         }});
-                        if (filterName === 'ALL') document.getElementById('btn-all').classList.add('active');
-                        else if (filterName === 'เที่ยวที่ 1') document.getElementById('btn-trip1').classList.add('active');
-                        else if (filterName === 'เที่ยวที่ 2') document.getElementById('btn-trip2').classList.add('active');
-                        else if (filterName === 'เที่ยวที่ 3') document.getElementById('btn-trip3').classList.add('active');
+                        
+                        if (filterName === 'ALL') {{
+                            let btnAll = document.getElementById('btn-all');
+                            if (btnAll) btnAll.classList.add('active');
+                        }} else {{
+                            // ค้นหาปุ่มของเที่ยวปัจจุบัน
+                            document.querySelectorAll('.filter-btn').forEach(el => {{
+                                if (el.innerText === filterName) {{
+                                    el.classList.add('active');
+                                }}
+                            }});
+                        }}
 
                         initMarkers();
                         let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
@@ -1569,6 +1590,13 @@ if dw_uploaded_file and sum_uploaded_file:
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
             opt_points_json = json.dumps(all_opt_points_flat, ensure_ascii=False)
 
+            # สร้าง Legend สำหรับหน้า Optimized แบบไดนามิก
+            opt_legend_items = ""
+            for t_info in trip_quotas:
+                t_name = f"เที่ยวที่ {t_info['trip_no']}"
+                t_color = trip_colors.get(t_name, "#0055FF")
+                opt_legend_items += f'<div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:{t_color};"></span> {t_name}</div>\n'
+
             opt_map_html = f"""
             <!DOCTYPE html>
             <html>
@@ -1644,9 +1672,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 </div>
 
                 <div class="opt-legend">
-                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#0055FF;"></span> เที่ยว 1</div>
-                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#FF0055;"></span> เที่ยว 2</div>
-                    <div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:#00AA44;"></span> เที่ยว 3</div>
+                    {opt_legend_items}
                     <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาคือ <b>"ลำดับเดิม"</b></div>
                 </div>
 
@@ -1747,99 +1773,4 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function updateOptStep(stepIndex) {{
-                        if (stepIndex < 0 || stepIndex >= optSegments.length) return;
-                        optCurrentStep = stepIndex;
-                        let currentSeg = optSegments[optCurrentStep];
-                        let info = currentSeg.info;
-
-                        let slider = document.getElementById('optTimeSlider');
-                        slider.value = optCurrentStep;
-                        slider.style.accentColor = currentSeg.color;
-
-                        let optSeq = currentSeg.opt_seq || '-';
-                        let origSeq = currentSeg.orig_seq || '-';
-                        let custId = info.cust_id || '-';
-                        let custName = info.cust_name || '-';
-                        let tripName = currentSeg.trip || '-';
-
-                        document.getElementById('opt-banner-content').innerHTML = `
-                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | ลูกค้า: <span style="color:#64ffda;">${{custId}} (${{custName}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
-                        `;
-
-                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span> (${{custId}})`;
-
-                        optActivePolylines.forEach(p => optMap.removeLayer(p));
-                        optActivePolylines = [];
-
-                        let accumulatedDist = 0.0;
-                        for (let i = 0; i <= optCurrentStep; i++) {{
-                            let seg = optSegments[i];
-                            accumulatedDist += (seg.dist_km || 0.0);
-                            let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
-                            optActivePolylines.push(polyline);
-                        }}
-
-                        highlightOptMarker(info);
-
-                        document.getElementById('opt-info-box').innerHTML = `
-                            <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
-                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{custName}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
-                            <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
-                        `;
-
-                        let lastPt = currentSeg.path[currentSeg.path.length - 1];
-                        if (lastPt) optMap.panTo(lastPt);
-                    }}
-
-                    function nextOptStep() {{
-                        if (optCurrentStep + 1 < optSegments.length) {{
-                            optCurrentStep++;
-                            updateOptStep(optCurrentStep);
-                        }} else {{
-                            pauseOptAnimation();
-                            document.getElementById('opt-status-text').innerText = "🏁 จำลองเส้นทาง Optimized เสร็จสิ้น!";
-                        }}
-                    }}
-
-                    function startOptAnimation() {{
-                        if (optIsPlaying) return;
-                        optIsPlaying = true;
-                        document.getElementById('opt-status-text').innerText = "▶ กำลังจำลองเส้นทาง Optimized...";
-                        updateOptStep(optCurrentStep);
-                        optAnimTimer = setInterval(nextOptStep, optSpeedMs);
-                    }}
-
-                    function pauseOptAnimation() {{
-                        optIsPlaying = false;
-                        if (optAnimTimer) {{ clearInterval(optAnimTimer); optAnimTimer = null; }}
-                        document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
-                    }}
-
-                    function resetOptAnimation() {{
-                        pauseOptAnimation();
-                        optCurrentStep = 0;
-                        updateOptStep(0);
-                        document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }}
-
-                    function onOptSliderChange(val) {{
-                        pauseOptAnimation();
-                        updateOptStep(parseInt(val));
-                    }}
-
-                    if (optSegments.length > 0) {{ updateOptStep(0); }}
-                </script>
-            </body>
-            </html>
-            """
-
-            st.components.v1.html(opt_map_html, height=620, scrolling=False)
-
-            st.info(
-                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องข้ามเที่ยวตั้งแต่ต้นจนจบ และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **เฉพาะตัวเลขลำดับเดิม** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
-            )
-else:
-    st.info(
-        "ℹ️ กรุณาอัปโหลดไฟล์ทั้ง 2 ไฟล์ (รายงานใบเบิกใบคืน และ รายงานสรุปการจัดส่ง) ที่ด้านบน เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
-    )
+                        if (stepIndex
