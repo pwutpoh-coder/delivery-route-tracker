@@ -875,14 +875,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 <style>
                     #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     
-                    /* กำหนดความกว้าง tooltip ประมาณ 3 ซม. (115px) และบังคับตัดบรรทัด */
-                    .leaflet-tooltip {{
-                        max-width: 115px !important;
-                        white-space: normal !important;
-                        word-break: break-word !important;
-                        overflow-wrap: break-word !important;
-                    }}
-                    
                     #top-active-banner {{
                         background: linear-gradient(135deg, #1e3d59, #17b978);
                         color: white;
@@ -1108,7 +1100,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         let districtInfo = info.shipping_district && info.shipping_district !== '-' ? info.shipping_district : '';
                         let fullAddressText = (addrInfo || districtInfo) ? `<br><b>ที่อยู่:</b> ${{addrInfo}} ${{districtInfo}}` : '';
 
-                        return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
+                        // กำหนดความกว้างกล่องข้อความประมาณ 3.00 ซม. (ประมาณ 113px) และบังคับตัดคำ/ขึ้นบรรทัดใหม่
+                        return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:3cm; white-space:normal; word-break:break-word; overflow-wrap:break-word;">
                             <b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>
                             ${{badgesHtml.join(' ')}}<br>
                             <b>เวลา:</b> ${{info.time}}<br>
@@ -1587,14 +1580,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 <style>
                     #opt-map {{ width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     
-                    /* กำหนดความกว้าง tooltip ประมาณ 3 ซม. สำหรับแผนที่ Optimized เช่นกัน */
-                    .leaflet-tooltip {{
-                        max-width: 115px !important;
-                        white-space: normal !important;
-                        word-break: break-word !important;
-                        overflow-wrap: break-word !important;
-                    }}
-                    
                     #opt-top-banner {{
                         background: linear-gradient(135deg, #2c3e50, #2980b9);
                         color: white;
@@ -1726,7 +1711,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 
                                 let addrText = seg.info.shipping_address && seg.info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{seg.info.shipping_address}} ${{seg.info.shipping_district || ''}}` : '';
                                 
-                                marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
+                                marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:3cm; white-space:normal; word-break:break-word; overflow-wrap:break-word;">
                                     <b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br>
                                     <b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br>
                                     <b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})` + addrText + `<br>
