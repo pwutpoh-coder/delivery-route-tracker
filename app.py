@@ -1096,12 +1096,11 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#7F8C8D;">คำนวณไม่ได้</span>`);
                         if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#D35400;">ย้ายรอบ</span>`);
 
+                        // กำหนดความกว้างประมาณ 4.00 ซม. (ประมาณ 150px) และบังคับตัดคำ/ตัดบรรทัดเพื่อไม่ให้ล้นออกนอกกรอบ และไม่เอาแขวง/เขตมาแสดง
                         let addrInfo = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '';
-                        let districtInfo = info.shipping_district && info.shipping_district !== '-' ? info.shipping_district : '';
-                        let fullAddressText = (addrInfo || districtInfo) ? `<br><b>ที่อยู่:</b> ${{addrInfo}} ${{districtInfo}}` : '';
+                        let fullAddressText = addrInfo ? `<br><b>ที่อยู่:</b> ${{addrInfo}}` : '';
 
-                        // กำหนดความกว้างกล่องข้อความประมาณ 3.00 ซม. (ประมาณ 113px) และบังคับตัดคำ/ขึ้นบรรทัดใหม่
-                        return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:3cm; white-space:normal; word-break:break-word; overflow-wrap:break-word;">
+                        return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
                             <b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>
                             ${{badgesHtml.join(' ')}}<br>
                             <b>เวลา:</b> ${{info.time}}<br>
@@ -1273,7 +1272,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('info-box').innerHTML = `
                             <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
                             <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}} ${{info.shipping_district || '-'}}<br>
+                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
                             <b>📝 เหตุขาดส่ง (H):</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
                             <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
@@ -1709,9 +1708,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                 let marker = L.marker(lastPt, {{icon: customIcon}});
                                 marker.addTo(optMap);
                                 
-                                let addrText = seg.info.shipping_address && seg.info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{seg.info.shipping_address}} ${{seg.info.shipping_district || ''}}` : '';
+                                let addrText = seg.info.shipping_address && seg.info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{seg.info.shipping_address}}` : '';
                                 
-                                marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:3cm; white-space:normal; word-break:break-word; overflow-wrap:break-word;">
+                                marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
                                     <b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br>
                                     <b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br>
                                     <b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})` + addrText + `<br>
@@ -1785,7 +1784,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-info-box').innerHTML = `
                             <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
                             <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{custName}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}} ${{info.shipping_district || '-'}}<br>
+                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
                         `;
 
