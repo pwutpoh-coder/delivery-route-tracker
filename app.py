@@ -311,8 +311,6 @@ def parse_dual_excel_data(dw_file, sum_file):
             continue
 
         cust_name = row_list[1] if len(row_list) > 1 and row_list[1] != "" else "-"
-        
-        # เพิ่มการดึงข้อมูลคอลัมน์ C (ที่อยู่จัดส่ง) และ D (แขวง/เขตจัดส่ง)
         shipping_address = row_list[2] if len(row_list) > 2 and row_list[2] != "" else "-"
         shipping_district = row_list[3] if len(row_list) > 3 and row_list[3] != "" else "-"
 
@@ -448,7 +446,6 @@ def parse_dual_excel_data(dw_file, sum_file):
             target_net = trip_quotas[curr_trip_idx]["net_qty"]
             rem_quota = target_net - curr_trip_sum
 
-            # เงื่อนไขที่ 1: แตกบรรทัด (Split) หากยอดส่งของลูกค้าคาบเกี่ยวระหว่างรอบ
             if (
                 r["qty"] > rem_quota
                 and rem_quota > 0
@@ -471,7 +468,6 @@ def parse_dual_excel_data(dw_file, sum_file):
                 raw_records[i] = r2
                 continue
 
-            # เงื่อนไขที่ 2: กรณีรายการ 0 ถัง อยู่ตรงสุดท้ายของรอบ พิจารณาเวลาใกล้เคียง
             if (
                 r["qty"] == 0
                 and curr_trip_sum >= target_net
@@ -722,7 +718,6 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 return " | ".join(notices)
 
-            # จัดเรียงคอลัมน์ใหม่โดยเพิ่ม ที่อยู่จัดส่ง และ แขวง/เขตจัดส่ง ตามคำขอ
             disp_df = df[[
                 "time",
                 "inc_time",
@@ -1101,12 +1096,21 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#7F8C8D;">คำนวณไม่ได้</span>`);
                         if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#D35400;">ย้ายรอบ</span>`);
 
-                        // เพิ่มการแสดงข้อมูลที่อยู่จัดส่งและแขวง/เขตจัดส่งใน Tooltip ตามที่ขอ
+                        // ตัดบรรทัดใหม่ด้วย <br> เพื่อความเป็นระเบียบและไม่ยาวเกะกะ
                         let addrInfo = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '';
                         let districtInfo = info.shipping_district && info.shipping_district !== '-' ? info.shipping_district : '';
                         let fullAddressText = (addrInfo || districtInfo) ? `<br><b>ที่อยู่:</b> ${{addrInfo}} ${{districtInfo}}` : '';
 
-                        return `<div style="font-family:sans-serif; font-size:12px;"><b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>${{badgesHtml.join(' ')}}<br><b>เวลา:</b> ${{info.time}}<br><b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})${{fullAddressText}}<br><b>ยอดส่ง:</b> ${{info.qty}} ถัง<br><b>ตรงเวลา (G):</b> ${{info.on_time_col || '-'}}<br><b>เหตุขาดส่ง (H):</b> ${{info.short_reason_col || '-'}}</div>`;
+                        return `<div style="font-family:sans-serif; font-size:12px; line-height:1.5; max-width:320px;">
+                            <b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>
+                            ${{badgesHtml.join(' ')}}<br>
+                            <b>เวลา:</b> ${{info.time}}<br>
+                            <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
+                            fullAddressText + `<br>
+                            <b>ยอดส่ง:</b> ${{info.qty}} ถัง<br>
+                            <b>ตรงเวลา (G):</b> ${{info.on_time_col || '-'}}<br>
+                            <b>เหตุขาดส่ง (H):</b> ${{info.short_reason_col || '-'}}
+                        </div>`;
                     }}
 
                     function createMarkerIcon(seqNum, color, ptInfo) {{
@@ -1706,7 +1710,15 @@ if dw_uploaded_file and sum_uploaded_file:
                                 marker.addTo(optMap);
                                 
                                 let addrText = seg.info.shipping_address && seg.info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{seg.info.shipping_address}} ${{seg.info.shipping_district || ''}}` : '';
-                                marker.bindTooltip(`<b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br><b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br><b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})${{addrText}}<br><b>เที่ยว:</b> ${{seg.trip}}<br><b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง`, {{direction: 'top', opacity: 0.95}});
+                                
+                                marker.bindTooltip(`<div style="font-family:sans-serif; font-size:12px; line-height:1.5; max-width:320px;">
+                                    <b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br>
+                                    <b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br>
+                                    <b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})` + addrText + `<br>
+                                    <b>เที่ยว:</b> ${{seg.trip}}<br>
+                                    <b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง
+                                </div>`, {{direction: 'top', opacity: 0.95}});
+                                
                                 optMarkers[idx] = marker;
                             }}
                         }});
