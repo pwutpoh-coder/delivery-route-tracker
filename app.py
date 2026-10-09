@@ -1773,4 +1773,99 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function updateOptStep(stepIndex) {{
-                        if (stepIndex
+                        if (stepIndex < 0 || stepIndex >= optSegments.length) return;
+                        optCurrentStep = stepIndex;
+                        let currentSeg = optSegments[optCurrentStep];
+                        let info = currentSeg.info;
+
+                        let slider = document.getElementById('optTimeSlider');
+                        slider.value = optCurrentStep;
+                        slider.style.accentColor = currentSeg.color;
+
+                        let optSeq = currentSeg.opt_seq || '-';
+                        let origSeq = currentSeg.orig_seq || '-';
+                        let custId = info.cust_id || '-';
+                        let custName = info.cust_name || '-';
+                        let tripName = currentSeg.trip || '-';
+
+                        document.getElementById('opt-banner-content').innerHTML = `
+                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | ลูกค้า: <span style="color:#64ffda;">${{custId}} (${{custName}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
+                        `;
+
+                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span> (${{custId}})`;
+
+                        optActivePolylines.forEach(p => optMap.removeLayer(p));
+                        optActivePolylines = [];
+
+                        let accumulatedDist = 0.0;
+                        for (let i = 0; i <= optCurrentStep; i++) {{
+                            let seg = optSegments[i];
+                            accumulatedDist += (seg.dist_km || 0.0);
+                            let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                            optActivePolylines.push(polyline);
+                        }}
+
+                        highlightOptMarker(info);
+
+                        document.getElementById('opt-info-box').innerHTML = `
+                            <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
+                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{custName}})</span><br>
+                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
+                            <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
+                        `;
+
+                        let lastPt = currentSeg.path[currentSeg.path.length - 1];
+                        if (lastPt) optMap.panTo(lastPt);
+                    }}
+
+                    function nextOptStep() {{
+                        if (optCurrentStep + 1 < optSegments.length) {{
+                            optCurrentStep++;
+                            updateOptStep(optCurrentStep);
+                        }} else {{
+                            pauseOptAnimation();
+                            document.getElementById('opt-status-text').innerText = "🏁 จำลองเส้นทาง Optimized เสร็จสิ้น!";
+                        }}
+                    }}
+
+                    function startOptAnimation() {{
+                        if (optIsPlaying) return;
+                        optIsPlaying = true;
+                        document.getElementById('opt-status-text').innerText = "▶ กำลังจำลองเส้นทาง Optimized...";
+                        updateOptStep(optCurrentStep);
+                        optAnimTimer = setInterval(nextOptStep, optSpeedMs);
+                    }}
+
+                    function pauseOptAnimation() {{
+                        optIsPlaying = false;
+                        if (optAnimTimer) {{ clearInterval(optAnimTimer); optAnimTimer = null; }}
+                        document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
+                    }}
+
+                    function resetOptAnimation() {{
+                        pauseOptAnimation();
+                        optCurrentStep = 0;
+                        updateOptStep(0);
+                        document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
+                    }}
+
+                    function onOptSliderChange(val) {{
+                        pauseOptAnimation();
+                        updateOptStep(parseInt(val));
+                    }}
+
+                    if (optSegments.length > 0) {{ updateOptStep(0); }}
+                </script>
+            </body>
+            </html>
+            """
+
+            st.components.v1.html(opt_map_html, height=620, scrolling=False)
+
+            st.info(
+                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องข้ามเที่ยวตั้งแต่ต้นจนจบ และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **เฉพาะตัวเลขลำดับเดิม** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
+            )
+else:
+    st.info(
+        "ℹ️ กรุณาอัปโหลดไฟล์ทั้ง 2 ไฟล์ (รายงานใบเบิกใบคืน และ รายงานสรุปการจัดส่ง) ที่ด้านบน เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
+    )
