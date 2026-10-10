@@ -154,7 +154,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (รองรับ Split บรรทัด และ 0 ถังคาบเกี่ยว) ---
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (บังคับ 'ไม่สามารถเข้าส่งได้' หากไม่มีพิกัด) ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ"}
 
@@ -385,8 +385,12 @@ def parse_dual_excel_data(dw_file, sum_file):
         if str_f:
             status = str_f
 
+        # บังคับหากไม่มีพิกัด ให้คอลัมน์ตรงเวลาเป็น "ไม่สามารถเข้าส่งได้"
+        if lat == 0.0 or lng == 0.0:
+            on_time_status = "ไม่สามารถเข้าส่งได้"
+
         is_extra_trip = "รอบเสริม" in status or "รอบเสริม" in on_time_status
-        is_cannot_calc = "ไม่สามารถคำนวณได้" in status or "คำนวณไม่ได้" in status
+        is_cannot_calc = "ไม่สามารถคำนวณได้" in status or "คำนวณไม่ได้" in status or lat == 0.0 or lng == 0.0
         is_new_member = "สมาชิกใหม่" in status or "สมาชิกใหม่" in on_time_status
         is_moved_trip = "ย้ายรอบ" in status
 
@@ -546,7 +550,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
     if df.empty:
         st.error(
-            "❌ไม่พบข้อมูลรายการจัดส่ง กรุณาตรวจสอบรูปแบบไฟล์รายงานสรุปการจัดส่งประจำวันอีกครั้ง"
+            "❌ ไม่พบข้อมูลรายการจัดส่ง กรุณาตรวจสอบรูปแบบไฟล์รายงานสรุปการจัดส่งประจำวันอีกครั้ง"
         )
     else:
         st.success(
@@ -588,13 +592,13 @@ if dw_uploaded_file and sum_uploaded_file:
                 last_time_dt = None
 
                 for trip_name, group in grouped:
+                    # กรองเฉพาะจุดที่มีพิกัดจริงมาคำนวณเส้นทาง OSRM
                     valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
                     route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
                     trip_times = []
 
-                    # คำนวณเส้นทาง OSRM ระหว่างจุดเชื่อมต่อจริง
                     trip_route_segments = []
                     for i in range(len(route_pts) - 1):
                         p1, p2 = route_pts[i], route_pts[i + 1]
@@ -605,6 +609,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         trip_route_segments.append(road_path)
 
                     records_list = group.to_dict("records")
+                    valid_segment_idx = 0
+
                     for idx_r, info in enumerate(records_list):
                         info["point_idx"] = point_counter
                         point_counter += 1
@@ -648,10 +654,10 @@ if dw_uploaded_file and sum_uploaded_file:
                         info["trip"] = trip_name
                         info["seg_dist_km"] = 0.0
 
-                        # ดึงเส้นทางถนนจริงของช่วงจุดส่งนั้นๆ มาแสดง
                         segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
-                        if idx_r < len(trip_route_segments):
-                            segment_path = trip_route_segments[idx_r]
+                        if info["lat"] != 0.0 and info["lng"] != 0.0 and valid_segment_idx < len(trip_route_segments):
+                            segment_path = trip_route_segments[valid_segment_idx]
+                            valid_segment_idx += 1
 
                         segments_data.append({
                             "trip": trip_name,
@@ -684,7 +690,9 @@ if dw_uploaded_file and sum_uploaded_file:
                 notices = []
                 on_time_val = str(row.get("on_time_col", ""))
 
-                if "ไม่ตรงเวลา" in on_time_val:
+                if "ไม่สามารถเข้าส่งได้" in on_time_val:
+                    notices.append("ไม่สามารถเข้าส่งได้ (ไม่มีพิกัด)")
+                elif "ไม่ตรงเวลา" in on_time_val:
                     notices.append("จัดส่งไม่ตรงเวลา")
                 elif "รอบเสริม" in on_time_val:
                     notices.append("รอบเสริม")
@@ -693,7 +701,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 else:
                     notices.append("จัดส่งตรงเวลา")
 
-                if row["gps_diff_num"] > 100:
+                if row["lat"] != 0.0 and row["lng"] != 0.0 and row["gps_diff_num"] > 100:
                     notices.append(f"GPS ห่าง {row['gps_diff']}m")
                 if row.get("is_extra_trip"):
                     notices.append("รอบเสริม")
@@ -780,11 +788,12 @@ if dw_uploaded_file and sum_uploaded_file:
                 
                 ontime_count = len(group[group["on_time_col"] == "จัดส่งตรงเวลา"]) if not group.empty else 0
                 late_count = len(group[group["on_time_col"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
+                no_loc_count = len(group[group["on_time_col"] == "ไม่สามารถเข้าส่งได้"]) if not group.empty else 0
                 extra_count = len(group[group["on_time_col"] == "รอบเสริม"]) if not group.empty else 0
                 new_count = len(group[group["on_time_col"] == "สมาชิกใหม่"]) if not group.empty else 0
                 
                 gps_err_count = (
-                    len(group[group["gps_diff_num"] > 100])
+                    len(group[(group["lat"] != 0.0) & (group["lng"] != 0.0) & (group["gps_diff_num"] > 100)])
                     if not group.empty
                     else 0
                 )
@@ -801,6 +810,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     "ระยะทางวิ่งรวม (กม.)": f"{t_dist:.2f}",
                     "จัดส่งตรงเวลา (จุด)": ontime_count,
                     "จัดส่งไม่ตรงเวลา (จุด)": late_count,
+                    "ไม่มีพิกัด (เข้าส่งไม่ได้)": no_loc_count,
                     "รอบเสริม (จุด)": extra_count,
                     "สมาชิกใหม่ (จุด)": new_count,
                     "GPS คลาดเคลื่อน >100m (จุด)": gps_err_count,
@@ -822,10 +832,11 @@ if dw_uploaded_file and sum_uploaded_file:
                 "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
                 "จัดส่งตรงเวลา (จุด)": len(df[df["on_time_col"] == "จัดส่งตรงเวลา"]),
                 "จัดส่งไม่ตรงเวลา (จุด)": len(df[df["on_time_col"].str.contains("ไม่ตรงเวลา", na=False)]),
+                "ไม่มีพิกัด (เข้าส่งไม่ได้)": len(df[df["on_time_col"] == "ไม่สามารถเข้าส่งได้"]),
                 "รอบเสริม (จุด)": len(df[df["on_time_col"] == "รอบเสริม"]),
                 "สมาชิกใหม่ (จุด)": len(df[df["on_time_col"] == "สมาชิกใหม่"]),
                 "GPS คลาดเคลื่อน >100m (จุด)": len(
-                    df[df["gps_diff_num"] > 100]
+                    df[(df["lat"] != 0.0) & (df["lng"] != 0.0) & (df["gps_diff_num"] > 100)]
                 ),
             })
 
@@ -933,6 +944,12 @@ if dw_uploaded_file and sum_uploaded_file:
                         border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                         display: flex; align-items: center; justify-content: center; z-index: 20;
                     }}
+                    .marker-badge-nolic {{
+                        position: absolute; top: -6px; right: -8px;
+                        background-color: #555555; color: white; border: 1.5px solid white;
+                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
+                        display: flex; align-items: center; justify-content: center; z-index: 20;
+                    }}
                     .marker-badge-extra {{
                         position: absolute; bottom: -4px; right: -6px;
                         background-color: #8E44AD; color: white; border: 1px solid white;
@@ -942,11 +959,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         position: absolute; bottom: -4px; left: -6px;
                         background-color: #2980B9; color: white; border: 1px solid white;
                         border-radius: 3px; padding: 0 2px; font-size: 8px; font-weight: bold; z-index: 20;
-                    }}
-                    .marker-badge-calc {{
-                        position: absolute; top: 50%; right: -10px; transform: translateY(-50%);
-                        background-color: #7F8C8D; color: white; border: 1px solid white;
-                        border-radius: 3px; padding: 0 2px; font-size: 7px; font-weight: bold; z-index: 20;
                     }}
                     .marker-badge-reason {{
                         position: absolute; top: 50%; left: -14px; transform: translateY(-50%);
@@ -974,11 +986,11 @@ if dw_uploaded_file and sum_uploaded_file:
                 <div class="filter-bar" style="background: #faf2f2;">
                     <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะพิเศษ (คอลัมน์ I):</span>
                     <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-nolic" onclick="setStatusFilter('nolic')">ไม่มีพิกัด/เข้าส่งไม่ได้ (<span id="count-nolic">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')">GPS>100m (<span id="count-gps">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-reason" onclick="setStatusFilter('reason')">เหตุขาดส่งขึ้นต้น 'ไม่' (<span id="count-reason">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')">รอบเสริม (<span id="count-extra">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')">สมาชิกใหม่ (<span id="count-new">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-calc" onclick="setStatusFilter('calc')">คำนวณไม่ได้ (<span id="count-calc">0</span>)</button>
                 </div>
 
                 <div class="controls">
@@ -1028,59 +1040,59 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function pointMatchesFilter(pt) {{
+                        if (pt.lat === 0.0 || pt.lng === 0.0) return false; // ข้ามจุดที่ไม่มีพิกัดออกจากการจำลองเส้นทาง
                         if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
                         if (currentStatusFilter !== null) {{
                             let onTimeCol = pt.on_time_col || '';
                             let isLate = onTimeCol.includes("ไม่ตรงเวลา");
-                            let isGps = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
+                            let isNoLoc = onTimeCol.includes("ไม่สามารถเข้าส่งได้");
+                            let isGps = (pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100);
                             let isReasonNot = hasReasonStartsWithNot(pt);
                             let isExtra = pt.is_extra_trip || onTimeCol.includes("รอบเสริม");
                             let isNew = pt.is_new_member || onTimeCol.includes("สมาชิกใหม่");
-                            let isCalc = pt.is_cannot_calc;
 
                             if (currentStatusFilter === 'late' && !isLate) return false;
+                            if (currentStatusFilter === 'nolic' && !isNoLoc) return false;
                             if (currentStatusFilter === 'gps' && !isGps) return false;
                             if (currentStatusFilter === 'reason' && !isReasonNot) return false;
                             if (currentStatusFilter === 'extra' && !isExtra) return false;
                             if (currentStatusFilter === 'new' && !isNew) return false;
-                            if (currentStatusFilter === 'calc' && !isCalc) return false;
                         }}
                         return true;
                     }}
 
                     function updateStatusCounts() {{
-                        let counts = {{ late: 0, gps: 0, reason: 0, extra: 0, new: 0, calc: 0 }};
+                        let counts = {{ late: 0, nolic: 0, gps: 0, reason: 0, extra: 0, new: 0 }};
                         points.forEach(pt => {{
-                            if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
+                            if (pt.lat !== 0.0 && pt.lng !== 0.0 && (currentFilter === 'ALL' || pt.trip === currentFilter)) {{
                                 let onTimeCol = pt.on_time_col || '';
                                 if (onTimeCol.includes("ไม่ตรงเวลา")) counts.late++;
-                                if ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100) counts.gps++;
+                                if (onTimeCol.includes("ไม่สามารถเข้าส่งได้")) counts.nolic++;
+                                if ((pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100)) counts.gps++;
                                 if (hasReasonStartsWithNot(pt)) counts.reason++;
                                 if (pt.is_extra_trip || onTimeCol.includes("รอบเสริม")) counts.extra++;
                                 if (pt.is_new_member || onTimeCol.includes("สมาชิกใหม่")) counts.new++;
-                                if (pt.is_cannot_calc) counts.calc++;
                             }}
                         }});
                         document.getElementById('count-late').innerText = counts.late;
+                        document.getElementById('count-nolic').innerText = counts.nolic;
                         document.getElementById('count-gps').innerText = counts.gps;
                         document.getElementById('count-reason').innerText = counts.reason;
                         document.getElementById('count-extra').innerText = counts.extra;
                         document.getElementById('count-new').innerText = counts.new;
-                        document.getElementById('count-calc').innerText = counts.calc;
                     }}
 
                     function createTooltipHtml(info, seqNum) {{
                         let badgesHtml = [];
                         let onTimeVal = info.on_time_col || 'จัดส่งตรงเวลา';
-                        if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
+                        if (onTimeVal.includes("ไม่สามารถเข้าส่งได้")) badgesHtml.push(`<span class="alert-badge" style="background:#555555;">เข้าส่งไม่ได้</span>`);
+                        else if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
                         else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{onTimeVal}}</span>`);
                         
-                        if ((info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
+                        if (info.lat !== 0.0 && info.lng !== 0.0 && (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
                         if (hasReasonStartsWithNot(info)) badgesHtml.push(`<span class="alert-badge" style="background:#C0392B;">เหตุขาดส่ง: ${{info.short_reason_col}}</span>`);
                         if (info.is_extra_trip) badgesHtml.push(`<span class="alert-badge" style="background:#8E44AD;">รอบเสริม</span>`);
                         if (info.is_new_member) badgesHtml.push(`<span class="alert-badge" style="background:#2980B9;">สมาชิกใหม่</span>`);
-                        if (info.is_cannot_calc) badgesHtml.push(`<span class="alert-badge" style="background:#7F8C8D;">คำนวณไม่ได้</span>`);
-                        if (info.is_moved_trip) badgesHtml.push(`<span class="alert-badge" style="background:#D35400;">ย้ายรอบ</span>`);
 
                         let addrInfo = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '';
                         let fullAddressText = addrInfo ? `<br><b>ที่อยู่:</b> ${{addrInfo}}` : '';
@@ -1100,7 +1112,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function createMarkerIcon(seqNum, color, ptInfo) {{
                         let onTimeVal = ptInfo && ptInfo.on_time_col ? ptInfo.on_time_col : '';
                         let isLate = onTimeVal.includes("ไม่ตรงเวลา");
-                        let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
+                        let isGpsDiff = ptInfo && (ptInfo.lat !== 0.0 && ptInfo.lng !== 0.0) && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
                         let isReasonNot = ptInfo && hasReasonStartsWithNot(ptInfo);
                         
                         let lateBadgeHtml = isLate ? `<div class="marker-badge-late">!</div>` : '';
@@ -1108,9 +1120,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         let reasonBadgeHtml = isReasonNot ? `<div class="marker-badge-reason" title="${{ptInfo.short_reason_col}}">ไม่</div>` : '';
                         let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
                         let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
-                        let calcBadgeHtml = (ptInfo && ptInfo.is_cannot_calc) ? `<div class="marker-badge-calc">NC</div>` : '';
 
-                        let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}${{calcBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
+                        let badgeCombo = lateBadgeHtml + gpsBadgeHtml;
+                        let innerHtml = `<div class="marker-container">${{badgeCombo}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
                         return L.divIcon({{ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
                     }}
 
@@ -1118,7 +1130,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         allMarkers.forEach(m => map.removeLayer(m));
                         allMarkers = [];
                         points.forEach((pt, idx) => {{
-                            if (pointMatchesFilter(pt)) {{
+                            if (pt.lat !== 0.0 && pt.lng !== 0.0 && pointMatchesFilter(pt)) {{
                                 let seqNumber = idx + 1;
                                 let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
                                 let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }});
@@ -1126,9 +1138,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 if (!isMode1 && idx > currentStep) {{
                                     // ซ่อนไว้ก่อน
                                 }} else {{
-                                    if (pt.lat !== 0.0 && pt.lng !== 0.0) {{
-                                        marker.addTo(map);
-                                    }}
+                                    marker.addTo(map);
                                 }}
                                 
                                 marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
@@ -1162,14 +1172,14 @@ if dw_uploaded_file and sum_uploaded_file:
                         }}
 
                         initMarkers();
-                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
                         if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
                     }}
 
                     function setStatusFilter(statusKey) {{
                         pauseAnimation();
                         currentStatusFilter = (currentStatusFilter === statusKey) ? null : statusKey;
-                        ['late', 'gps', 'reason', 'extra', 'new', 'calc'].forEach(k => {{
+                        ['late', 'nolic', 'gps', 'reason', 'extra', 'new'].forEach(k => {{
                             let btn = document.getElementById('status-btn-' + k);
                             if (btn) {{
                                 if (k === currentStatusFilter) btn.classList.add('active');
@@ -1177,7 +1187,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }});
                         initMarkers();
-                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
                         if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
                     }}
 
@@ -1192,7 +1202,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }}
                         activeMarkerRef = null;
-                        if (!info || info.point_idx === undefined || info.point_idx === null) return;
+                        if (!info || info.point_idx === undefined || info.point_idx === null || info.lat === 0.0) return;
                         
                         let target = allMarkers[info.point_idx];
                         if (target) {{
@@ -1215,8 +1225,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         currentStep = stepIndex;
                         let currentSeg = segments[currentStep];
 
-                        if (!pointMatchesFilter(currentSeg.info)) {{
-                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && pointMatchesFilter(seg.info));
+                        if (currentSeg.info.lat === 0.0 || !pointMatchesFilter(currentSeg.info)) {{
+                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
                             if (nextValid !== -1) {{ currentStep = nextValid; currentSeg = segments[currentStep]; }}
                         }}
 
@@ -1244,9 +1254,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         let accumulatedDistance = 0.0;
                         for (let i = 0; i <= currentStep; i++) {{
                             let seg = segments[i];
-                            if (!pointMatchesFilter(seg.info)) continue;
+                            if (seg.info.lat === 0.0 || !pointMatchesFilter(seg.info)) continue;
                             accumulatedDistance += (seg.dist_km || 0.0);
-                            if (seg.path && seg.path.length > 0 && seg.info.lat !== 0.0) {{
+                            if (seg.path && seg.path.length > 0) {{
                                 let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
                                 activePolylines.push(polyline);
                             }}
@@ -1256,8 +1266,8 @@ if dw_uploaded_file and sum_uploaded_file:
                             allMarkers.forEach((marker, mIdx) => {{
                                 if (marker) {{
                                     let ptInfo = points[mIdx];
-                                    let matches = pointMatchesFilter(ptInfo);
-                                    if (matches && mIdx <= currentStep && ptInfo.lat !== 0.0) {{
+                                    let matches = ptInfo.lat !== 0.0 && pointMatchesFilter(ptInfo);
+                                    if (matches && mIdx <= currentStep) {{
                                         if (!map.hasLayer(marker)) marker.addTo(map);
                                     }} else {{
                                         if (map.hasLayer(marker)) map.removeLayer(marker);
@@ -1285,7 +1295,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function nextStep() {{
                         let nextIdx = currentStep + 1;
                         while (nextIdx < segments.length) {{
-                            if (pointMatchesFilter(segments[nextIdx].info)) break;
+                            if (segments[nextIdx].info.lat !== 0.0 && pointMatchesFilter(segments[nextIdx].info)) break;
                             nextIdx++;
                         }}
                         if (nextIdx < segments.length) {{
@@ -1313,7 +1323,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     function resetAnimation() {{
                         pauseAnimation();
-                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
                         currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
                         updateStep(currentStep);
                         document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
@@ -1379,28 +1389,29 @@ if dw_uploaded_file and sum_uploaded_file:
                     )
                     orig_trip_dist += d_km
 
-                unvisited = orig_records.copy()
+                valid_unvisited = [p for p in orig_records if p["lat"] != 0.0 and p["lng"] != 0.0]
+                no_loc_items = [p for p in orig_records if p["lat"] == 0.0 or p["lng"] == 0.0]
+
+                unvisited = valid_unvisited.copy()
                 current_pos = warehouse_coord
-                opt_records = []
+                opt_records_valid = []
                 while unvisited:
                     best_idx = 0
                     min_d = float("inf")
                     for idx, pt in enumerate(unvisited):
-                        if pt["lat"] == 0.0 or pt["lng"] == 0.0:
-                            d = 999999.0
-                        else:
-                            d = haversine(
-                                current_pos[0], current_pos[1], pt["lat"], pt["lng"]
-                            )
+                        d = haversine(
+                            current_pos[0], current_pos[1], pt["lat"], pt["lng"]
+                        )
                         if d < min_d:
                             min_d = d
                             best_idx = idx
                     next_item = unvisited.pop(best_idx)
-                    opt_records.append(next_item)
-                    if next_item["lat"] != 0.0 and next_item["lng"] != 0.0:
-                        current_pos = (next_item["lat"], next_item["lng"])
+                    opt_records_valid.append(next_item)
+                    current_pos = (next_item["lat"], next_item["lng"])
 
-                valid_opt = [(pt["lat"], pt["lng"]) for pt in opt_records if pt["lat"] != 0.0 and pt["lng"] != 0.0]
+                opt_records = opt_records_valid + no_loc_items
+
+                valid_opt = [(pt["lat"], pt["lng"]) for pt in opt_records_valid]
                 opt_pts_coords = (
                     [warehouse_coord]
                     + valid_opt
@@ -1416,7 +1427,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     )
                     opt_trip_dist += d_km
 
-                if opt_trip_dist >= orig_trip_dist and n_pts > 2:
+                if opt_trip_dist >= orig_trip_dist and len(valid_unvisited) > 2:
                     opt_records = orig_records.copy()
                     opt_trip_dist = orig_trip_dist
 
@@ -1466,7 +1477,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
                 })
 
-                valid_opt_group_coords = [warehouse_coord] + [(pt["lat"], pt["lng"]) for pt in opt_records if pt["lat"] != 0.0 and pt["lng"] != 0.0] + [warehouse_coord]
+                valid_opt_group_coords = [warehouse_coord] + [(pt["lat"], pt["lng"]) for pt in opt_records_valid] + [warehouse_coord]
                 trip_opt_route_segments = []
                 for i in range(len(valid_opt_group_coords) - 1):
                     p1, p2 = valid_opt_group_coords[i], valid_opt_group_coords[i+1]
@@ -1489,7 +1500,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     all_opt_points_flat.append(info)
 
                     segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
-                    if info["lat"] != 0.0 and valid_idx_counter < len(trip_opt_route_segments):
+                    if info["lat"] != 0.0 and info["lng"] != 0.0 and valid_idx_counter < len(trip_opt_route_segments):
                         segment_path = trip_opt_route_segments[valid_idx_counter]
                         valid_idx_counter += 1
 
@@ -1727,7 +1738,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }}
                         optActiveMarkerRef = null;
-                        if (!info || info.point_idx === undefined) return;
+                        if (!info || info.point_idx === undefined || info.lat === 0.0) return;
                         
                         let target = optMarkers[info.point_idx];
                         if (target) {{
@@ -1744,8 +1755,13 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (stepIndex < 0 || stepIndex >= optSegments.length) return;
                         optCurrentStep = stepIndex;
                         let currentSeg = optSegments[optCurrentStep];
-                        let info = currentSeg.info;
 
+                        if (currentSeg.info.lat === 0.0) {{
+                            let nextValid = optSegments.findIndex((seg, idx) => idx >= optCurrentStep && seg.info.lat !== 0.0);
+                            if (nextValid !== -1) {{ optCurrentStep = nextValid; currentSeg = optSegments[optCurrentStep]; }}
+                        }}
+
+                        let info = currentSeg.info;
                         let slider = document.getElementById('optTimeSlider');
                         slider.value = optCurrentStep;
                         slider.style.accentColor = currentSeg.color;
@@ -1768,8 +1784,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         let accumulatedDist = 0.0;
                         for (let i = 0; i <= optCurrentStep; i++) {{
                             let seg = optSegments[i];
+                            if (seg.info.lat === 0.0) continue;
                             accumulatedDist += (seg.dist_km || 0.0);
-                            if (seg.path && seg.path.length > 0 && seg.info.lat !== 0.0) {{
+                            if (seg.path && seg.path.length > 0) {{
                                 let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
                                 optActivePolylines.push(polyline);
                             }}
@@ -1790,8 +1807,13 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function nextOptStep() {{
-                        if (optCurrentStep + 1 < optSegments.length) {{
-                            optCurrentStep++;
+                        let nextIdx = optCurrentStep + 1;
+                        while (nextIdx < optSegments.length) {{
+                            if (optSegments[nextIdx].info.lat !== 0.0) break;
+                            nextIdx++;
+                        }}
+                        if (nextIdx < optSegments.length) {{
+                            optCurrentStep = nextIdx;
                             updateOptStep(optCurrentStep);
                         }} else {{
                             pauseOptAnimation();
@@ -1815,8 +1837,9 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     function resetOptAnimation() {{
                         pauseOptAnimation();
-                        optCurrentStep = 0;
-                        updateOptStep(0);
+                        let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
+                        optCurrentStep = firstValid !== -1 ? firstValid : 0;
+                        updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
                     }}
 
