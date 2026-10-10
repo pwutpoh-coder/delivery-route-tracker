@@ -518,6 +518,12 @@ def parse_dual_excel_data(dw_file, sum_file):
 
 # --- MAIN APP INTERFACE ---
 st.markdown("### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
+st.markdown(
+    "🔗 **ลิงก์สำหรับดาวน์โหลดรายงานต้นทาง:**\n"
+    "- [📥 ดาวน์โหลดไฟล์รายงานใบเบิกใบคืนประจำวัน](https://customreport.sprinkle-th.work/customsql/report/nn_daily_requisition_and_return)\n"
+    "- [📥 ดาวน์โหลดไฟล์รายงานสรุปการจัดส่งประจำวัน](https://customreport.sprinkle-th.work/customsql/report/nn_delivery_summary)"
+)
+
 col_up1, col_up2 = st.columns(2)
 with col_up1:
     dw_uploaded_file = st.file_uploader(
@@ -585,7 +591,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 last_time_dt = None
 
                 for trip_name, group in grouped:
-                    # กรองเฉพาะจุดที่มีพิกัด Lat/Lng สมบูรณ์มาคำนวณเส้นทาง OSRM
                     valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
                     pts = (
                         [warehouse_coord]
@@ -772,7 +777,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 actual_qty = group["qty"].sum() if not group.empty else 0
                 point_count = len(group)
                 
-                # จำแนกประเภทตามคอลัมน์ I (on_time_col)
                 ontime_count = len(group[group["on_time_col"] == "จัดส่งตรงเวลา"]) if not group.empty else 0
                 late_count = len(group[group["on_time_col"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
                 extra_count = len(group[group["on_time_col"] == "รอบเสริม"]) if not group.empty else 0
@@ -836,14 +840,12 @@ if dw_uploaded_file and sum_uploaded_file:
             wh_json = json.dumps(warehouse_coord)
             is_mode_1 = "แบบที่ 1" in play_mode
 
-            # สร้าง HTML Legend อัตโนมัติตามจำนวนเที่ยวจริง (สูงสุด 6 เที่ยว)
             legend_html_items = ""
             for t_info in trip_quotas:
                 t_name = f"เที่ยวที่ {t_info['trip_no']}"
                 t_color = trip_colors.get(t_name, "#0055FF")
                 legend_html_items += f'<div class="legend-item"><span class="color-box" style="background:{t_color};"></span> {t_name}</div>\n'
 
-            # สร้างปุ่มตัวกรองเที่ยวอัตโนมัติตามจำนวนเที่ยวจริง
             trip_filter_buttons = '<button class="filter-btn active" id="btn-all" onclick="setTripFilter(\'ALL\')">แสดงทั้งหมด</button>\n'
             for t_info in trip_quotas:
                 t_name = f"เที่ยวที่ {t_info['trip_no']}"
