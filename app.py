@@ -564,7 +564,6 @@ if dw_uploaded_file and sum_uploaded_file:
             c1.info(f"📅 **ประจำวันที่:** {header_info['date']}")
             c2.info(f"🚛 **รหัสรถส่ง:** {header_info['truck_no']}")
 
-            # รองรับสีสูงสุด 6 เที่ยว
             trip_colors = {
                 "เที่ยวที่ 1": "#0055FF",
                 "เที่ยวที่ 2": "#FF0055",
@@ -586,29 +585,26 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 row_incremental_distances = []
                 row_incremental_time_diffs = []
-
-                last_lat, last_lng = warehouse_coord
                 last_time_dt = None
 
                 for trip_name, group in grouped:
                     valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
-                    pts = (
-                        [warehouse_coord]
-                        + list(zip(valid_group["lat"], valid_group["lng"]))
-                        + [warehouse_coord]
-                    )
-                    records_list = group.to_dict("records")
+                    route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
                     trip_times = []
 
-                    for i in range(len(pts) - 1):
-                        p1, p2 = pts[i], pts[i + 1]
+                    # คำนวณเส้นทาง OSRM ระหว่างจุดเชื่อมต่อจริง
+                    trip_route_segments = []
+                    for i in range(len(route_pts) - 1):
+                        p1, p2 = route_pts[i], route_pts[i + 1]
                         road_path, dist_km = get_osrm_route(
                             p1[0], p1[1], p2[0], p2[1]
                         )
                         total_trip_dist += dist_km
+                        trip_route_segments.append(road_path)
 
+                    records_list = group.to_dict("records")
                     for idx_r, info in enumerate(records_list):
                         info["point_idx"] = point_counter
                         point_counter += 1
@@ -652,10 +648,15 @@ if dw_uploaded_file and sum_uploaded_file:
                         info["trip"] = trip_name
                         info["seg_dist_km"] = 0.0
 
+                        # ดึงเส้นทางถนนจริงของช่วงจุดส่งนั้นๆ มาแสดง
+                        segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
+                        if idx_r < len(trip_route_segments):
+                            segment_path = trip_route_segments[idx_r]
+
                         segments_data.append({
                             "trip": trip_name,
                             "color": trip_colors.get(trip_name, "#0055FF"),
-                            "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]] if info["lat"] != 0.0 else [warehouse_coord, warehouse_coord],
+                            "path": segment_path,
                             "info": info,
                             "dist_km": 0.0,
                         })
@@ -1465,6 +1466,14 @@ if dw_uploaded_file and sum_uploaded_file:
                     "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
                 })
 
+                valid_opt_group_coords = [warehouse_coord] + [(pt["lat"], pt["lng"]) for pt in opt_records if pt["lat"] != 0.0 and pt["lng"] != 0.0] + [warehouse_coord]
+                trip_opt_route_segments = []
+                for i in range(len(valid_opt_group_coords) - 1):
+                    p1, p2 = valid_opt_group_coords[i], valid_opt_group_coords[i+1]
+                    road_path, _ = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
+                    trip_opt_route_segments.append(road_path)
+
+                valid_idx_counter = 0
                 for i, opt_rec in enumerate(opt_records):
                     info = opt_rec.copy()
                     info["trip"] = trip_name
@@ -1479,10 +1488,15 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     all_opt_points_flat.append(info)
 
+                    segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
+                    if info["lat"] != 0.0 and valid_idx_counter < len(trip_opt_route_segments):
+                        segment_path = trip_opt_route_segments[valid_idx_counter]
+                        valid_idx_counter += 1
+
                     opt_segments_data.append({
                         "trip": trip_name,
                         "color": trip_colors.get(trip_name, "#0055FF"),
-                        "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]] if info["lat"] != 0.0 else [warehouse_coord, warehouse_coord],
+                        "path": segment_path,
                         "info": info,
                         "dist_km": 0.0,
                         "opt_seq": opt_seq_num,
