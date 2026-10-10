@@ -18,7 +18,7 @@ st.title(
     "🚚 ระบบวิเคราะห์และติดตามเส้นทางส่งสินค้า (Sprinkle Delivery Inspector)"
 )
 st.markdown(
-    "ระบบดึงข้อมูลรายงานใบเบิกใบคืน และรายงานสรุปการจัดส่งประจำวันจากลิงก์ระบบโดยอัตโนมัติ เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
+    "อัปโหลดไฟล์รายงานใบเบิกใบคืน และรายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
 )
 
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
@@ -86,7 +86,7 @@ st.sidebar.divider()
 
 st.sidebar.header("🔄 จัดการข้อมูล")
 if st.sidebar.button(
-    "🗑️ ล้างข้อมูล / โหลดข้อมูลใหม่", use_container_width=True
+    "🗑️ ล้างข้อมูล / นำเข้าไฟล์ใหม่", use_container_width=True
 ):
     st.cache_data.clear()
     st.rerun()
@@ -518,45 +518,13 @@ def parse_dual_excel_data(dw_file, sum_file):
 
 
 # --- MAIN APP INTERFACE ---
-st.markdown("### 📂 แหล่งข้อมูลรายงานประจำวัน")
+st.markdown("### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
 st.markdown(
-    "เลือกโหลดข้อมูลจากลิงก์ระบบโดยอัตโนมัติ หรือเลือกอัปโหลดไฟล์ด้วยตนเองด้านล่าง"
+    "🔗 **ลิงก์สำหรับดาวน์โหลดรายงานต้นทาง:**\n"
+    "- [📥 ดาวน์โหลดไฟล์รายงานใบเบิกใบคืนประจำวัน](https://customreport.sprinkle-th.work/customsql/report/nn_daily_requisition_and_return)\n"
+    "- [📥 ดาวน์โหลดไฟล์รายงานสรุปการจัดส่งประจำวัน](https://customreport.sprinkle-th.work/customsql/report/nn_delivery_summary)"
 )
 
-col_mode1, col_mode2 = st.columns([1, 1])
-with col_mode1:
-    fetch_auto = st.button(
-        "🚀 ดึงข้อมูลจากลิงก์ระบบอัตโนมัติทันที", use_container_width=True
-    )
-
-dw_file_obj = None
-sum_file_obj = None
-
-if fetch_auto:
-    with st.spinner("กำลังดึงข้อมูลจากลิงก์ระบบ..."):
-        try:
-            url_dw = "https://customreport.sprinkle-th.work/customsql/report/nn_daily_requisition_and_return"
-            url_sum = (
-                "https://customreport.sprinkle-th.work/customsql/report/nn_delivery_summary"
-            )
-
-            res_dw = requests.get(url_dw, timeout=10)
-            res_sum = requests.get(url_sum, timeout=10)
-
-            if res_dw.status_code == 200 and res_sum.status_code == 200:
-                dw_file_obj = io.BytesIO(res_dw.content)
-                sum_file_obj = io.BytesIO(res_sum.content)
-                st.success("✅ ดึงข้อมูลจากลิงก์ระบบสำเร็จเรียบร้อยแล้ว!")
-            else:
-                st.error(
-                    f"❌ ไม่สามารถดึงข้อมูลจากลิงก์ได้ (Status Code: DW={res_dw.status_code}, SUM={res_sum.status_code})"
-                )
-        except Exception as e:
-            st.error(
-                f"❌ เกิดข้อผิดพลาดในการเชื่อมต่อเครือข่าย: {e} (แนะนำให้ใช้วิธีอัปโหลดไฟล์ด้านล่างแทนหากติดปัญหา CORS/Network)"
-            )
-
-st.markdown("---")
 col_up1, col_up2 = st.columns(2)
 with col_up1:
     dw_uploaded_file = st.file_uploader(
@@ -564,27 +532,22 @@ with col_up1:
         type=["xlsx", "xls"],
         key="dw_file",
     )
-    if dw_uploaded_file:
-        dw_file_obj = dw_uploaded_file
-
 with col_up2:
     sum_uploaded_file = st.file_uploader(
         "2. ไฟล์รายงานสรุปการจัดส่งประจำวัน (.xls / .xlsx)",
         type=["xlsx", "xls"],
         key="sum_file",
     )
-    if sum_uploaded_file:
-        sum_file_obj = sum_uploaded_file
 
-if dw_file_obj and sum_file_obj:
-    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากไฟล์..."):
+if dw_uploaded_file and sum_uploaded_file:
+    with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากไฟล์ทั้งสอง..."):
         df, trip_quotas, header_info = parse_dual_excel_data(
-            dw_file_obj, sum_file_obj
+            dw_uploaded_file, sum_uploaded_file
         )
 
     if df.empty:
         st.error(
-            "❌ ไม่พบข้อมูลรายการจัดส่ง กรุณาตรวจสอบรูปแบบไฟล์รายงานสรุปการจัดส่งประจำวันอีกครั้ง"
+            "❌ไม่พบข้อมูลรายการจัดส่ง กรุณาตรวจสอบรูปแบบไฟล์รายงานสรุปการจัดส่งประจำวันอีกครั้ง"
         )
     else:
         st.success(
@@ -1861,5 +1824,5 @@ if dw_file_obj and sum_file_obj:
             )
 else:
     st.info(
-        "ℹ️ กรุณากดปุ่ม **'ดึงข้อมูลจากลิงก์ระบบอัตโนมัติทันที'** ด้านบน หรืออัปโหลดไฟล์ทั้ง 2 ไฟล์ด้วยตนเอง เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
+        "ℹ️ กรุณาอัปโหลดไฟล์ทั้ง 2 ไฟล์ (รายงานใบเบิกใบคืน และ รายงานสรุปการจัดส่ง) ที่ด้านบน เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
     )
