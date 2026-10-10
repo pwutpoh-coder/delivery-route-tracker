@@ -74,7 +74,7 @@ def get_auto_warehouse_by_truck(truck_no):
     return None
 
 
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (ประกาศล่วงหน้าเพื่อให้ sidebar เลือกค่าอัตโนมัติได้) ---
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ"}
 
@@ -461,7 +461,6 @@ with col_up2:
         key="sum_file",
     )
 
-# ตรวจจับรหัสรถอัตโนมัติหากมีการอัปโหลดไฟล์ DW แล้ว
 detected_truck_no = "ไม่ระบุ"
 auto_wh_name = None
 if dw_uploaded_file:
@@ -482,7 +481,6 @@ if dw_uploaded_file:
     except:
         pass
 
-# ตั้งค่าเลือกคลังสินค้าใน sidebar โดยเลือกค่าอัตโนมัติจากรหัสรถถ้ามี
 wh_keys = list(warehouse_options.keys())
 default_index = 0
 if auto_wh_name and auto_wh_name in wh_keys:
@@ -1485,7 +1483,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         for i, o in enumerate(orig_records)
                         if o["cust_id"] == opt_item["cust_id"]
                     )
-                    if idx != orig_idx:
+                    is_swapped = (idx != orig_idx)
+                    if is_swapped:
                         swapped_count += 1
 
                     detailed_swap_records.append({
@@ -1498,9 +1497,10 @@ if dw_uploaded_file and sum_uploaded_file:
                         "ลำดับใหม่ (Optimized)": global_opt_seq_counter,
                         "สถานะการสลับ": (
                             "🔄 สลับตำแหน่ง"
-                            if idx != orig_idx
+                            if is_swapped
                             else "✔️ คงเดิม"
                         ),
+                        "is_swapped": is_swapped,
                     })
 
                 total_swapped_points += swapped_count
@@ -1537,9 +1537,18 @@ if dw_uploaded_file and sum_uploaded_file:
                     global_opt_seq_counter += 1
                     orig_seq_num = original_order_map.get(info["cust_id"], "-")
 
+                    # ตรวจสอบว่าจุดนี้มีการสลับตำแหน่งหรือไม่เพื่อใช้กำหนดสีป้ายเดิม (ถ้าสลับ=แดง, ถ้าคงเดิม=ดำ)
+                    orig_idx_check = next(
+                        idx_o
+                        for idx_o, o_rec in enumerate(orig_records)
+                        if o_rec["cust_id"] == opt_rec["cust_id"]
+                    )
+                    is_swapped_point = (i != orig_idx_check)
+
                     info["color"] = trip_colors.get(trip_name, "#0055FF")
                     info["opt_seq"] = opt_seq_num
                     info["orig_seq"] = orig_seq_num
+                    info["is_swapped"] = is_swapped_point
                     info["point_idx"] = len(all_opt_points_flat)
 
                     all_opt_points_flat.append(info)
@@ -1557,6 +1566,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         "dist_km": 0.0,
                         "opt_seq": opt_seq_num,
                         "orig_seq": orig_seq_num,
+                        "is_swapped": is_swapped_point,
                     })
 
             total_dist_diff = total_orig_dist_all - total_opt_dist_all
@@ -1590,8 +1600,10 @@ if dw_uploaded_file and sum_uploaded_file:
             st.markdown(
                 "#### 🔄 ตารางเปรียบเทียบการสลับลำดับจุดส่ง (เทียบแบบที่ 2 กับ แบบที่ 1)"
             )
+            # ตัดคอลัมน์ภายใน is_swapped ออกก่อนแสดงผลตาราง
+            display_swap_df = pd.DataFrame(detailed_swap_records).drop(columns=["is_swapped"])
             st.dataframe(
-                pd.DataFrame(detailed_swap_records),
+                display_swap_df,
                 use_container_width=True,
                 height=300,
                 hide_index=True,
@@ -1669,7 +1681,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     .opt-orig-badge {{
                         position: absolute; top: -8px; right: -12px;
-                        background-color: #333333; color: #FFD700; border: 1.5px solid white;
+                        color: #FFFFFF; border: 1.5px solid white;
                         border-radius: 10px; padding: 0 4px; font-size: 9px; font-weight: bold;
                         box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
                         white-space: nowrap;
@@ -1685,7 +1697,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="opt-legend">
                     {opt_legend_items}
-                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายสีดำมุมบนขวาคือ <b>"ลำดับเดิม"</b></div>
+                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายมุมบนขวา: <span style="color:#D32F2F; font-weight:bold;">สีแดง = สลับตำแหน่ง</span> | <span style="color:#333; font-weight:bold;">สีดำ = ไม่เปลี่ยนลำดับ</span></div>
                 </div>
 
                 <div class="opt-controls">
@@ -1733,8 +1745,11 @@ if dw_uploaded_file and sum_uploaded_file:
                             if (info && info.cust_id && info.cust_id !== "WH-001" && info.lat !== 0.0 && info.lng !== 0.0) {{
                                 let optSeq = seg.opt_seq;
                                 let origSeq = seg.orig_seq;
+                                let isSwapped = seg.is_swapped;
                                 
-                                let origBadgeHtml = `<div class="opt-orig-badge">${{origSeq}}</div>`;
+                                // ถ้ามีการเปลี่ยนลำดับ ให้ป้ายสีแดง ถ้าไม่เปลี่ยนให้เป็นสีดำ
+                                let badgeBgColor = isSwapped ? '#D32F2F' : '#333333';
+                                let origBadgeHtml = `<div class="opt-orig-badge" style="background-color: ${{badgeBgColor}};">${{origSeq}}</div>`;
                                 let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
                                 
                                 let customIcon = L.divIcon({{
@@ -1747,10 +1762,11 @@ if dw_uploaded_file and sum_uploaded_file:
                                 marker.addTo(optMap);
                                 
                                 let addrText = info.shipping_address && info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{info.shipping_address}}` : '';
+                                let swapStatusText = isSwapped ? '<span style="color:#D32F2F; font-weight:bold;">🔄 สลับตำแหน่ง</span>' : '<span style="color:#2E7D32; font-weight:bold;">✔️ คงเดิม</span>';
                                 
                                 marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
                                     <b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br>
-                                    <b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br>
+                                    <b>🔄 ลำดับเดิม:</b> #${{origSeq}} (${{swapStatusText}})<br>
                                     <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name}})` + addrText + `<br>
                                     <b>เที่ยว:</b> ${{seg.trip}}<br>
                                     <b>ยอดส่ง:</b> ${{info.qty}} ถัง
@@ -1862,20 +1878,20 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
-                    function resetOptAnimation() {{
+                    function resetOptAnimation() {
                         pauseOptAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }}
+                    }
 
-                    function onOptSliderChange(val) {{
+                    function onOptSliderChange(val) {
                         pauseOptAnimation();
                         updateOptStep(parseInt(val));
-                    }}
+                    }
 
-                    if (optSegments.length > 0) {{ updateOptStep(0); }}
+                    if (optSegments.length > 0) { updateOptStep(0); }
                 </script>
             </body>
             </html>
@@ -1884,7 +1900,7 @@ if dw_uploaded_file and sum_uploaded_file:
             st.components.v1.html(opt_map_html, height=620, scrolling=False)
 
             st.info(
-                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องข้ามเที่ยวตั้งแต่ต้นจนจบ และป้ายกำกับสีดำมุมขวาบนของหมุดแสดง **เฉพาะตัวเลขลำดับเดิม** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
+                "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องข้ามเที่ยวตั้งแต่ต้นจนจบ และป้ายกำกับมุมขวาบนของหมุดแสดงเลข **ลำดับเดิม** โดยถ้าตำแหน่งมีการเปลี่ยนแปลงจะแสดงเป็น **สีแดง** และถ้าไม่เปลี่ยนแปลงจะแสดงเป็น **สีดำ** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
             )
 else:
     st.info(
