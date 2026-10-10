@@ -386,7 +386,6 @@ def parse_dual_excel_data(dw_file, sum_file):
         if str_f:
             status = str_f
 
-        # ตรวจสอบว่าไม่มีพิกัด (Lat หรือ Lng เป็น 0.0) ให้กำหนดสถานะเป็น "ไม่สามารถเข้าส่งได้"
         if lat == 0.0 or lng == 0.0:
             on_time_status = "ไม่สามารถเข้าส่งได้"
 
@@ -579,7 +578,7 @@ if dw_uploaded_file and sum_uploaded_file:
             }
 
             with st.spinner(
-                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (ตามเวลาจริง)..."
+                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (ตามเวลาจริง)...ขนเฉพาะจุดที่มีพิกัด"
             ):
                 segments_data = []
                 grouped = df.groupby("trip", sort=False)
@@ -591,27 +590,27 @@ if dw_uploaded_file and sum_uploaded_file:
                 row_incremental_distances = []
                 row_incremental_time_diffs = []
 
-                last_lat, last_lng = warehouse_coord
                 last_time_dt = None
 
                 for trip_name, group in grouped:
-                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
-                    pts = (
-                        [warehouse_coord]
-                        + list(zip(valid_group["lat"], valid_group["lng"]))
-                        + [warehouse_coord]
-                    )
-                    records_list = group.to_dict("records")
+                    # กรองเฉพาะจุดที่มีพิกัดถูกต้องมาเชื่อมเส้นทาง
+                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
+                    
+                    # สร้างลำดับพิกัดสำหรับ OSRM เริ่มจากคลัง -> จุดส่งที่มีพิกัด -> คลัง
+                    route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
                     trip_times = []
 
-                    for i in range(len(pts) - 1):
-                        p1, p2 = pts[i], pts[i + 1]
+                    # คำนวณเส้นทางถนนจริงเฉพาะระหว่างจุดที่มีพิกัด
+                    for i in range(len(route_pts) - 1):
+                        p1, p2 = route_pts[i], route_pts[i + 1]
                         road_path, dist_km = get_osrm_route(
                             p1[0], p1[1], p2[0], p2[1]
                         )
                         total_trip_dist += dist_km
+
+                    records_list = group.to_dict("records")
 
                     for idx_r, info in enumerate(records_list):
                         info["point_idx"] = point_counter
@@ -656,13 +655,16 @@ if dw_uploaded_file and sum_uploaded_file:
                         info["trip"] = trip_name
                         info["seg_dist_km"] = 0.0
 
-                        segments_data.append({
-                            "trip": trip_name,
-                            "color": trip_colors.get(trip_name, "#0055FF"),
-                            "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]] if info["lat"] != 0.0 else [warehouse_coord, warehouse_coord],
-                            "info": info,
-                            "dist_km": 0.0,
-                        })
+                        # สำหรับ segments_data ให้เก็บเฉพาะจุดที่มีพิกัดจริงเพื่อนำไปวาดเส้นทางต่อกันได้ถูกต้อง
+                        if info["lat"] != 0.0 and info["lng"] != 0.0:
+                            # หาพิกัดก่อนหน้าที่มีจริงเพื่อดึงเส้นทาง OSRM ย่อยมาร้อยเรียง
+                            segments_data.append({
+                                "trip": trip_name,
+                                "color": trip_colors.get(trip_name, "#0055FF"),
+                                "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]],
+                                "info": info,
+                                "dist_km": 0.0,
+                            })
 
                     trip_distances[trip_name] = round(total_trip_dist, 2)
                     if trip_times:
@@ -839,13 +841,38 @@ if dw_uploaded_file and sum_uploaded_file:
 
             st.table(pd.DataFrame(summaries))
 
+            # สร้างเส้นทางถนนเชื่อมต่อระหว่างคลัง -> จุดที่มีพิกัดจริงตามลำดับการส่ง
+            valid_segments_data = []
+            for trip_name, group in grouped:
+                v_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
+                if v_group.empty:
+                    continue
+                
+                route_coords = [warehouse_coord] + list(zip(v_group["lat"], v_group["lng"])) + [warehouse_coord]
+                
+                for i in range(len(route_coords) - 1):
+                    p1 = route_coords[i]
+                    p2 = route_coords[i+1]
+                    road_pts, _ = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
+                    
+                    # ค้นหาข้อมูล info ของจุดปลายทาง (ถ้าไม่ใช่คลังสินค้าขากลับ)
+                    target_info = v_group.iloc[i].to_dict() if i < len(v_group) else v_group.iloc[-1].to_dict()
+                    
+                    valid_segments_data.append({
+                        "trip": trip_name,
+                        "color": trip_colors.get(trip_name, "#0055FF"),
+                        "path": road_pts,
+                        "info": target_info,
+                        "dist_km": 0.0
+                    })
+
             df_records = df.to_dict("records")
             for idx, r in enumerate(df_records):
                 r["color"] = trip_colors.get(r.get("trip"), "#0055FF")
                 r["point_idx"] = idx
 
             points_json = json.dumps(df_records, ensure_ascii=False)
-            segments_json = json.dumps(segments_data, ensure_ascii=False)
+            segments_json = json.dumps(valid_segments_data, ensure_ascii=False)
             wh_json = json.dumps(warehouse_coord)
             is_mode_1 = "แบบที่ 1" in play_mode
 
@@ -957,11 +984,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         background-color: #2980B9; color: white; border: 1px solid white;
                         border-radius: 3px; padding: 0 2px; font-size: 8px; font-weight: bold; z-index: 20;
                     }}
-                    .marker-badge-calc {{
-                        position: absolute; top: 50%; right: -10px; transform: translateY(-50%);
-                        background-color: #7F8C8D; color: white; border: 1px solid white;
-                        border-radius: 3px; padding: 0 2px; font-size: 7px; font-weight: bold; z-index: 20;
-                    }}
                     .marker-badge-reason {{
                         position: absolute; top: 50%; left: -14px; transform: translateY(-50%);
                         background-color: #C0392B; color: white; border: 1px solid white;
@@ -1004,7 +1026,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="timeline-container">
                     <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
-                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
+                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(valid_segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
                     <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:350px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
                 </div>
 
@@ -1263,7 +1285,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             let seg = segments[i];
                             if (!pointMatchesFilter(seg.info)) continue;
                             accumulatedDistance += (seg.dist_km || 0.0);
-                            if (seg.path && seg.path.length > 0 && seg.info.lat !== 0.0) {{
+                            if (seg.path && seg.path.length > 0) {{
                                 let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
                                 activePolylines.push(polyline);
                             }}
@@ -1396,28 +1418,30 @@ if dw_uploaded_file and sum_uploaded_file:
                     )
                     orig_trip_dist += d_km
 
-                unvisited = orig_records.copy()
+                # เฉพาะจุดที่มีพิกัดจริงมาคำนวณ TSP
+                valid_unvisited = [p for p in orig_records if p["lat"] != 0.0 and p["lng"] != 0.0]
+                no_loc_items = [p for p in orig_records if p["lat"] == 0.0 or p["lng"] == 0.0]
+
+                unvisited = valid_unvisited.copy()
                 current_pos = warehouse_coord
-                opt_records = []
+                opt_records_valid = []
                 while unvisited:
                     best_idx = 0
                     min_d = float("inf")
                     for idx, pt in enumerate(unvisited):
-                        if pt["lat"] == 0.0 or pt["lng"] == 0.0:
-                            d = 999999.0
-                        else:
-                            d = haversine(
-                                current_pos[0], current_pos[1], pt["lat"], pt["lng"]
-                            )
+                        d = haversine(
+                            current_pos[0], current_pos[1], pt["lat"], pt["lng"]
+                        )
                         if d < min_d:
                             min_d = d
                             best_idx = idx
                     next_item = unvisited.pop(best_idx)
-                    opt_records.append(next_item)
-                    if next_item["lat"] != 0.0 and next_item["lng"] != 0.0:
-                        current_pos = (next_item["lat"], next_item["lng"])
+                    opt_records_valid.append(next_item)
+                    current_pos = (next_item["lat"], next_item["lng"])
 
-                valid_opt = [(pt["lat"], pt["lng"]) for pt in opt_records if pt["lat"] != 0.0 and pt["lng"] != 0.0]
+                opt_records = opt_records_valid + no_loc_items
+
+                valid_opt = [(pt["lat"], pt["lng"]) for pt in opt_records_valid]
                 opt_pts_coords = (
                     [warehouse_coord]
                     + valid_opt
@@ -1433,7 +1457,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     )
                     opt_trip_dist += d_km
 
-                if opt_trip_dist >= orig_trip_dist and n_pts > 2:
+                if opt_trip_dist >= orig_trip_dist and len(valid_unvisited) > 2:
                     opt_records = orig_records.copy()
                     opt_trip_dist = orig_trip_dist
 
@@ -1497,14 +1521,33 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     all_opt_points_flat.append(info)
 
-                    opt_segments_data.append({
+            # สร้างเส้นทาง OSRM เชื่อมต่อเฉพาะจุดที่มีพิกัดจริงสำหรับ Optimized Map
+            valid_opt_segments_data = []
+            for trip_name, group in grouped_opt:
+                v_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
+                if v_group.empty:
+                    continue
+                
+                # หาว่าใน optimized records ของเที่ยวนี้ มีลำดับการเรียงอย่างไร
+                trip_opt_items = [item for item in all_opt_points_flat if item["trip"] == trip_name and item["lat"] != 0.0 and item["lng"] != 0.0]
+                
+                route_coords = [warehouse_coord] + [(item["lat"], item["lng"]) for item in trip_opt_items] + [warehouse_coord]
+                
+                for i in range(len(route_coords) - 1):
+                    p1 = route_coords[i]
+                    p2 = route_coords[i+1]
+                    road_pts, d_km = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
+                    
+                    target_info = trip_opt_items[i] if i < len(trip_opt_items) else trip_opt_items[-1]
+                    
+                    valid_opt_segments_data.append({
                         "trip": trip_name,
                         "color": trip_colors.get(trip_name, "#0055FF"),
-                        "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]] if info["lat"] != 0.0 else [warehouse_coord, warehouse_coord],
-                        "info": info,
-                        "dist_km": 0.0,
-                        "opt_seq": opt_seq_num,
-                        "orig_seq": orig_seq_num,
+                        "path": road_pts,
+                        "info": target_info,
+                        "dist_km": round(d_km, 2),
+                        "opt_seq": target_info["opt_seq"],
+                        "orig_seq": target_info["orig_seq"],
                     })
 
             total_dist_diff = total_orig_dist_all - total_opt_dist_all
@@ -1560,7 +1603,7 @@ if dw_uploaded_file and sum_uploaded_file:
             st.markdown(
                 "### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map พร้อมปุ่มเล่น)"
             )
-            opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
+            opt_segments_json = json.dumps(valid_opt_segments_data, ensure_ascii=False)
             opt_points_json = json.dumps(all_opt_points_flat, ensure_ascii=False)
 
             opt_legend_items = ""
@@ -1657,7 +1700,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="opt-timeline-container">
                     <span style="font-weight:bold; font-size:12px;">⏱️ ลำดับจุด:</span>
-                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="{max(len(opt_segments_data)-1, 0)}" value="0" oninput="onOptSliderChange(this.value)">
+                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="{max(len(valid_opt_segments_data)-1, 0)}" value="0" oninput="onOptSliderChange(this.value)">
                     <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">จุด 1</span>
                 </div>
 
@@ -1773,7 +1816,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         for (let i = 0; i <= optCurrentStep; i++) {{
                             let seg = optSegments[i];
                             accumulatedDist += (seg.dist_km || 0.0);
-                            if (seg.path && seg.path.length > 0 && seg.info.lat !== 0.0) {{
+                            if (seg.path && seg.path.length > 0) {{
                                 let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
                                 optActivePolylines.push(polyline);
                             }}
@@ -1817,19 +1860,19 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
-                    function resetOptAnimation() {{
+                    function resetOptAnimation() {
                         pauseOptAnimation();
                         optCurrentStep = 0;
                         updateOptStep(0);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }}
+                    }
 
-                    function onOptSliderChange(val) {{
+                    function onOptSliderChange(val) {
                         pauseOptAnimation();
                         updateOptStep(parseInt(val));
-                    }}
+                    }
 
-                    if (optSegments.length > 0) {{ updateOptStep(0); }}
+                    if (optSegments.length > 0) { updateOptStep(0); }
                 </script>
             </body>
             </html>
