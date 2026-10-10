@@ -1091,8 +1091,8 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
                             fullAddressText + `<br>
                             <b>ยอดส่ง:</b> ${{info.qty}} ถัง<br>
-                            <b>ตรงเวลา (Col I):</b> ${{info.on_time_col || '-'}}<br>
-                            <b>เหตุขาดส่ง (Col J):</b> ${{info.short_reason_col || '-'}}
+                            <b>ตรงเวลา:</b> ${{info.on_time_col || '-'}}<br>
+                            <b>เหตุขาดส่ง:</b> ${{info.short_reason_col || '-'}}
                         </div>`;
                     }}
 
