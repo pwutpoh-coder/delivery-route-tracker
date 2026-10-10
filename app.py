@@ -578,49 +578,37 @@ if dw_uploaded_file and sum_uploaded_file:
             }
 
             with st.spinner(
-                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (ตามเวลาจริง)...ขนเฉพาะจุดที่มีพิกัด"
+                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (ตามเวลาจริง)..."
             ):
-                segments_data = []
                 grouped = df.groupby("trip", sort=False)
-
                 trip_distances = {}
                 trip_time_ranges = {}
                 point_counter = 0
 
                 row_incremental_distances = []
                 row_incremental_time_diffs = []
-
                 last_time_dt = None
 
                 for trip_name, group in grouped:
-                    # กรองเฉพาะจุดที่มีพิกัดถูกต้องมาเชื่อมเส้นทาง
-                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
-                    
-                    # สร้างลำดับพิกัดสำหรับ OSRM เริ่มจากคลัง -> จุดส่งที่มีพิกัด -> คลัง
+                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
                     route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
                     trip_times = []
 
-                    # คำนวณเส้นทางถนนจริงเฉพาะระหว่างจุดที่มีพิกัด
                     for i in range(len(route_pts) - 1):
                         p1, p2 = route_pts[i], route_pts[i + 1]
-                        road_path, dist_km = get_osrm_route(
-                            p1[0], p1[1], p2[0], p2[1]
-                        )
+                        _, dist_km = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
                         total_trip_dist += dist_km
 
                     records_list = group.to_dict("records")
-
-                    for idx_r, info in enumerate(records_list):
+                    for info in records_list:
                         info["point_idx"] = point_counter
                         point_counter += 1
 
                         row_incremental_distances.append(round(info.get("gps_diff_num", 0.0), 2))
 
-                        t_str = re.sub(
-                            r"[^\d:]", "", str(info.get("time", ""))
-                        )
+                        t_str = re.sub(r"[^\d:]", "", str(info.get("time", "")))
                         time_diff_str = "-"
                         if t_str:
                             try:
@@ -639,38 +627,18 @@ if dw_uploaded_file and sum_uploaded_file:
                                     if mins >= 60:
                                         hrs = mins // 60
                                         rmins = mins % 60
-                                        time_diff_str = (
-                                            f"{hrs} ชม. {rmins} นาที"
-                                        )
+                                        time_diff_str = f"{hrs} ชม. {rmins} นาที"
                                 last_time_dt = curr_dt
                             except Exception:
                                 pass
                         row_incremental_time_diffs.append(time_diff_str)
 
-                        if info.get("time") and "ไม่ระบุ" not in str(
-                            info.get("time")
-                        ):
+                        if info.get("time") and "ไม่ระบุ" not in str(info.get("time")):
                             trip_times.append(str(info.get("time")))
-
-                        info["trip"] = trip_name
-                        info["seg_dist_km"] = 0.0
-
-                        # สำหรับ segments_data ให้เก็บเฉพาะจุดที่มีพิกัดจริงเพื่อนำไปวาดเส้นทางต่อกันได้ถูกต้อง
-                        if info["lat"] != 0.0 and info["lng"] != 0.0:
-                            # หาพิกัดก่อนหน้าที่มีจริงเพื่อดึงเส้นทาง OSRM ย่อยมาร้อยเรียง
-                            segments_data.append({
-                                "trip": trip_name,
-                                "color": trip_colors.get(trip_name, "#0055FF"),
-                                "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]],
-                                "info": info,
-                                "dist_km": 0.0,
-                            })
 
                     trip_distances[trip_name] = round(total_trip_dist, 2)
                     if trip_times:
-                        trip_time_ranges[trip_name] = (
-                            f"{trip_times[0]} - {trip_times[-1]}"
-                        )
+                        trip_time_ranges[trip_name] = f"{trip_times[0]} - {trip_times[-1]}"
                     else:
                         trip_time_ranges[trip_name] = "-"
 
@@ -841,7 +809,6 @@ if dw_uploaded_file and sum_uploaded_file:
 
             st.table(pd.DataFrame(summaries))
 
-            # สร้างเส้นทางถนนเชื่อมต่อระหว่างคลัง -> จุดที่มีพิกัดจริงตามลำดับการส่ง
             valid_segments_data = []
             for trip_name, group in grouped:
                 v_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
@@ -849,13 +816,10 @@ if dw_uploaded_file and sum_uploaded_file:
                     continue
                 
                 route_coords = [warehouse_coord] + list(zip(v_group["lat"], v_group["lng"])) + [warehouse_coord]
-                
                 for i in range(len(route_coords) - 1):
                     p1 = route_coords[i]
                     p2 = route_coords[i+1]
                     road_pts, _ = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
-                    
-                    # ค้นหาข้อมูล info ของจุดปลายทาง (ถ้าไม่ใช่คลังสินค้าขากลับ)
                     target_info = v_group.iloc[i].to_dict() if i < len(v_group) else v_group.iloc[-1].to_dict()
                     
                     valid_segments_data.append({
@@ -1418,7 +1382,6 @@ if dw_uploaded_file and sum_uploaded_file:
                     )
                     orig_trip_dist += d_km
 
-                # เฉพาะจุดที่มีพิกัดจริงมาคำนวณ TSP
                 valid_unvisited = [p for p in orig_records if p["lat"] != 0.0 and p["lng"] != 0.0]
                 no_loc_items = [p for p in orig_records if p["lat"] == 0.0 or p["lng"] == 0.0]
 
@@ -1521,23 +1484,19 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     all_opt_points_flat.append(info)
 
-            # สร้างเส้นทาง OSRM เชื่อมต่อเฉพาะจุดที่มีพิกัดจริงสำหรับ Optimized Map
             valid_opt_segments_data = []
             for trip_name, group in grouped_opt:
                 v_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
                 if v_group.empty:
                     continue
                 
-                # หาว่าใน optimized records ของเที่ยวนี้ มีลำดับการเรียงอย่างไร
                 trip_opt_items = [item for item in all_opt_points_flat if item["trip"] == trip_name and item["lat"] != 0.0 and item["lng"] != 0.0]
-                
                 route_coords = [warehouse_coord] + [(item["lat"], item["lng"]) for item in trip_opt_items] + [warehouse_coord]
                 
                 for i in range(len(route_coords) - 1):
                     p1 = route_coords[i]
                     p2 = route_coords[i+1]
                     road_pts, d_km = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
-                    
                     target_info = trip_opt_items[i] if i < len(trip_opt_items) else trip_opt_items[-1]
                     
                     valid_opt_segments_data.append({
@@ -1860,19 +1819,19 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
-                    function resetOptAnimation() {
+                    function resetOptAnimation() {{
                         pauseOptAnimation();
                         optCurrentStep = 0;
                         updateOptStep(0);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }
+                    }}
 
-                    function onOptSliderChange(val) {
+                    function onOptSliderChange(val) {{
                         pauseOptAnimation();
                         updateOptStep(parseInt(val));
-                    }
+                    }}
 
-                    if (optSegments.length > 0) { updateOptStep(0); }
+                    if (optSegments.length > 0) {{ updateOptStep(0); }}
                 </script>
             </body>
             </html>
