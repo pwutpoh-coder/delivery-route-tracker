@@ -382,19 +382,16 @@ def parse_dual_excel_data(dw_file, sum_file):
                     except:
                         pass
 
-        if lat == 0.0 or lng == 0.0:
-            continue
-
         if str_f:
             status = str_f
 
-        is_extra_trip = "รอบเสริม" in status
+        is_extra_trip = "รอบเสริม" in status or "รอบเสริม" in on_time_status
         is_cannot_calc = "ไม่สามารถคำนวณได้" in status or "คำนวณไม่ได้" in status
-        is_new_member = "สมาชิกใหม่" in status
+        is_new_member = "สมาชิกใหม่" in status or "สมาชิกใหม่" in on_time_status
         is_moved_trip = "ย้ายรอบ" in status
 
-        lat_str = f"{lat:.5f}"
-        lng_str = f"{lng:.5f}"
+        lat_str = f"{lat:.5f}" if lat != 0.0 else "-"
+        lng_str = f"{lng:.5f}" if lng != 0.0 else "-"
         gps_diff_str = f"{gps_diff_val:.2f}"
 
         records.append(
@@ -414,7 +411,7 @@ def parse_dual_excel_data(dw_file, sum_file):
                 "time": delivery_time,
                 "time_key": time_sort_key,
                 "status": status,
-                "on_time_col": on_time_status if on_time_status else "ตรงเวลา",
+                "on_time_col": on_time_status if on_time_status else "จัดส่งตรงเวลา",
                 "short_reason_col": (
                     short_delivery_reason if short_delivery_reason else "-"
                 ),
@@ -588,9 +585,11 @@ if dw_uploaded_file and sum_uploaded_file:
                 last_time_dt = None
 
                 for trip_name, group in grouped:
+                    # กรองเฉพาะจุดที่มีพิกัด Lat/Lng สมบูรณ์มาคำนวณเส้นทาง OSRM
+                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
                     pts = (
                         [warehouse_coord]
-                        + list(zip(group["lat"], group["lng"]))
+                        + list(zip(valid_group["lat"], valid_group["lng"]))
                         + [warehouse_coord]
                     )
                     records_list = group.to_dict("records")
@@ -605,70 +604,55 @@ if dw_uploaded_file and sum_uploaded_file:
                         )
                         total_trip_dist += dist_km
 
-                        if i < len(records_list):
-                            info = records_list[i]
-                            info["point_idx"] = point_counter
-                            point_counter += 1
+                    for idx_r, info in enumerate(records_list):
+                        info["point_idx"] = point_counter
+                        point_counter += 1
 
-                            row_incremental_distances.append(round(dist_km, 2))
+                        row_incremental_distances.append(round(info.get("gps_diff_num", 0.0), 2))
 
-                            t_str = re.sub(
-                                r"[^\d:]", "", str(info.get("time", ""))
-                            )
-                            time_diff_str = "-"
-                            if t_str:
-                                try:
-                                    parts = t_str.split(":")
-                                    curr_dt = datetime.strptime(
-                                        f"{parts[0].zfill(2)}:{parts[1].zfill(2)}",
-                                        "%H:%M",
-                                    )
-                                    if last_time_dt is not None:
-                                        diff = curr_dt - last_time_dt
-                                        total_seconds = int(diff.total_seconds())
-                                        if total_seconds < 0:
-                                            total_seconds += 24 * 3600
-                                        mins = total_seconds // 60
-                                        time_diff_str = f"{mins} นาที"
-                                        if mins >= 60:
-                                            hrs = mins // 60
-                                            rmins = mins % 60
-                                            time_diff_str = (
-                                                f"{hrs} ชม. {rmins} นาที"
-                                            )
-                                    last_time_dt = curr_dt
-                                except Exception:
-                                    pass
-                            row_incremental_time_diffs.append(time_diff_str)
+                        t_str = re.sub(
+                            r"[^\d:]", "", str(info.get("time", ""))
+                        )
+                        time_diff_str = "-"
+                        if t_str:
+                            try:
+                                parts = t_str.split(":")
+                                curr_dt = datetime.strptime(
+                                    f"{parts[0].zfill(2)}:{parts[1].zfill(2)}",
+                                    "%H:%M",
+                                )
+                                if last_time_dt is not None:
+                                    diff = curr_dt - last_time_dt
+                                    total_seconds = int(diff.total_seconds())
+                                    if total_seconds < 0:
+                                        total_seconds += 24 * 3600
+                                    mins = total_seconds // 60
+                                    time_diff_str = f"{mins} นาที"
+                                    if mins >= 60:
+                                        hrs = mins // 60
+                                        rmins = mins % 60
+                                        time_diff_str = (
+                                            f"{hrs} ชม. {rmins} นาที"
+                                        )
+                                last_time_dt = curr_dt
+                            except Exception:
+                                pass
+                        row_incremental_time_diffs.append(time_diff_str)
 
-                            if info.get("time") and "ไม่ระบุ" not in str(
-                                info.get("time")
-                            ):
-                                trip_times.append(str(info.get("time")))
-                        else:
-                            info = {
-                                "cust_id": "WH-001",
-                                "cust_name": "คลังสินค้า",
-                                "shipping_address": "-",
-                                "shipping_district": "-",
-                                "time": "จบเที่ยววิ่ง",
-                                "qty": 0,
-                                "gps_diff": "0.00",
-                                "gps_diff_num": 0.0,
-                                "status": "วิ่งกลับเข้าคลังเรียบร้อย",
-                                "on_time_col": "ตรงเวลา",
-                                "short_reason_col": "-",
-                                "point_idx": None,
-                            }
+                        if info.get("time") and "ไม่ระบุ" not in str(
+                            info.get("time")
+                        ):
+                            trip_times.append(str(info.get("time")))
+
                         info["trip"] = trip_name
-                        info["seg_dist_km"] = round(dist_km, 2)
+                        info["seg_dist_km"] = 0.0
 
                         segments_data.append({
                             "trip": trip_name,
                             "color": trip_colors.get(trip_name, "#0055FF"),
-                            "path": road_path,
+                            "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]] if info["lat"] != 0.0 else [warehouse_coord, warehouse_coord],
                             "info": info,
-                            "dist_km": round(dist_km, 2),
+                            "dist_km": 0.0,
                         })
 
                     trip_distances[trip_name] = round(total_trip_dist, 2)
@@ -692,16 +676,15 @@ if dw_uploaded_file and sum_uploaded_file:
 
             def get_notification_badge(row):
                 notices = []
-                has_special_tag = (
-                    row.get("is_extra_trip")
-                    or row.get("is_moved_trip")
-                    or row.get("is_cannot_calc")
-                    or row.get("is_new_member")
-                )
+                on_time_val = str(row.get("on_time_col", ""))
 
-                if "ไม่ตรงเวลา" in str(row["status"]):
+                if "ไม่ตรงเวลา" in on_time_val:
                     notices.append("จัดส่งไม่ตรงเวลา")
-                elif not has_special_tag:
+                elif "รอบเสริม" in on_time_val:
+                    notices.append("รอบเสริม")
+                elif "สมาชิกใหม่" in on_time_val:
+                    notices.append("สมาชิกใหม่")
+                else:
                     notices.append("จัดส่งตรงเวลา")
 
                 if row["gps_diff_num"] > 100:
@@ -788,28 +771,13 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 actual_qty = group["qty"].sum() if not group.empty else 0
                 point_count = len(group)
-                ontime_count = (
-                    len(
-                        group[
-                            ~group["status"].str.contains(
-                                "ไม่ตรงเวลา", na=False
-                            )
-                        ]
-                    )
-                    if not group.empty
-                    else 0
-                )
-                late_count = (
-                    len(
-                        group[
-                            group["status"].str.contains(
-                                "ไม่ตรงเวลา", na=False
-                            )
-                        ]
-                    )
-                    if not group.empty
-                    else 0
-                )
+                
+                # จำแนกประเภทตามคอลัมน์ I (on_time_col)
+                ontime_count = len(group[group["on_time_col"] == "จัดส่งตรงเวลา"]) if not group.empty else 0
+                late_count = len(group[group["on_time_col"].str.contains("ไม่ตรงเวลา", na=False)]) if not group.empty else 0
+                extra_count = len(group[group["on_time_col"] == "รอบเสริม"]) if not group.empty else 0
+                new_count = len(group[group["on_time_col"] == "สมาชิกใหม่"]) if not group.empty else 0
+                
                 gps_err_count = (
                     len(group[group["gps_diff_num"] > 100])
                     if not group.empty
@@ -828,6 +796,8 @@ if dw_uploaded_file and sum_uploaded_file:
                     "ระยะทางวิ่งรวม (กม.)": f"{t_dist:.2f}",
                     "จัดส่งตรงเวลา (จุด)": ontime_count,
                     "จัดส่งไม่ตรงเวลา (จุด)": late_count,
+                    "รอบเสริม (จุด)": extra_count,
+                    "สมาชิกใหม่ (จุด)": new_count,
                     "GPS คลาดเคลื่อน >100m (จุด)": gps_err_count,
                 })
 
@@ -845,12 +815,10 @@ if dw_uploaded_file and sum_uploaded_file:
                 "ยอดจัดส่งจริง (ถัง)": df["qty"].sum(),
                 "จำนวนจุดส่ง (จุด)": len(df),
                 "ระยะทางวิ่งรวม (กม.)": f"{total_day_distance:.2f}",
-                "จัดส่งตรงเวลา (จุด)": len(
-                    df[~df["status"].str.contains("ไม่ตรงเวลา", na=False)]
-                ),
-                "จัดส่งไม่ตรงเวลา (จุด)": len(
-                    df[df["status"].str.contains("ไม่ตรงเวลา", na=False)]
-                ),
+                "จัดส่งตรงเวลา (จุด)": len(df[df["on_time_col"] == "จัดส่งตรงเวลา"]),
+                "จัดส่งไม่ตรงเวลา (จุด)": len(df[df["on_time_col"].str.contains("ไม่ตรงเวลา", na=False)]),
+                "รอบเสริม (จุด)": len(df[df["on_time_col"] == "รอบเสริม"]),
+                "สมาชิกใหม่ (จุด)": len(df[df["on_time_col"] == "สมาชิกใหม่"]),
                 "GPS คลาดเคลื่อน >100m (จุด)": len(
                     df[df["gps_diff_num"] > 100]
                 ),
@@ -1001,7 +969,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 </div>
 
                 <div class="filter-bar" style="background: #faf2f2;">
-                    <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะพิเศษ:</span>
+                    <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะพิเศษ (คอลัมน์ I):</span>
                     <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')">GPS>100m (<span id="count-gps">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-reason" onclick="setStatusFilter('reason')">เหตุขาดส่งขึ้นต้น 'ไม่' (<span id="count-reason">0</span>)</button>
@@ -1059,11 +1027,12 @@ if dw_uploaded_file and sum_uploaded_file:
                     function pointMatchesFilter(pt) {{
                         if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
                         if (currentStatusFilter !== null) {{
-                            let isLate = pt.status && pt.status.includes("ไม่ตรงเวลา");
+                            let onTimeCol = pt.on_time_col || '';
+                            let isLate = onTimeCol.includes("ไม่ตรงเวลา");
                             let isGps = (pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100;
                             let isReasonNot = hasReasonStartsWithNot(pt);
-                            let isExtra = pt.is_extra_trip;
-                            let isNew = pt.is_new_member;
+                            let isExtra = pt.is_extra_trip || onTimeCol.includes("รอบเสริม");
+                            let isNew = pt.is_new_member || onTimeCol.includes("สมาชิกใหม่");
                             let isCalc = pt.is_cannot_calc;
 
                             if (currentStatusFilter === 'late' && !isLate) return false;
@@ -1080,11 +1049,12 @@ if dw_uploaded_file and sum_uploaded_file:
                         let counts = {{ late: 0, gps: 0, reason: 0, extra: 0, new: 0, calc: 0 }};
                         points.forEach(pt => {{
                             if (currentFilter === 'ALL' || pt.trip === currentFilter) {{
-                                if (pt.status && pt.status.includes("ไม่ตรงเวลา")) counts.late++;
+                                let onTimeCol = pt.on_time_col || '';
+                                if (onTimeCol.includes("ไม่ตรงเวลา")) counts.late++;
                                 if ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100) counts.gps++;
                                 if (hasReasonStartsWithNot(pt)) counts.reason++;
-                                if (pt.is_extra_trip) counts.extra++;
-                                if (pt.is_new_member) counts.new++;
+                                if (pt.is_extra_trip || onTimeCol.includes("รอบเสริม")) counts.extra++;
+                                if (pt.is_new_member || onTimeCol.includes("สมาชิกใหม่")) counts.new++;
                                 if (pt.is_cannot_calc) counts.calc++;
                             }}
                         }});
@@ -1098,8 +1068,10 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     function createTooltipHtml(info, seqNum) {{
                         let badgesHtml = [];
-                        if (info.status && info.status.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{info.status}}</span>`);
-                        else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">จัดส่งตรงเวลา</span>`);
+                        let onTimeVal = info.on_time_col || 'จัดส่งตรงเวลา';
+                        if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
+                        else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{onTimeVal}}</span>`);
+                        
                         if ((info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
                         if (hasReasonStartsWithNot(info)) badgesHtml.push(`<span class="alert-badge" style="background:#C0392B;">เหตุขาดส่ง: ${{info.short_reason_col}}</span>`);
                         if (info.is_extra_trip) badgesHtml.push(`<span class="alert-badge" style="background:#8E44AD;">รอบเสริม</span>`);
@@ -1117,21 +1089,22 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
                             fullAddressText + `<br>
                             <b>ยอดส่ง:</b> ${{info.qty}} ถัง<br>
-                            <b>ตรงเวลา (G):</b> ${{info.on_time_col || '-'}}<br>
-                            <b>เหตุขาดส่ง (H):</b> ${{info.short_reason_col || '-'}}
+                            <b>ตรงเวลา (Col I):</b> ${{info.on_time_col || '-'}}<br>
+                            <b>เหตุขาดส่ง (Col J):</b> ${{info.short_reason_col || '-'}}
                         </div>`;
                     }}
 
                     function createMarkerIcon(seqNum, color, ptInfo) {{
-                        let isLate = ptInfo && ptInfo.status && ptInfo.status.includes("ไม่ตรงเวลา");
+                        let onTimeVal = ptInfo && ptInfo.on_time_col ? ptInfo.on_time_col : '';
+                        let isLate = onTimeVal.includes("ไม่ตรงเวลา");
                         let isGpsDiff = ptInfo && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
                         let isReasonNot = ptInfo && hasReasonStartsWithNot(ptInfo);
                         
                         let lateBadgeHtml = isLate ? `<div class="marker-badge-late">!</div>` : '';
                         let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps">G</div>` : '';
                         let reasonBadgeHtml = isReasonNot ? `<div class="marker-badge-reason" title="${{ptInfo.short_reason_col}}">ไม่</div>` : '';
-                        let extraBadgeHtml = (ptInfo && ptInfo.is_extra_trip) ? `<div class="marker-badge-extra">เสริม</div>` : '';
-                        let newBadgeHtml = (ptInfo && ptInfo.is_new_member) ? `<div class="marker-badge-new">ใหม่</div>` : '';
+                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
+                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
                         let calcBadgeHtml = (ptInfo && ptInfo.is_cannot_calc) ? `<div class="marker-badge-calc">NC</div>` : '';
 
                         let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}${{calcBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
@@ -1150,7 +1123,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                 if (!isMode1 && idx > currentStep) {{
                                     // ซ่อนไว้ก่อน
                                 }} else {{
-                                    marker.addTo(map);
+                                    if (pt.lat !== 0.0 && pt.lng !== 0.0) {{
+                                        marker.addTo(map);
+                                    }}
                                 }}
                                 
                                 marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
@@ -1166,7 +1141,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         pauseAnimation();
                         currentFilter = filterName;
                         
-                        // ปรับการลบและใส่คลาส active สำหรับปุ่มตัวกรองเที่ยวทั้งหมดแบบยืดหยุ่น
                         document.querySelectorAll('.filter-btn').forEach(el => {{
                             if (el.id.startsWith('btn-trip') || el.id === 'btn-all') {{
                                 el.classList.remove('active');
@@ -1177,7 +1151,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             let btnAll = document.getElementById('btn-all');
                             if (btnAll) btnAll.classList.add('active');
                         }} else {{
-                            // ค้นหาปุ่มของเที่ยวปัจจุบัน
                             document.querySelectorAll('.filter-btn').forEach(el => {{
                                 if (el.innerText === filterName) {{
                                     el.classList.add('active');
@@ -1257,7 +1230,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
                         document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | สถานะ: ${{info.status}}
+                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | สถานะ: ${{info.on_time_col || info.status}}
                         `;
 
                         document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - ลูกค้า: <span style="color:#0055FF;">${{custIdLabel}} (${{custNameLabel}})</span> (จุด ${{pointNumText}})`;
@@ -1270,8 +1243,10 @@ if dw_uploaded_file and sum_uploaded_file:
                             let seg = segments[i];
                             if (!pointMatchesFilter(seg.info)) continue;
                             accumulatedDistance += (seg.dist_km || 0.0);
-                            let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
-                            activePolylines.push(polyline);
+                            if (seg.path && seg.path.length > 0 && seg.info.lat !== 0.0) {{
+                                let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
+                                activePolylines.push(polyline);
+                            }}
                         }}
 
                         if (!isMode1) {{
@@ -1279,7 +1254,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 if (marker) {{
                                     let ptInfo = points[mIdx];
                                     let matches = pointMatchesFilter(ptInfo);
-                                    if (matches && mIdx <= currentStep) {{
+                                    if (matches && mIdx <= currentStep && ptInfo.lat !== 0.0) {{
                                         if (!map.hasLayer(marker)) marker.addTo(map);
                                     }} else {{
                                         if (map.hasLayer(marker)) map.removeLayer(marker);
@@ -1295,12 +1270,13 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
                             <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                            <b>📝 เหตุขาดส่ง (H):</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
-                            <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDistance.toFixed(2)}} กม.</span> | <b>📌 สถานะ:</b> ${{info.status}}
+                            <b>📝 เหตุขาดส่ง (Col J):</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
+                            <b>📌 สถานะ (Col I):</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
                         `;
 
-                        let lastPt = currentSeg.path[currentSeg.path.length - 1];
-                        if (lastPt) {{ map.panTo(lastPt); }}
+                        if (info.lat !== 0.0 && info.lng !== 0.0) {{
+                            map.panTo([info.lat, info.lng]);
+                        }}
                     }}
 
                     function nextStep() {{
@@ -1384,9 +1360,10 @@ if dw_uploaded_file and sum_uploaded_file:
                 n_pts = len(orig_records)
                 total_points_count += n_pts
 
+                valid_orig = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
                 orig_pts_coords = (
                     [warehouse_coord]
-                    + list(zip(group["lat"], group["lng"]))
+                    + list(zip(valid_orig["lat"], valid_orig["lng"]))
                     + [warehouse_coord]
                 )
                 orig_trip_dist = 0.0
@@ -1406,19 +1383,24 @@ if dw_uploaded_file and sum_uploaded_file:
                     best_idx = 0
                     min_d = float("inf")
                     for idx, pt in enumerate(unvisited):
-                        d = haversine(
-                            current_pos[0], current_pos[1], pt["lat"], pt["lng"]
-                        )
+                        if pt["lat"] == 0.0 or pt["lng"] == 0.0:
+                            d = 999999.0
+                        else:
+                            d = haversine(
+                                current_pos[0], current_pos[1], pt["lat"], pt["lng"]
+                            )
                         if d < min_d:
                             min_d = d
                             best_idx = idx
                     next_item = unvisited.pop(best_idx)
                     opt_records.append(next_item)
-                    current_pos = (next_item["lat"], next_item["lng"])
+                    if next_item["lat"] != 0.0 and next_item["lng"] != 0.0:
+                        current_pos = (next_item["lat"], next_item["lng"])
 
+                valid_opt = [(pt["lat"], pt["lng"]) for pt in opt_records if pt["lat"] != 0.0 and pt["lng"] != 0.0]
                 opt_pts_coords = (
                     [warehouse_coord]
-                    + [(pt["lat"], pt["lng"]) for pt in opt_records]
+                    + valid_opt
                     + [warehouse_coord]
                 )
                 opt_trip_dist = 0.0
@@ -1481,55 +1463,26 @@ if dw_uploaded_file and sum_uploaded_file:
                     "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
                 })
 
-                opt_full_pts = [warehouse_coord] + [
-                    (pt["lat"], pt["lng"]) for pt in opt_records
-                ] + [warehouse_coord]
-                for i in range(len(opt_full_pts) - 1):
-                    p1, p2 = opt_full_pts[i], opt_full_pts[i + 1]
-                    road_path, dist_km = get_osrm_route(
-                        p1[0], p1[1], p2[0], p2[1]
-                    )
-                    info = (
-                        opt_records[i]
-                        if i < len(opt_records)
-                        else {
-                            "cust_id": "WH-001",
-                            "cust_name": "คลังสินค้า",
-                            "shipping_address": "-",
-                            "shipping_district": "-",
-                            "time": "จบเที่ยววิ่ง",
-                            "qty": 0,
-                            "status": "เข้าคลัง",
-                        }
-                    )
+                for i, opt_rec in enumerate(opt_records):
+                    info = opt_rec.copy()
                     info["trip"] = trip_name
-
-                    if i < len(opt_records):
-                        opt_seq_num = global_opt_seq_counter
-                        global_opt_seq_counter += 1
-                    else:
-                        opt_seq_num = ""
-
-                    orig_seq_num = (
-                        original_order_map.get(info["cust_id"], "-")
-                        if i < len(opt_records)
-                        else "-"
-                    )
+                    opt_seq_num = global_opt_seq_counter
+                    global_opt_seq_counter += 1
+                    orig_seq_num = original_order_map.get(info["cust_id"], "-")
 
                     info["color"] = trip_colors.get(trip_name, "#0055FF")
                     info["opt_seq"] = opt_seq_num
                     info["orig_seq"] = orig_seq_num
                     info["point_idx"] = len(all_opt_points_flat)
 
-                    if i < len(opt_records):
-                        all_opt_points_flat.append(info)
+                    all_opt_points_flat.append(info)
 
                     opt_segments_data.append({
                         "trip": trip_name,
                         "color": trip_colors.get(trip_name, "#0055FF"),
-                        "path": road_path,
+                        "path": [[info["lat"], info["lng"]], [info["lat"], info["lng"]]] if info["lat"] != 0.0 else [warehouse_coord, warehouse_coord],
                         "info": info,
-                        "dist_km": round(dist_km, 2),
+                        "dist_km": 0.0,
                         "opt_seq": opt_seq_num,
                         "orig_seq": orig_seq_num,
                     })
@@ -1590,7 +1543,6 @@ if dw_uploaded_file and sum_uploaded_file:
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
             opt_points_json = json.dumps(all_opt_points_flat, ensure_ascii=False)
 
-            # สร้าง Legend สำหรับหน้า Optimized แบบไดนามิก
             opt_legend_items = ""
             for t_info in trip_quotas:
                 t_name = f"เที่ยวที่ {t_info['trip_no']}"
@@ -1717,8 +1669,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         optMarkers.forEach(m => optMap.removeLayer(m));
                         optMarkers = [];
                         optSegments.forEach((seg, idx) => {{
-                            let lastPt = seg.path[Math.floor(seg.path.length / 2)];
-                            if (lastPt && seg.info && seg.info.cust_id && seg.info.cust_id !== "WH-001") {{
+                            let info = seg.info;
+                            if (info && info.cust_id && info.cust_id !== "WH-001" && info.lat !== 0.0 && info.lng !== 0.0) {{
                                 let optSeq = seg.opt_seq;
                                 let origSeq = seg.orig_seq;
                                 
@@ -1731,17 +1683,17 @@ if dw_uploaded_file and sum_uploaded_file:
                                     iconSize: [32, 32], iconAnchor: [16, 16]
                                 }});
 
-                                let marker = L.marker(lastPt, {{icon: customIcon}});
+                                let marker = L.marker([info.lat, info.lng], {{icon: customIcon}});
                                 marker.addTo(optMap);
                                 
-                                let addrText = seg.info.shipping_address && seg.info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{seg.info.shipping_address}}` : '';
+                                let addrText = info.shipping_address && info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{info.shipping_address}}` : '';
                                 
                                 marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
                                     <b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br>
                                     <b>🔄 ลำดับเดิม:</b> #${{origSeq}}<br>
-                                    <b>รหัสลูกค้า:</b> ${{seg.info.cust_id}} (${{seg.info.cust_name}})` + addrText + `<br>
+                                    <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name}})` + addrText + `<br>
                                     <b>เที่ยว:</b> ${{seg.trip}}<br>
-                                    <b>ยอดส่ง:</b> ${{seg.info.qty}} ถัง
+                                    <b>ยอดส่ง:</b> ${{info.qty}} ถัง
                                 </div>`, {{direction: 'top', opacity: 0.95}});
                                 
                                 optMarkers[idx] = marker;
@@ -1801,8 +1753,10 @@ if dw_uploaded_file and sum_uploaded_file:
                         for (let i = 0; i <= optCurrentStep; i++) {{
                             let seg = optSegments[i];
                             accumulatedDist += (seg.dist_km || 0.0);
-                            let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
-                            optActivePolylines.push(polyline);
+                            if (seg.path && seg.path.length > 0 && seg.info.lat !== 0.0) {{
+                                let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                                optActivePolylines.push(polyline);
+                            }}
                         }}
 
                         highlightOptMarker(info);
@@ -1814,8 +1768,9 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
                         `;
 
-                        let lastPt = currentSeg.path[currentSeg.path.length - 1];
-                        if (lastPt) optMap.panTo(lastPt);
+                        if (info.lat !== 0.0 && info.lng !== 0.0) {{
+                            optMap.panTo([info.lat, info.lng]);
+                        }}
                     }}
 
                     function nextOptStep() {{
