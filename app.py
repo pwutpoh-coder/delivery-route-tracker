@@ -490,9 +490,6 @@ selected_wh_name = st.sidebar.selectbox(
     "เลือกสาขาคลังสินค้า:", wh_keys, index=default_index
 )
 
-if auto_wh_name and auto_wh_name in wh_keys and dw_uploaded_file:
-    st.sidebar.success(f"รหัสรถ {detected_truck_no} (2 ตัวแรกคือ {detected_truck_no[:2]}) ➔ ตั้งค่า {auto_wh_name} อัตโนมัติ")
-
 if selected_wh_name == "อื่นๆ (ระบุพิกัดเอง)":
     wh_input = st.sidebar.text_input(
         "กรอกพิกัด (Lat, Lng) หรือชื่อสถานที่:",
@@ -508,23 +505,12 @@ if selected_wh_name == "อื่นๆ (ระบุพิกัดเอง)":
                 float(coord_match.group(1)),
                 float(coord_match.group(2)),
             )
-            st.sidebar.success(
-                f"พบพิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}"
-            )
         else:
             warehouse_coord = (13.66800, 100.61000)
-            st.sidebar.info(
-                "ใช้พิกัดเริ่มต้นสำรอง เนื่องจากรูปแบบพิกัดไม่ถูกต้อง"
-            )
     else:
         warehouse_coord = (13.66800, 100.61000)
-        st.sidebar.info("ใช้พิกัดเริ่มต้นสำรอง (บางนา)")
 else:
     warehouse_coord = warehouse_options[selected_wh_name]
-    if not (auto_wh_name and auto_wh_name in wh_keys and dw_uploaded_file):
-        st.sidebar.success(
-            f"เลือก {selected_wh_name} (พิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f})"
-        )
 
 st.sidebar.divider()
 
@@ -1876,7 +1862,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function resetOptAnimation() {{
-                        pauseOptAnimation();
+                        pauseAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
@@ -1884,7 +1870,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function onOptSliderChange(val) {{
-                        pauseOptAnimation();
+                        pauseAnimation();
                         updateOptStep(parseInt(val));
                     }}
 
