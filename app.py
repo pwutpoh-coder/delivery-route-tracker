@@ -45,116 +45,36 @@ warehouse_options = {
     "อื่นๆ (ระบุพิกัดเอง)": None,
 }
 
-selected_wh_name = st.sidebar.selectbox(
-    "เลือกสาขาคลังสินค้า:", list(warehouse_options.keys())
-)
-
-if selected_wh_name == "อื่นๆ (ระบุพิกัดเอง)":
-    wh_input = st.sidebar.text_input(
-        "กรอกพิกัด (Lat, Lng) หรือชื่อสถานที่:",
-        value="",
-        placeholder="ตัวอย่าง: 13.66800, 100.61000",
-    )
-    if wh_input.strip():
-        coord_match = re.match(
-            r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", wh_input.strip()
-        )
-        if coord_match:
-            warehouse_coord = (
-                float(coord_match.group(1)),
-                float(coord_match.group(2)),
-            )
-            st.sidebar.success(
-                f"พบพิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}"
-            )
-        else:
-            warehouse_coord = (13.66800, 100.61000)
-            st.sidebar.info(
-                "ใช้พิกัดเริ่มต้นสำรอง เนื่องจากรูปแบบพิกัดไม่ถูกต้อง"
-            )
-    else:
-        warehouse_coord = (13.66800, 100.61000)
-        st.sidebar.info("ใช้พิกัดเริ่มต้นสำรอง (บางนา)")
-else:
-    warehouse_coord = warehouse_options[selected_wh_name]
-    st.sidebar.success(
-        f"เลือก {selected_wh_name} (พิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f})"
-    )
-
-st.sidebar.divider()
-
-st.sidebar.header("🔄 จัดการข้อมูล")
-if st.sidebar.button(
-    "🗑️ ล้างข้อมูล / นำเข้าไฟล์ใหม่", use_container_width=True
-):
-    st.cache_data.clear()
-    st.rerun()
-
-st.sidebar.divider()
-
-st.sidebar.header("🎬 การตั้งค่าการจำลองเส้นทาง")
-play_mode = st.sidebar.radio(
-    "รูปแบบการแสดงผลบนแผนที่ตามเวลาจริง:",
-    (
-        "แบบที่ 1: แสดงหมุดครบทั้งหมดล่วงหน้า (เส้นทางวิ่งตามเวลา)",
-        "แบบที่ 2: ปรากฏหมุดและเส้นทางเฉพาะจุดล่าสุดทีละจุดตามลำดับเวลา",
-    ),
-)
-
-anim_speed_ms = st.sidebar.slider(
-    "ความเร็วการจำลอง (มิลลิวินาที/จุด)",
-    min_value=100,
-    max_value=3000,
-    value=600,
-    step=100,
-)
+# --- FUNCTION: แปลงรหัสรถขนส่งเป็นคลังสินค้าอัตโนมัติจากเลข 2 ตัวแรก ---
+def get_auto_warehouse_by_truck(truck_no):
+    prefix_map = {
+        "16": "สาขากรุงเทพกรีฑา",
+        "70": "สาขากิ่งแก้ว",
+        "98": "สาขาดอนเมือง",
+        "17": "สาขาบางบัวทอง",
+        "10": "สาขาบางพลี",
+        "40": "สาขาบุคคโล",
+        "30": "สาขาปทุมธานี",
+        "18": "สาขาประชาชื่น",
+        "90": "สาขาประเวศ",
+        "60": "สาขาปากเกร็ด",
+        "20": "สาขาพระราม 2",
+        "50": "สาขาพระราม 3",
+        "80": "สาขาพุทธมณฑลสาย1",
+        "13": "สาขารามอินทรา",
+        "14": "สาขาราษฎร์บูรณะ",
+        "12": "สาขาวังน้อย",
+        "15": "สาขาสำโรง",
+        "11": "สาขาสุขุมวิท 50",
+    }
+    clean_truck = str(truck_no).strip()
+    if len(clean_truck) >= 2:
+        p2 = clean_truck[:2]
+        return prefix_map.get(p2, None)
+    return None
 
 
-# --- FUNCTION: Haversine Distance ---
-def haversine(lat1, lon1, lat2, lon2):
-    r = 6371
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = (
-        sin(dlat / 2) ** 2
-        + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
-    )
-    return 2 * r * asin(sqrt(a))
-
-
-# --- FUNCTION: แปลงเวลาเป็นนาทีสำหรับเทียบช่วงเวลา ---
-def time_to_mins(t_str):
-    try:
-        t_clean = re.sub(r"[^\d:]", "", str(t_str))
-        parts = t_clean.split(":")
-        if len(parts) >= 2:
-            return int(parts[0]) * 60 + int(parts[1])
-    except:
-        pass
-    return 0
-
-
-# --- FUNCTION: ดึงเส้นทางถนนจริงและระยะทางจาก OSRM ---
-@st.cache_data(show_spinner=False)
-def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
-    url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
-    try:
-        res = requests.get(url, timeout=4)
-        if res.status_code == 200:
-            data = res.json()
-            if data.get("routes"):
-                route = data["routes"][0]
-                coords = route["geometry"]["coordinates"]
-                distance_km = route["distance"] / 1000.0
-                return [[pt[1], pt[0]] for pt in coords], distance_km
-    except Exception:
-        pass
-
-    dist = haversine(p1_lat, p1_lng, p2_lat, p2_lng)
-    return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
-
-
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ ---
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (ประกาศล่วงหน้าเพื่อให้ sidebar เลือกค่าอัตโนมัติได้) ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ"}
 
@@ -540,6 +460,146 @@ with col_up2:
         type=["xlsx", "xls"],
         key="sum_file",
     )
+
+# ตรวจจับรหัสรถอัตโนมัติหากมีการอัปโหลดไฟล์ DW แล้ว
+detected_truck_no = "ไม่ระบุ"
+auto_wh_name = None
+if dw_uploaded_file:
+    try:
+        dw_raw_temp = pd.read_excel(dw_uploaded_file, header=None)
+        header_blob_temp = " ".join(
+            dw_raw_temp.iloc[:10].fillna("").astype(str).to_numpy().flatten()
+        )
+        c_match_t = re.search(r"carCode\s*([\w\-]+)", header_blob_temp)
+        if c_match_t:
+            detected_truck_no = c_match_t.group(1)
+        else:
+            t_match_t = re.search(r"รถส่ง\s*([\w\-]+)", header_blob_temp)
+            if t_match_t:
+                detected_truck_no = t_match_t.group(1)
+        
+        auto_wh_name = get_auto_warehouse_by_truck(detected_truck_no)
+    except:
+        pass
+
+# ตั้งค่าเลือกคลังสินค้าใน sidebar โดยเลือกค่าอัตโนมัติจากรหัสรถถ้ามี
+wh_keys = list(warehouse_options.keys())
+default_index = 0
+if auto_wh_name and auto_wh_name in wh_keys:
+    default_index = wh_keys.index(auto_wh_name)
+
+selected_wh_name = st.sidebar.selectbox(
+    "เลือกสาขาคลังสินค้า:", wh_keys, index=default_index
+)
+
+if auto_wh_name and auto_wh_name in wh_keys and dw_uploaded_file:
+    st.sidebar.success(f"🚚 รหัสรถ {detected_truck_no} (2 ตัวแรกคือ {detected_truck_no[:2]}) ➔ ตั้งค่า {auto_wh_name} อัตโนมัติ")
+
+if selected_wh_name == "อื่นๆ (ระบุพิกัดเอง)":
+    wh_input = st.sidebar.text_input(
+        "กรอกพิกัด (Lat, Lng) หรือชื่อสถานที่:",
+        value="",
+        placeholder="ตัวอย่าง: 13.66800, 100.61000",
+    )
+    if wh_input.strip():
+        coord_match = re.match(
+            r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", wh_input.strip()
+        )
+        if coord_match:
+            warehouse_coord = (
+                float(coord_match.group(1)),
+                float(coord_match.group(2)),
+            )
+            st.sidebar.success(
+                f"พบพิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f}"
+            )
+        else:
+            warehouse_coord = (13.66800, 100.61000)
+            st.sidebar.info(
+                "ใช้พิกัดเริ่มต้นสำรอง เนื่องจากรูปแบบพิกัดไม่ถูกต้อง"
+            )
+    else:
+        warehouse_coord = (13.66800, 100.61000)
+        st.sidebar.info("ใช้พิกัดเริ่มต้นสำรอง (บางนา)")
+else:
+    warehouse_coord = warehouse_options[selected_wh_name]
+    if not (auto_wh_name and auto_wh_name in wh_keys and dw_uploaded_file):
+        st.sidebar.success(
+            f"เลือก {selected_wh_name} (พิกัด: {warehouse_coord[0]:.5f}, {warehouse_coord[1]:.5f})"
+        )
+
+st.sidebar.divider()
+
+st.sidebar.header("🔄 จัดการข้อมูล")
+if st.sidebar.button(
+    "🗑️ ล้างข้อมูล / นำเข้าไฟล์ใหม่", use_container_width=True
+):
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.divider()
+
+st.sidebar.header("🎬 การตั้งค่าการจำลองเส้นทาง")
+play_mode = st.sidebar.radio(
+    "รูปแบบการแสดงผลบนแผนที่ตามเวลาจริง:",
+    (
+        "แบบที่ 1: แสดงหมุดครบทั้งหมดล่วงหน้า (เส้นทางวิ่งตามเวลา)",
+        "แบบที่ 2: ปรากฏหมุดและเส้นทางเฉพาะจุดล่าสุดทีละจุดตามลำดับเวลา",
+    ),
+)
+
+anim_speed_ms = st.sidebar.slider(
+    "ความเร็วการจำลอง (มิลลิวินาที/จุด)",
+    min_value=100,
+    max_value=3000,
+    value=600,
+    step=100,
+)
+
+
+# --- FUNCTION: Haversine Distance ---
+def haversine(lat1, lon1, lat2, lon2):
+    r = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = (
+        sin(dlat / 2) ** 2
+        + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    )
+    return 2 * r * asin(sqrt(a))
+
+
+# --- FUNCTION: แปลงเวลาเป็นนาทีสำหรับเทียบช่วงเวลา ---
+def time_to_mins(t_str):
+    try:
+        t_clean = re.sub(r"[^\d:]", "", str(t_str))
+        parts = t_clean.split(":")
+        if len(parts) >= 2:
+            return int(parts[0]) * 60 + int(parts[1])
+    except:
+        pass
+    return 0
+
+
+# --- FUNCTION: ดึงเส้นทางถนนจริงและระยะทางจาก OSRM ---
+@st.cache_data(show_spinner=False)
+def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
+    url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
+    try:
+        res = requests.get(url, timeout=4)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("routes"):
+                route = data["routes"][0]
+                coords = route["geometry"]["coordinates"]
+                distance_km = route["distance"] / 1000.0
+                return [[pt[1], pt[0]] for pt in coords], distance_km
+    except Exception:
+        pass
+
+    dist = haversine(p1_lat, p1_lng, p2_lat, p2_lng)
+    return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
+
 
 if dw_uploaded_file and sum_uploaded_file:
     with st.spinner("กำลังอ่านและประมวลผลข้อมูลจากไฟล์ทั้งสอง..."):
