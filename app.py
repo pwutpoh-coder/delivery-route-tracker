@@ -1537,7 +1537,6 @@ if dw_uploaded_file and sum_uploaded_file:
                     global_opt_seq_counter += 1
                     orig_seq_num = original_order_map.get(info["cust_id"], "-")
 
-                    # ตรวจสอบว่าจุดนี้มีการสลับตำแหน่งหรือไม่เพื่อใช้กำหนดสีป้ายเดิม (ถ้าสลับ=แดง, ถ้าคงเดิม=ดำ)
                     orig_idx_check = next(
                         idx_o
                         for idx_o, o_rec in enumerate(orig_records)
@@ -1600,7 +1599,6 @@ if dw_uploaded_file and sum_uploaded_file:
             st.markdown(
                 "#### 🔄 ตารางเปรียบเทียบการสลับลำดับจุดส่ง (เทียบแบบที่ 2 กับ แบบที่ 1)"
             )
-            # ตัดคอลัมน์ภายใน is_swapped ออกก่อนแสดงผลตาราง
             display_swap_df = pd.DataFrame(detailed_swap_records).drop(columns=["is_swapped"])
             st.dataframe(
                 display_swap_df,
@@ -1747,7 +1745,6 @@ if dw_uploaded_file and sum_uploaded_file:
                                 let origSeq = seg.orig_seq;
                                 let isSwapped = seg.is_swapped;
                                 
-                                // ถ้ามีการเปลี่ยนลำดับ ให้ป้ายสีแดง ถ้าไม่เปลี่ยนให้เป็นสีดำ
                                 let badgeBgColor = isSwapped ? '#D32F2F' : '#333333';
                                 let origBadgeHtml = `<div class="opt-orig-badge" style="background-color: ${{badgeBgColor}};">${{origSeq}}</div>`;
                                 let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
@@ -1878,20 +1875,20 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
-                    function resetOptAnimation() {
+                    function resetOptAnimation() {{
                         pauseOptAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }
+                    }}
 
-                    function onOptSliderChange(val) {
+                    function onOptSliderChange(val) {{
                         pauseOptAnimation();
                         updateOptStep(parseInt(val));
-                    }
+                    }}
 
-                    if (optSegments.length > 0) { updateOptStep(0); }
+                    if (optSegments.length > 0) {{ updateOptStep(0); }}
                 </script>
             </body>
             </html>
