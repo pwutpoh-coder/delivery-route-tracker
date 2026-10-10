@@ -154,7 +154,7 @@ def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     return [[p1_lat, p1_lng], [p2_lat, p2_lng]], dist
 
 
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ (บังคับ 'ไม่สามารถเข้าส่งได้' หากไม่มีพิกัด) ---
+# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ"}
 
@@ -385,7 +385,7 @@ def parse_dual_excel_data(dw_file, sum_file):
         if str_f:
             status = str_f
 
-        # บังคับหากไม่มีพิกัด ให้คอลัมน์ตรงเวลาเป็น "ไม่สามารถเข้าส่งได้"
+        # ถ้าไม่มีพิกัด ให้คอลัมน์ตรงเวลาแสดงเป็น "ไม่สามารถเข้าส่งได้"
         if lat == 0.0 or lng == 0.0:
             on_time_status = "ไม่สามารถเข้าส่งได้"
 
@@ -578,7 +578,7 @@ if dw_uploaded_file and sum_uploaded_file:
             }
 
             with st.spinner(
-                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (ตามเวลาจริง)..."
+                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (เฉพาะจุดที่มีพิกัด)..."
             ):
                 segments_data = []
                 grouped = df.groupby("trip", sort=False)
@@ -592,8 +592,8 @@ if dw_uploaded_file and sum_uploaded_file:
                 last_time_dt = None
 
                 for trip_name, group in grouped:
-                    # กรองเฉพาะจุดที่มีพิกัดจริงมาคำนวณเส้นทาง OSRM
-                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)]
+                    # กรองเฉพาะจุดที่มีพิกัดจริงมาเชื่อมเส้นทาง OSRM
+                    valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
                     route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
@@ -609,7 +609,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         trip_route_segments.append(road_path)
 
                     records_list = group.to_dict("records")
-                    valid_segment_idx = 0
+                    valid_idx_counter = 0
 
                     for idx_r, info in enumerate(records_list):
                         info["point_idx"] = point_counter
@@ -655,9 +655,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         info["seg_dist_km"] = 0.0
 
                         segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
-                        if info["lat"] != 0.0 and info["lng"] != 0.0 and valid_segment_idx < len(trip_route_segments):
-                            segment_path = trip_route_segments[valid_segment_idx]
-                            valid_segment_idx += 1
+                        if info["lat"] != 0.0 and valid_idx_counter < len(trip_route_segments):
+                            segment_path = trip_route_segments[valid_idx_counter]
+                            valid_idx_counter += 1
 
                         segments_data.append({
                             "trip": trip_name,
@@ -944,12 +944,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                         display: flex; align-items: center; justify-content: center; z-index: 20;
                     }}
-                    .marker-badge-nolic {{
-                        position: absolute; top: -6px; right: -8px;
-                        background-color: #555555; color: white; border: 1.5px solid white;
-                        border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
-                        display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
                     .marker-badge-extra {{
                         position: absolute; bottom: -4px; right: -6px;
                         background-color: #8E44AD; color: white; border: 1px solid white;
@@ -984,9 +978,8 @@ if dw_uploaded_file and sum_uploaded_file:
                 </div>
 
                 <div class="filter-bar" style="background: #faf2f2;">
-                    <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะพิเศษ (คอลัมน์ I):</span>
+                    <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะพิเศษ:</span>
                     <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-nolic" onclick="setStatusFilter('nolic')">ไม่มีพิกัด/เข้าส่งไม่ได้ (<span id="count-nolic">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')">GPS>100m (<span id="count-gps">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-reason" onclick="setStatusFilter('reason')">เหตุขาดส่งขึ้นต้น 'ไม่' (<span id="count-reason">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')">รอบเสริม (<span id="count-extra">0</span>)</button>
@@ -1040,19 +1033,17 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function pointMatchesFilter(pt) {{
-                        if (pt.lat === 0.0 || pt.lng === 0.0) return false; // ข้ามจุดที่ไม่มีพิกัดออกจากการจำลองเส้นทาง
+                        if (pt.lat === 0.0 || pt.lng === 0.0) return false;
                         if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
                         if (currentStatusFilter !== null) {{
                             let onTimeCol = pt.on_time_col || '';
                             let isLate = onTimeCol.includes("ไม่ตรงเวลา");
-                            let isNoLoc = onTimeCol.includes("ไม่สามารถเข้าส่งได้");
                             let isGps = (pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100);
                             let isReasonNot = hasReasonStartsWithNot(pt);
                             let isExtra = pt.is_extra_trip || onTimeCol.includes("รอบเสริม");
                             let isNew = pt.is_new_member || onTimeCol.includes("สมาชิกใหม่");
 
                             if (currentStatusFilter === 'late' && !isLate) return false;
-                            if (currentStatusFilter === 'nolic' && !isNoLoc) return false;
                             if (currentStatusFilter === 'gps' && !isGps) return false;
                             if (currentStatusFilter === 'reason' && !isReasonNot) return false;
                             if (currentStatusFilter === 'extra' && !isExtra) return false;
@@ -1062,12 +1053,11 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function updateStatusCounts() {{
-                        let counts = {{ late: 0, nolic: 0, gps: 0, reason: 0, extra: 0, new: 0 }};
+                        let counts = {{ late: 0, gps: 0, reason: 0, extra: 0, new: 0 }};
                         points.forEach(pt => {{
                             if (pt.lat !== 0.0 && pt.lng !== 0.0 && (currentFilter === 'ALL' || pt.trip === currentFilter)) {{
                                 let onTimeCol = pt.on_time_col || '';
                                 if (onTimeCol.includes("ไม่ตรงเวลา")) counts.late++;
-                                if (onTimeCol.includes("ไม่สามารถเข้าส่งได้")) counts.nolic++;
                                 if ((pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100)) counts.gps++;
                                 if (hasReasonStartsWithNot(pt)) counts.reason++;
                                 if (pt.is_extra_trip || onTimeCol.includes("รอบเสริม")) counts.extra++;
@@ -1075,7 +1065,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }});
                         document.getElementById('count-late').innerText = counts.late;
-                        document.getElementById('count-nolic').innerText = counts.nolic;
                         document.getElementById('count-gps').innerText = counts.gps;
                         document.getElementById('count-reason').innerText = counts.reason;
                         document.getElementById('count-extra').innerText = counts.extra;
@@ -1085,8 +1074,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function createTooltipHtml(info, seqNum) {{
                         let badgesHtml = [];
                         let onTimeVal = info.on_time_col || 'จัดส่งตรงเวลา';
-                        if (onTimeVal.includes("ไม่สามารถเข้าส่งได้")) badgesHtml.push(`<span class="alert-badge" style="background:#555555;">เข้าส่งไม่ได้</span>`);
-                        else if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
+                        if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
                         else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{onTimeVal}}</span>`);
                         
                         if (info.lat !== 0.0 && info.lng !== 0.0 && (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
@@ -1104,8 +1092,8 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
                             fullAddressText + `<br>
                             <b>ยอดส่ง:</b> ${{info.qty}} ถัง<br>
-                            <b>ตรงเวลา (Col I):</b> ${{info.on_time_col || '-'}}<br>
-                            <b>เหตุขาดส่ง (Col J):</b> ${{info.short_reason_col || '-'}}
+                            <b>ตรงเวลา:</b> ${{info.on_time_col || '-'}}<br>
+                            <b>เหตุขาดส่ง:</b> ${{info.short_reason_col || '-'}}
                         </div>`;
                     }}
 
@@ -1121,8 +1109,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
                         let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
 
-                        let badgeCombo = lateBadgeHtml + gpsBadgeHtml;
-                        let innerHtml = `<div class="marker-container">${{badgeCombo}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
+                        let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
                         return L.divIcon({{ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
                     }}
 
@@ -1179,7 +1166,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function setStatusFilter(statusKey) {{
                         pauseAnimation();
                         currentStatusFilter = (currentStatusFilter === statusKey) ? null : statusKey;
-                        ['late', 'nolic', 'gps', 'reason', 'extra', 'new'].forEach(k => {{
+                        ['late', 'gps', 'reason', 'extra', 'new'].forEach(k => {{
                             let btn = document.getElementById('status-btn-' + k);
                             if (btn) {{
                                 if (k === currentStatusFilter) btn.classList.add('active');
@@ -1231,6 +1218,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         }}
 
                         let info = currentSeg.info;
+                        if (info.lat === 0.0) return;
+
                         let slider = document.getElementById('timeSlider');
                         slider.value = currentStep;
                         slider.style.accentColor = currentSeg.color;
@@ -1283,13 +1272,11 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
                             <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                            <b>📝 เหตุขาดส่ง (Col J):</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
-                            <b>📌 สถานะ (Col I):</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
+                            <b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
+                            <b>📌 ตรงเวลา:</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
                         `;
 
-                        if (info.lat !== 0.0 && info.lng !== 0.0) {{
-                            map.panTo([info.lat, info.lng]);
-                        }}
+                        map.panTo([info.lat, info.lng]);
                     }}
 
                     function nextStep() {{
@@ -1477,10 +1464,10 @@ if dw_uploaded_file and sum_uploaded_file:
                     "จุดที่ถูกสลับลำดับ": f"{swapped_count} จุด (จาก {n_pts} จุด)",
                 })
 
-                valid_opt_group_coords = [warehouse_coord] + [(pt["lat"], pt["lng"]) for pt in opt_records_valid] + [warehouse_coord]
+                trip_opt_group_coords = [warehouse_coord] + [(pt["lat"], pt["lng"]) for pt in opt_records_valid] + [warehouse_coord]
                 trip_opt_route_segments = []
-                for i in range(len(valid_opt_group_coords) - 1):
-                    p1, p2 = valid_opt_group_coords[i], valid_opt_group_coords[i+1]
+                for i in range(len(trip_opt_group_coords) - 1):
+                    p1, p2 = trip_opt_group_coords[i], trip_opt_group_coords[i+1]
                     road_path, _ = get_osrm_route(p1[0], p1[1], p2[0], p2[1])
                     trip_opt_route_segments.append(road_path)
 
@@ -1500,7 +1487,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     all_opt_points_flat.append(info)
 
                     segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
-                    if info["lat"] != 0.0 and info["lng"] != 0.0 and valid_idx_counter < len(trip_opt_route_segments):
+                    if info["lat"] != 0.0 and valid_idx_counter < len(trip_opt_route_segments):
                         segment_path = trip_opt_route_segments[valid_idx_counter]
                         valid_idx_counter += 1
 
@@ -1755,13 +1742,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (stepIndex < 0 || stepIndex >= optSegments.length) return;
                         optCurrentStep = stepIndex;
                         let currentSeg = optSegments[optCurrentStep];
-
-                        if (currentSeg.info.lat === 0.0) {{
-                            let nextValid = optSegments.findIndex((seg, idx) => idx >= optCurrentStep && seg.info.lat !== 0.0);
-                            if (nextValid !== -1) {{ optCurrentStep = nextValid; currentSeg = optSegments[optCurrentStep]; }}
-                        }}
-
                         let info = currentSeg.info;
+                        if (info.lat === 0.0) return;
+
                         let slider = document.getElementById('optTimeSlider');
                         slider.value = optCurrentStep;
                         slider.style.accentColor = currentSeg.color;
@@ -1801,9 +1784,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
                         `;
 
-                        if (info.lat !== 0.0 && info.lng !== 0.0) {{
-                            optMap.panTo([info.lat, info.lng]);
-                        }}
+                        optMap.panTo([info.lat, info.lng]);
                     }}
 
                     function nextOptStep() {{
