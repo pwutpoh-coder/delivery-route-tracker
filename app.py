@@ -491,7 +491,7 @@ selected_wh_name = st.sidebar.selectbox(
 )
 
 if auto_wh_name and auto_wh_name in wh_keys and dw_uploaded_file:
-    st.sidebar.success(f"🚚 รหัสรถ {detected_truck_no} (2 ตัวแรกคือ {detected_truck_no[:2]}) ➔ ตั้งค่า {auto_wh_name} อัตโนมัติ")
+    st.sidebar.success(f"รหัสรถ {detected_truck_no} (2 ตัวแรกคือ {detected_truck_no[:2]}) ➔ ตั้งค่า {auto_wh_name} อัตโนมัติ")
 
 if selected_wh_name == "อื่นๆ (ระบุพิกัดเอง)":
     wh_input = st.sidebar.text_input(
