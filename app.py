@@ -1038,7 +1038,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 <div class="timeline-container">
                     <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
                     <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                    <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:350px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
+                    <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
                 </div>
 
                 <div id="map"></div>
@@ -1269,15 +1269,17 @@ if dw_uploaded_file and sum_uploaded_file:
                         let timeLabel = info.time || '-';
                         let custIdLabel = info.cust_id || '-';
                         let custNameLabel = info.cust_name || '-';
+                        let addressLabel = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '-';
                         let qtyLabel = info.qty !== undefined ? info.qty : 0;
+                        let accQtyLabel = info.acc_qty !== undefined ? info.acc_qty : 0;
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
                         document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | สถานะ: ${{info.on_time_col || info.status}}
+                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#ffe082;">${{accQtyLabel}} ถัง</span>
                         `;
 
-                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - ลูกค้า: <span style="color:#0055FF;">${{custIdLabel}} (${{custNameLabel}})</span> (จุด ${{pointNumText}})`;
+                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}})`;
 
                         activePolylines.forEach(p => map.removeLayer(p));
                         activePolylines = [];
@@ -1694,7 +1696,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 <div class="opt-timeline-container">
                     <span style="font-weight:bold; font-size:12px;">⏱️ ลำดับจุด:</span>
                     <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="{max(len(opt_segments_data)-1, 0)}" value="0" oninput="onOptSliderChange(this.value)">
-                    <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">จุด 1</span>
+                    <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:200px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">จุด 1</span>
                 </div>
 
                 <div id="opt-map"></div>
@@ -1797,14 +1799,13 @@ if dw_uploaded_file and sum_uploaded_file:
                         let optSeq = currentSeg.opt_seq || '-';
                         let origSeq = currentSeg.orig_seq || '-';
                         let custId = info.cust_id || '-';
-                        let custName = info.cust_name || '-';
                         let tripName = currentSeg.trip || '-';
 
                         document.getElementById('opt-banner-content').innerHTML = `
-                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | ลูกค้า: <span style="color:#64ffda;">${{custId}} (${{custName}})</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
+                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | รหัสลูกค้า: <span style="color:#64ffda;">${{custId}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
                         `;
 
-                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span> (${{custId}})`;
+                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span>`;
 
                         optActivePolylines.forEach(p => optMap.removeLayer(p));
                         optActivePolylines = [];
@@ -1824,7 +1825,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         document.getElementById('opt-info-box').innerHTML = `
                             <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
-                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{custName}})</span><br>
+                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{info.cust_name}})</span><br>
                             <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
                             <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
                         `;
