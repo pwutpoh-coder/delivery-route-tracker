@@ -2052,6 +2052,40 @@ if dw_uploaded_file and sum_uploaded_file:
                             <style>
                                 #map-tab3 {{ width: 100%; height: 600px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                                 
+                                .map-legend-box {{
+                                    background: #ffffff;
+                                    padding: 8px 14px;
+                                    border-radius: 6px;
+                                    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+                                    margin-bottom: 10px;
+                                    font-family: sans-serif;
+                                    font-size: 13px;
+                                    display: flex;
+                                    gap: 16px;
+                                    align-items: center;
+                                    flex-wrap: wrap;
+                                }}
+                                .legend-pill {{
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 6px;
+                                    font-weight: bold;
+                                    color: #333;
+                                }}
+                                .legend-dot-new {{
+                                    width: 16px; height: 16px; border-radius: 50%;
+                                    background: linear-gradient(135deg, #1e3c72, #2a5298);
+                                    border: 2px solid #00d2ff;
+                                    display: inline-block;
+                                }}
+                                .legend-dot-prev {{
+                                    width: 16px; height: 16px; border-radius: 50%;
+                                    background: #ff6b6b;
+                                    border: 2px solid #ffffff;
+                                    display: inline-block;
+                                    text-align: center; font-size: 9px; line-height: 12px; color: white;
+                                }}
+
                                 .new-member-container {{
                                     position: relative;
                                     width: 36px;
@@ -2118,6 +2152,13 @@ if dw_uploaded_file and sum_uploaded_file:
                             </style>
                         </head>
                         <body>
+                            <div class="map-legend-box">
+                                <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
+                                <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ที่เพิ่มไป (✦)</div>
+                                <div class="legend-pill"><span class="legend-dot-prev">🔗</span> พิกัดรายที่จะนำไปแทรกต่อ (จุดก่อนหน้า)</div>
+                                <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป (คลิก/ชี้เพื่อดูข้อมูล)</div>
+                            </div>
+
                             <div id="map-tab3"></div>
                             <script>
                                 const warehouse = {wh_json};
@@ -2147,7 +2188,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                                     <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
                                                     <b>ชื่อ:</b> ${{pt.cust_name}}<br>
                                                     <b>เที่ยว:</b> ${{pt.trip}}
-                                                </div>`, {{permanent: true, direction: 'bottom'}});
+                                                </div>`, {{direction: 'top', opacity: 0.95}});
                                         }} else {{
                                             let iconHtml = `<div class="exist-icon">${{seqNum}}</div>`;
                                             let customIcon = L.divIcon({{ className: '', html: iconHtml, iconSize: [24, 24], iconAnchor: [12, 12] }});
@@ -2180,7 +2221,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                         <b>เที่ยวจัดส่ง:</b> ${{newPt.trip}}<br>
                                         <b>ตำแหน่งแทรก:</b> ลำดับที่ ${{newPt.insert_seq}} ของเที่ยว<br>
                                         <b>ต่อจากลูกค้า:</b> ${{newPt.insert_after}}
-                                    </div>`, {{permanent: true, direction: 'top'}});
+                                    </div>`, {{direction: 'top', opacity: 0.95}});
 
                                 if(newRoutePath && newRoutePath.length > 0) {{
                                     L.polyline(newRoutePath, {{color: '#00d2ff', weight: 4, opacity: 0.85, dashArray: '6, 6'}}).addTo(map3);
@@ -2192,7 +2233,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         </body>
                         </html>
                         """
-                        st.components.v1.html(map_tab3_html, height=620, scrolling=False)
+                        st.components.v1.html(map_tab3_html, height=650, scrolling=False)
 
                     else:
                         st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งที่สามารถนำมาคำนวณเปรียบเทียบได้ในไฟล์")
