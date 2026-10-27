@@ -1889,12 +1889,12 @@ if dw_uploaded_file and sum_uploaded_file:
             )
 
         # -------------------------------------------------------------
-        # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่ พร้อมแผนที่ Leaflet
+        # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่ พร้อมแผนที่ Leaflet (ปรับปรุงใหม่)
         # -------------------------------------------------------------
         with tab3:
             st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่")
             st.markdown(
-                "กรอกพิกัดหรือข้อมูลของสมาชิกใหม่ที่ต้องการเพิ่มเข้ามาในเส้นทาง เพื่อให้ระบบคำนวณหาว่า **ควรไปแทรกอยู่ในเที่ยวไหน และอยู่ระหว่างจุดจัดส่งใด (ลำดับที่เท่าไร)** พร้อมแสดงแผนที่ให้เห็นชัดเจน"
+                "กรอกพิกัดเป็น `ละติจูด, ลองจิจูด` ของสมาชิกใหม่ เพื่อให้ระบบประมวลผลหาว่า **ควรไปแทรกในเที่ยวไหน ลำดับที่เท่าไร และต่อจากลูกค้ารายใด** เพื่อให้ระยะทางเพิ่มขึ้นน้อยที่สุด"
             )
 
             col_input1, col_input2 = st.columns(2)
@@ -1903,184 +1903,300 @@ if dw_uploaded_file and sum_uploaded_file:
                 new_cust_name = st.text_input("ชื่อ-นามสกุล หรือรายละเอียด:", value="สมาชิกทดสอบรายใหม่")
                 new_cust_qty = st.number_input("จำนวนถังที่ต้องจัดส่ง (ถัง):", min_value=1, max_value=100, value=5)
             with col_input2:
-                new_lat_input = st.number_input("ละติจูด (Latitude):", value=warehouse_coord[0] + 0.02, format="%.6f")
-                new_lng_input = st.number_input("ลองจิจูด (Longitude):", value=warehouse_coord[1] + 0.02, format="%.6f")
+                # รวมพิกัด ละติจูด, ลองจิจูด ในช่องเดียวกันด้วยคอมม่า
+                default_coord_str = f"{warehouse_coord[0] + 0.02:.6f}, {warehouse_coord[1] + 0.02:.6f}"
+                coord_input_str = st.text_input(
+                    "พิกัดสมาชิกใหม่ (ละติจูด, ลองจิจูด):",
+                    value=default_coord_str,
+                    placeholder="เช่น 13.624988, 100.720414",
+                )
 
             if st.button("🚀 คำนวณหาตำแหน่งแทรกและแสดงบนแผนที่", use_container_width=True):
-                new_point = (float(new_lat_input), float(new_lng_input))
-                
-                best_overall_trip = None
-                best_insert_after_index = 0
-                min_additional_distance = float("inf")
-                
-                analysis_results = []
-                best_new_route_path = []
+                # ตรวจจับพิกัด lat, lng จากช่องกรอก
+                parsed_lat, parsed_lng = None, None
+                if coord_input_str.strip():
+                    c_match = re.search(r"^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$", coord_input_str.strip())
+                    if c_match:
+                        parsed_lat = float(c_match.group(1))
+                        parsed_lng = float(c_match.group(2))
 
-                grouped_analysis = df.groupby("trip", sort=False)
-
-                for trip_name, group in grouped_analysis:
-                    valid_points = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].to_dict("records")
-                    if not valid_points:
-                        continue
-                    
-                    trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_points] + [warehouse_coord]
-                    
-                    orig_trip_dist = 0.0
-                    for i in range(len(trip_coords) - 1):
-                        _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
-                        orig_trip_dist += d
-
-                    best_pos_in_trip = 0
-                    min_trip_new_dist = float("inf")
-                    best_route_for_this_trip = []
-
-                    for insert_idx in range(1, len(trip_coords)):
-                        test_coords = trip_coords.copy()
-                        test_coords.insert(insert_idx, new_point)
-                        
-                        test_trip_dist = 0.0
-                        temp_route_segments = []
-                        for i in range(len(test_coords) - 1):
-                            r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
-                            test_trip_dist += d
-                            temp_route_segments.extend(r_path)
-
-                        added_dist = test_trip_dist - orig_trip_dist
-                        if added_dist < min_trip_new_dist:
-                            min_trip_new_dist = added_dist
-                            best_pos_in_trip = insert_idx
-                            best_route_for_this_trip = temp_route_segments
-
-                    analysis_results.append({
-                        "trip": trip_name,
-                        "added_dist": min_trip_new_dist,
-                        "best_pos": best_pos_in_trip,
-                        "orig_dist": orig_trip_dist,
-                        "new_dist": orig_trip_dist + min_trip_new_dist
-                    })
-
-                    if min_trip_new_dist < min_additional_distance:
-                        min_additional_distance = min_trip_new_dist
-                        best_overall_trip = trip_name
-                        best_insert_after_index = best_pos_in_trip
-                        best_new_route_path = best_route_for_this_trip
-
-                if best_overall_trip:
-                    st.success(f"🎉 ผลการคำนวณแนะนำให้แทรกใน **{best_overall_trip}** โดยเพิ่มระยะทางน้อยที่สุดเพียง **{min_additional_distance:.2f} กม.** เท่านั้น!")
-                    
-                    target_group = df[df["trip"] == best_overall_trip].reset_index(drop=True)
-                    after_cust_id = "เริ่มต้นเที่ยว (ออกจากคลัง)"
-                    after_cust_name = "คลังสินค้า"
-                    if best_insert_after_index > 1 and best_insert_after_index - 2 < len(target_group):
-                        prev_rec = target_group.iloc[best_insert_after_index - 2]
-                        after_cust_id = prev_rec["cust_id"]
-                        after_cust_name = prev_rec["cust_name"]
-
-                    st.info(f"📌 **คำแนะนำการแทรก:** นำไปแทรกต่อจากลูกค้า **{after_cust_id} ({after_cust_name})** ใน **{best_overall_trip}**")
-
-                    st.markdown("#### 📊 ตารางเปรียบเทียบผลกระทบระยะทางหากแทรกเข้าในแต่ละเที่ยว:")
-                    res_df = pd.DataFrame(analysis_results)
-                    res_df.columns = ["เที่ยวการส่ง", "ระยะทางที่เพิ่มขึ้น (กม.)", "ตำแหน่งแทรกที่ดีที่สุด", "ระยะทางเดิม (กม.)", "ระยะทางหลังแทรก (กม.)"]
-                    st.table(res_df)
-
-                    st.markdown("#### 🗺️ แผนที่เปรียบเทียบตำแหน่งพิกัดลูกค้าเดิม และพิกัดลูกค้าใหม่")
-
-                    existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
-                    new_pt_json = json.dumps({
-                        "cust_id": new_cust_id,
-                        "cust_name": new_cust_name,
-                        "qty": new_cust_qty,
-                        "lat": float(new_lat_input),
-                        "lng": float(new_lng_input),
-                        "trip": best_overall_trip,
-                        "insert_after": f"{after_cust_id} ({after_cust_name})"
-                    }, ensure_ascii=False)
-                    new_route_json = json.dumps(best_new_route_path, ensure_ascii=False)
-
-                    map_tab3_html = f"""
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <meta charset="utf-8" />
-                        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-                        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-                        <style>
-                            #map-tab3 {{ width: 100%; height: 550px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
-                            .new-member-icon {{
-                                background-color: #FFD700 !important;
-                                color: #000000 !important;
-                                border: 3px solid #FF0000 !important;
-                                border-radius: 50% !important;
-                                text-align: center !important;
-                                font-weight: bold !important;
-                                font-size: 16px !important;
-                                line-height: 28px !important;
-                                width: 34px !important;
-                                height: 34px !important;
-                                box-shadow: 0 0 12px #FF0000 !important;
-                                animation: blink-animation 1.2s infinite alternate;
-                            }}
-                            @keyframes blink-animation {{
-                                0% {{ transform: scale(1); box-shadow: 0 0 5px #FF0000; }}
-                                100% {{ transform: scale(1.25); box-shadow: 0 0 20px #FF0000; }}
-                            }}
-                            .exist-icon {{
-                                background-color: #0055FF;
-                                color: white;
-                                border: 2px solid white;
-                                border-radius: 50%;
-                                text-align: center;
-                                font-size: 11px;
-                                line-height: 20px;
-                                width: 22px;
-                                height: 22px;
-                                font-weight: bold;
-                            }}
-                        </style>
-                    </head>
-                    <body>
-                        <div id="map-tab3"></div>
-                        <script>
-                            const warehouse = {wh_json};
-                            const existPoints = {existing_pts_json};
-                            const newPt = {new_pt_json};
-                            const newRoutePath = {new_route_json};
-
-                            const map3 = L.map('map-tab3').setView([newPt.lat, newPt.lng], 13);
-                            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
-                                attribution: '© OpenStreetMap contributors'
-                            }}).addTo(map3);
-
-                            L.marker(warehouse).addTo(map3).bindTooltip("🏢 คลังสินค้าหลัก");
-
-                            existPoints.forEach((pt, idx) => {{
-                                if(pt.lat !== 0.0 && pt.lng !== 0.0) {{
-                                    let iconHtml = `<div class="exist-icon">${{idx+1}}</div>`;
-                                    let customIcon = L.divIcon({{ className: '', html: iconHtml, iconSize: [22, 22], iconAnchor: [11, 11] }});
-                                    let m = L.marker([pt.lat, pt.lng], {{icon: customIcon}}).addTo(map3);
-                                    m.bindTooltip(`<b>📍 จุดเดิมที่ ${{idx+1}} (${{pt.trip}})</b><br>รหัส: ${{pt.cust_id}}<br>ชื่อ: ${{pt.cust_name}}<br>ยอดส่ง: ${{pt.qty}} ถัง`);
-                                }}
-                            }});
-
-                            let newIconHtml = `<div class="new-member-icon">★</div>`;
-                            let newCustomIcon = L.divIcon({{ className: '', html: newIconHtml, iconSize: [34, 34], iconAnchor: [17, 17] }});
-                            let newMarker = L.marker([newPt.lat, newPt.lng], {{icon: newCustomIcon}}).addTo(map3);
-                            newMarker.bindTooltip(`<b>⭐ จุดสมาชิกใหม่ที่ต้องการเพิ่ม</b><br><b>รหัส:</b> ${{newPt.cust_id}}<br><b>ชื่อ:</b> ${{newPt.cust_name}}<br><b>ยอดส่ง:</b> ${{newPt.qty}} ถัง<br><b>แนะนำแทรกใน:</b> ${{newPt.trip}}<br><b>แทรกต่อจาก:</b> ${{newPt.insert_after}}`, {{permanent: true, direction: 'top'}});
-
-                            if(newRoutePath && newRoutePath.length > 0) {{
-                                L.polyline(newRoutePath, {{color: '#FF0000', weight: 4, opacity: 0.8, dashArray: '8, 8'}}).addTo(map3);
-                            }}
-
-                            let groupBounds = L.latLngBounds([warehouse, [newPt.lat, newPt.lng]]);
-                            map3.fitBounds(groupBounds, {{padding: [50, 50]}});
-                        </script>
-                    </body>
-                    </html>
-                    """
-                    st.components.v1.html(map_tab3_html, height=580, scrolling=False)
-
+                if parsed_lat is None or parsed_lng is None:
+                    st.error("❌ รูปแบบพิกัดไม่ถูกต้อง กรุณากรอกในรูปแบบ: ละติจูด, ลองจิจูด (เช่น 13.624988, 100.720414)")
                 else:
-                    st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งที่สามารถนำมาคำนวณเปรียบเทียบได้ในไฟล์")
+                    new_point = (parsed_lat, parsed_lng)
+                    
+                    best_overall_trip = None
+                    best_insert_after_index = 0
+                    min_additional_distance = float("inf")
+                    
+                    analysis_results = []
+                    best_new_route_path = []
+
+                    grouped_analysis = df.groupby("trip", sort=False)
+
+                    for trip_name, group in grouped_analysis:
+                        valid_points = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].to_dict("records")
+                        if not valid_points:
+                            continue
+                        
+                        trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_points] + [warehouse_coord]
+                        
+                        orig_trip_dist = 0.0
+                        for i in range(len(trip_coords) - 1):
+                            _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
+                            orig_trip_dist += d
+
+                        best_pos_in_trip = 0
+                        min_trip_new_dist = float("inf")
+                        best_route_for_this_trip = []
+
+                        for insert_idx in range(1, len(trip_coords)):
+                            test_coords = trip_coords.copy()
+                            test_coords.insert(insert_idx, new_point)
+                            
+                            test_trip_dist = 0.0
+                            temp_route_segments = []
+                            for i in range(len(test_coords) - 1):
+                                r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
+                                test_trip_dist += d
+                                temp_route_segments.extend(r_path)
+
+                            added_dist = test_trip_dist - orig_trip_dist
+                            if added_dist < min_trip_new_dist:
+                                min_trip_new_dist = added_dist
+                                best_pos_in_trip = insert_idx
+                                best_route_for_this_trip = temp_route_segments
+
+                        analysis_results.append({
+                            "trip": trip_name,
+                            "added_dist": min_trip_new_dist,
+                            "best_pos": best_pos_in_trip,
+                            "orig_dist": orig_trip_dist,
+                            "new_dist": orig_trip_dist + min_trip_new_dist
+                        })
+
+                        if min_trip_new_dist < min_additional_distance:
+                            min_additional_distance = min_trip_new_dist
+                            best_overall_trip = trip_name
+                            best_insert_after_index = best_pos_in_trip
+                            best_new_route_path = best_route_for_this_trip
+
+                    if best_overall_trip:
+                        target_group = df[df["trip"] == best_overall_trip].reset_index(drop=True)
+                        after_cust_id = "เริ่มต้นเที่ยว (ออกจากคลัง)"
+                        after_cust_name = "คลังสินค้า"
+                        prev_point_lat, prev_point_lng = warehouse_coord[0], warehouse_coord[1]
+                        
+                        # คำนวณลำดับการส่งที่จะเข้าไปอยู่
+                        insert_seq_in_trip = best_insert_after_index # ลำดับที่ในเที่ยวส่งนั้น
+                        
+                        if best_insert_after_index > 1 and best_insert_after_index - 2 < len(target_group):
+                            prev_rec = target_group.iloc[best_insert_after_index - 2]
+                            after_cust_id = prev_rec["cust_id"]
+                            after_cust_name = prev_rec["cust_name"]
+                            prev_point_lat = prev_rec["lat"]
+                            prev_point_lng = prev_rec["lng"]
+
+                        # สรุปผลลัพธ์การแทรก
+                        st.markdown("### 📌 สรุปผลการประเมินตำแหน่งแทรกที่เหมาะสมที่สุด")
+                        c_res1, c_res2, c_res3, c_res4 = st.columns(4)
+                        c_res1.metric("เที่ยวจัดส่งที่แนะนำ", best_overall_trip)
+                        c_res2.metric("ลำดับจุดจัดส่งใหม่ในเที่ยว", f"ลำดับที่ {insert_seq_in_trip}")
+                        c_res3.metric("แทรกต่อจากสมาชิก", f"{after_cust_id}")
+                        c_res4.metric("ระยะทางวิ่งเพิ่มขึ้น", f"+{min_additional_distance:.2f} กม.", delta_color="inverse")
+
+                        st.info(
+                            f"💡 **สรุปคำแนะนำ:** ควรนำสมาชิกใหม่ **{new_cust_id} ({new_cust_name})** เข้าไปจัดส่งใน **{best_overall_trip}** โดยแทรกใน **ลำดับที่ {insert_seq_in_trip}** ของเที่ยว (ต่อจากลูกค้า **{after_cust_id} : {after_cust_name}**) ซึ่งจะส่งผลให้เส้นทางวิ่งรวมเพิ่มขึ้นน้อยที่สุดเพียง **{min_additional_distance:.2f} กม.**"
+                        )
+
+                        st.markdown("#### 📊 รายละเอียดตารางเปรียบเทียบผลกระทบหากแทรกเข้าในแต่ละเที่ยว:")
+                        res_df = pd.DataFrame(analysis_results)
+                        
+                        # ปรับรูปแบบตารางเพื่อแสดงผล
+                        display_tab3_df = []
+                        for item in analysis_results:
+                            t_grp = df[df["trip"] == item["trip"]].reset_index(drop=True)
+                            p_id = "คลังสินค้า"
+                            p_name = "เริ่มต้นเที่ยว"
+                            if item["best_pos"] > 1 and item["best_pos"] - 2 < len(t_grp):
+                                p_rec = t_grp.iloc[item["best_pos"] - 2]
+                                p_id = p_rec["cust_id"]
+                                p_name = p_rec["cust_name"]
+
+                            display_tab3_df.append({
+                                "เที่ยวการส่ง": item["trip"],
+                                "ลำดับแทรกแนะนำ": f"ลำดับที่ {item['best_pos']}",
+                                "แทรกต่อจากลูกค้า": f"{p_id} ({p_name})",
+                                "ระยะทางเดิม (กม.)": f"{item['orig_dist']:.2f}",
+                                "ระยะทางใหม่ (กม.)": f"{item['new_dist']:.2f}",
+                                "ระยะทางที่เพิ่มขึ้น (กม.)": f"+{item['added_dist']:.2f}",
+                            })
+
+                        st.dataframe(pd.DataFrame(display_tab3_df), use_container_width=True, hide_index=True)
+
+                        st.markdown("#### 🗺️ แผนที่แสดงตำแหน่งสมาชิกใหม่ และจุดส่งก่อนหน้าที่ต่อท้าย")
+
+                        existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
+                        new_pt_json = json.dumps({
+                            "cust_id": new_cust_id,
+                            "cust_name": new_cust_name,
+                            "qty": new_cust_qty,
+                            "lat": parsed_lat,
+                            "lng": parsed_lng,
+                            "trip": best_overall_trip,
+                            "insert_seq": insert_seq_in_trip,
+                            "insert_after": f"{after_cust_id} ({after_cust_name})",
+                            "prev_lat": prev_point_lat,
+                            "prev_lng": prev_point_lng,
+                            "prev_id": after_cust_id
+                        }, ensure_ascii=False)
+                        new_route_json = json.dumps(best_new_route_path, ensure_ascii=False)
+
+                        # HTML & JavaScript สำหรับ Leaflet Map แท็บที่ 3 ดีไซน์หมุดเรียบหรูสไตล์ Glassmorphism
+                        map_tab3_html = f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="utf-8" />
+                            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+                            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+                            <style>
+                                #map-tab3 {{ width: 100%; height: 560px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                                
+                                /* ดีไซน์หมุดใหม่: สไตล์ Modern Navy-Cyan Glassmorphic */
+                                .new-member-container {{
+                                    position: relative;
+                                    width: 36px;
+                                    height: 36px;
+                                }}
+                                .new-member-card {{
+                                    background: linear-gradient(135deg, #1e3c72, #2a5298) !important;
+                                    color: #ffffff !important;
+                                    border: 2px solid #00d2ff !important;
+                                    border-radius: 50% !important;
+                                    text-align: center !important;
+                                    font-weight: bold !important;
+                                    font-size: 18px !important;
+                                    line-height: 32px !important;
+                                    width: 34px !important;
+                                    height: 34px !important;
+                                    box-shadow: 0 4px 15px rgba(0, 210, 255, 0.45) !important;
+                                    display: flex !important;
+                                    align-items: center !important;
+                                    justify-content: center !important;
+                                }}
+                                .new-member-pulse {{
+                                    position: absolute;
+                                    top: -4px;
+                                    left: -4px;
+                                    width: 42px;
+                                    height: 42px;
+                                    border-radius: 50%;
+                                    border: 2px solid #00d2ff;
+                                    animation: pulse-ring 1.8s infinite ease-out;
+                                }}
+                                @keyframes pulse-ring {{
+                                    0% {{ transform: scale(0.8); opacity: 1; }}
+                                    100% {{ transform: scale(1.5); opacity: 0; }}
+                                }}
+
+                                /* สัญลักษณ์จุดก่อนหน้าที่ถูกต่อท้าย */
+                                .prev-connected-icon {{
+                                    background: #ff6b6b !important;
+                                    color: #ffffff !important;
+                                    border: 2px solid #ffffff !important;
+                                    border-radius: 50% !important;
+                                    width: 28px !important;
+                                    height: 28px !important;
+                                    text-align: center !important;
+                                    font-weight: bold !important;
+                                    font-size: 12px !important;
+                                    line-height: 24px !important;
+                                    box-shadow: 0 0 12px rgba(255, 107, 107, 0.8) !important;
+                                }}
+
+                                .exist-icon {{
+                                    background-color: #4a6572;
+                                    color: white;
+                                    border: 1.5px solid white;
+                                    border-radius: 50%;
+                                    text-align: center;
+                                    font-size: 10px;
+                                    line-height: 20px;
+                                    width: 20px;
+                                    height: 20px;
+                                    font-weight: bold;
+                                    opacity: 0.75;
+                                }}
+                            </style>
+                        </head>
+                        <body>
+                            <div id="map-tab3"></div>
+                            <script>
+                                const warehouse = {wh_json};
+                                const existPoints = {existing_pts_json};
+                                const newPt = {new_pt_json};
+                                const newRoutePath = {new_route_json};
+
+                                const map3 = L.map('map-tab3').setView([newPt.lat, newPt.lng], 13);
+                                L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                                    attribution: '© OpenStreetMap contributors'
+                                }}).addTo(map3);
+
+                                L.marker(warehouse).addTo(map3).bindTooltip("🏢 คลังสินค้าหลัก");
+
+                                existPoints.forEach((pt, idx) => {{
+                                    if(pt.lat !== 0.0 && pt.lng !== 0.0) {{
+                                        let isPrevConnected = (pt.cust_id === newPt.prev_id && pt.cust_id !== "คลังสินค้า");
+                                        
+                                        if (isPrevConnected) {{
+                                            // ทำสัญลักษณ์เน้นจุดลูกค้าก่อนหน้าที่ถูกต่อท้าย
+                                            let prevHtml = `<div class="prev-connected-icon">🔗</div>`;
+                                            let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
+                                            let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
+                                            pm.bindTooltip(`<b>📍 [จุดส่งก่อนหน้า]</b><br><b>รหัส:</b> ${{pt.cust_id}}<br><b>ชื่อ:</b> ${{pt.cust_name}}<br><b>ต่อด้วยสมาชิกใหม่ที่จุดนี้</b>`, {{permanent: true, direction: 'bottom'}});
+                                        }} else {{
+                                            let iconHtml = `<div class="exist-icon">${{idx+1}}</div>`;
+                                            let customIcon = L.divIcon({{ className: '', html: iconHtml, iconSize: [20, 20], iconAnchor: [10, 10] }});
+                                            let m = L.marker([pt.lat, pt.lng], {{icon: customIcon}}).addTo(map3);
+                                            m.bindTooltip(`<b>📍 จุดส่งเดิมที่ ${{idx+1}} (${{pt.trip}})</b><br>รหัส: ${{pt.cust_id}}<br>ชื่อ: ${{pt.cust_name}}<br>ยอดส่ง: ${{pt.qty}} ถัง`);
+                                        }}
+                                    }}
+                                me}});
+
+                                // หมุดสมาชิกใหม่ดีไซน์หรูหรา
+                                let newIconHtml = `
+                                    <div class="new-member-container">
+                                        <div class="new-member-pulse"></div>
+                                        <div class="new-member-card">✦</div>
+                                    </div>`;
+                                let newCustomIcon = L.divIcon({{ className: '', html: newIconHtml, iconSize: [36, 36], iconAnchor: [18, 18] }});
+                                let newMarker = L.marker([newPt.lat, newPt.lng], {{icon: newCustomIcon, zIndexOffset: 10000}}).addTo(map3);
+                                
+                                newMarker.bindTooltip(`
+                                    <div style="font-family:sans-serif; font-size:12px; line-height:1.5;">
+                                        <b style="color:#2a5298; font-size:13px;">🌟 จุดสมาชิกใหม่ (แนะนำแทรก)</b><br>
+                                        <b>รหัส:</b> ${{newPt.cust_id}} (${{newPt.cust_name}})<br>
+                                        <b>จำนวนส่ง:</b> ${{newPt.qty}} ถัง<br>
+                                        <b>เที่ยวจัดส่ง:</b> ${{newPt.trip}}<br>
+                                        <b>ตำแหน่งแทรก:</b> ลำดับที่ ${{newPt.insert_seq}} ของเที่ยว<br>
+                                        <b>ต่อจากลูกค้า:</b> ${{newPt.insert_after}}
+                                    </div>`, {{permanent: true, direction: 'top'}});
+
+                                if(newRoutePath && newRoutePath.length > 0) {{
+                                    L.polyline(newRoutePath, {{color: '#00d2ff', weight: 4, opacity: 0.85, dashArray: '6, 6'}}).addTo(map3);
+                                }}
+
+                                let groupBounds = L.latLngBounds([warehouse, [newPt.lat, newPt.lng], [newPt.prev_lat, newPt.prev_lng]]);
+                                map3.fitBounds(groupBounds, {{padding: [60, 60]}});
+                            </script>
+                        </body>
+                        </html>
+                        """
+                        st.components.v1.html(map_tab3_html, height=590, scrolling=False)
+
+                    else:
+                        st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งที่สามารถนำมาคำนวณเปรียบเทียบได้ในไฟล์")
 
 else:
     st.info(
