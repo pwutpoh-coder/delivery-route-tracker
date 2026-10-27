@@ -1924,30 +1924,55 @@ if dw_uploaded_file and sum_uploaded_file:
                     best_insert_after_index = 0
                     min_additional_distance = float("inf")
                     
+                    closest_cust_id = None
+                    closest_cust_name = None
+                    closest_road_dist = float("inf")
+                    
                     analysis_results = []
                     best_new_route_path = []
 
-                    grouped_analysis = df.groupby("trip", sort=False)
+                    # 1. ค้นหารหัสสมาชิกเดิมที่มีระยะทางเส้นถนน (Road Distance) ใกล้ที่สุดกับพิกัดใหม่
+                    all_valid_records = df[(df["lat"] != 0.0) & (df["lng"] != 0.0)].to_dict("records")
+                    if all_valid_records:
+                        for rec in all_valid_records:
+                            _, r_dist = get_osrm_route(parsed_lat, parsed_lng, rec["lat"], rec["lng"])
+                            if r_dist < closest_road_dist:
+                                closest_road_dist = r_dist
+                                closest_cust_id = rec["cust_id"]
+                                closest_cust_name = rec["cust_name"]
 
-                    for trip_name, group in grouped_analysis:
-                        valid_points = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].to_dict("records")
-                        if not valid_points:
-                            continue
+                        # 2. หาว่ารหัสสมาชิกที่ใกล้ที่สุดนั้น อยู่ในเที่ยวไหน และลำดับที่เท่าไหร่
+                        target_trip_name = None
+                        target_cust_idx_in_trip = -1
                         
-                        trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_points] + [warehouse_coord]
-                        
-                        orig_trip_dist = 0.0
-                        for i in range(len(trip_coords) - 1):
-                            _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
-                            orig_trip_dist += d
+                        grouped_analysis = df.groupby("trip", sort=False)
+                        for trip_name, group in grouped_analysis:
+                            g_records = group.to_dict("records")
+                            for idx_g, g_rec in enumerate(g_records):
+                                if g_rec["cust_id"] == closest_cust_id:
+                                    target_trip_name = trip_name
+                                    target_cust_idx_in_trip = idx_g
+                                    break
+                            if target_trip_name:
+                                break
 
-                        best_pos_in_trip = 0
-                        min_trip_new_dist = float("inf")
-                        best_route_for_this_trip = []
+                        if target_trip_name:
+                            best_overall_trip = target_trip_name
+                            # แทรกต่อท้ายสมาชิกที่ใกล้ที่สุด (index ใน trip_coords คือ index ของลูกค้า + 2)
+                            best_insert_after_index = target_cust_idx_in_trip + 2
 
-                        for insert_idx in range(1, len(trip_coords)):
+                            # คำนวณระยะทางที่เพิ่มขึ้นเมื่อแทรกต่อท้ายลูกค้ารายนี้
+                            target_group_df = df[df["trip"] == best_overall_trip].reset_index(drop=True)
+                            valid_pts_trip = target_group_df[(target_group_df["lat"] != 0.0) & (target_group_df["lng"] != 0.0)].to_dict("records")
+                            trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_pts_trip] + [warehouse_coord]
+                            
+                            orig_trip_dist = 0.0
+                            for i in range(len(trip_coords) - 1):
+                                _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
+                                orig_trip_dist += d
+
                             test_coords = trip_coords.copy()
-                            test_coords.insert(insert_idx, new_point)
+                            test_coords.insert(best_insert_after_index, new_point)
                             
                             test_trip_dist = 0.0
                             temp_route_segments = []
@@ -1956,50 +1981,63 @@ if dw_uploaded_file and sum_uploaded_file:
                                 test_trip_dist += d
                                 temp_route_segments.extend(r_path)
 
-                            added_dist = test_trip_dist - orig_trip_dist
-                            if added_dist < min_trip_new_dist:
-                                min_trip_new_dist = added_dist
-                                best_pos_in_trip = insert_idx
-                                best_route_for_this_trip = temp_route_segments
+                            min_additional_distance = test_trip_dist - orig_trip_dist
+                            best_new_route_path = temp_route_segments
 
-                        analysis_results.append({
-                            "trip": trip_name,
-                            "added_dist": min_trip_new_dist,
-                            "best_pos": best_pos_in_trip,
-                            "orig_dist": orig_trip_dist,
-                            "new_dist": orig_trip_dist + min_trip_new_dist
-                        })
+                            # เก็บข้อมูลเปรียบเทียบทุกเที่ยวสำหรับแสดงตาราง
+                            for trip_name, group in grouped_analysis:
+                                v_pts = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].to_dict("records")
+                                if not v_pts:
+                                    continue
+                                t_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in v_pts] + [warehouse_coord]
+                                o_dist = 0.0
+                                for i in range(len(t_coords) - 1):
+                                    _, d = get_osrm_route(t_coords[i][0], t_coords[i][1], t_coords[i+1][0], t_coords[i+1][1])
+                                    o_dist += d
+                                
+                                min_t_dist = float("inf")
+                                best_p = 1
+                                for ins_idx in range(1, len(t_coords)):
+                                    tc = t_coords.copy()
+                                    tc.insert(ins_idx, new_point)
+                                    td = 0.0
+                                    for i in range(len(tc) - 1):
+                                        _, d = get_osrm_route(tc[i][0], tc[i][1], tc[i+1][0], tc[i+1][1])
+                                        td += d
+                                    if (td - o_dist) < min_t_dist:
+                                        min_t_dist = td - o_dist
+                                        best_p = ins_idx
 
-                        if min_trip_new_dist < min_additional_distance:
-                            min_additional_distance = min_trip_new_dist
-                            best_overall_trip = trip_name
-                            best_insert_after_index = best_pos_in_trip
-                            best_new_route_path = best_route_for_this_trip
+                                analysis_results.append({
+                                    "trip": trip_name,
+                                    "added_dist": min_t_dist,
+                                    "best_pos": best_p,
+                                    "orig_dist": o_dist,
+                                    "new_dist": o_dist + min_t_dist
+                                })
 
                     if best_overall_trip:
                         target_group = df[df["trip"] == best_overall_trip].reset_index(drop=True)
-                        after_cust_id = "เริ่มต้นเที่ยว (ออกจากคลัง)"
-                        after_cust_name = "คลังสินค้า"
+                        after_cust_id = closest_cust_id
+                        after_cust_name = closest_cust_name
                         prev_point_lat, prev_point_lng = warehouse_coord[0], warehouse_coord[1]
                         
-                        insert_seq_in_trip = best_insert_after_index
-                        
-                        if best_insert_after_index > 1 and best_insert_after_index - 2 < len(target_group):
-                            prev_rec = target_group.iloc[best_insert_after_index - 2]
-                            after_cust_id = prev_rec["cust_id"]
-                            after_cust_name = prev_rec["cust_name"]
+                        if target_cust_idx_in_trip >= 0 and target_cust_idx_in_trip < len(target_group):
+                            prev_rec = target_group.iloc[target_cust_idx_in_trip]
                             prev_point_lat = prev_rec["lat"]
                             prev_point_lng = prev_rec["lng"]
 
-                        st.markdown("### 📌 สรุปผลการประเมินตำแหน่งแทรกที่เหมาะสมที่สุด")
+                        insert_seq_in_trip = best_insert_after_index
+
+                        st.markdown("### 📌 สรุปผลการประเมินตำแหน่งแทรกตามความใกล้ที่สุดของเส้นถนน")
                         c_res1, c_res2, c_res3, c_res4 = st.columns(4)
                         c_res1.metric("เที่ยวจัดส่งที่แนะนำ", best_overall_trip)
-                        c_res2.metric("ลำดับจุดจัดส่งใหม่ในเที่ยว", f"ลำดับที่ {insert_seq_in_trip}")
-                        c_res3.metric("แทรกต่อจากสมาชิก", f"{after_cust_id}")
+                        c_res2.metric("สมาชิกที่ใกล้ที่สุด", f"{closest_cust_id}")
+                        c_res3.metric("ระยะทางถนนถึงสมาชิก", f"{closest_road_dist:.2f} กม.")
                         c_res4.metric("ระยะทางวิ่งเพิ่มขึ้น", f"+{min_additional_distance:.2f} กม.", delta_color="inverse")
 
                         st.info(
-                            f"💡 **สรุปคำแนะนำ:** ควรนำสมาชิกใหม่ **{new_cust_id} ({new_cust_name})** เข้าไปจัดส่งใน **{best_overall_trip}** โดยแทรกใน **ลำดับที่ {insert_seq_in_trip}** ของเที่ยว (ต่อจากลูกค้า **{after_cust_id} : {after_cust_name}**) ซึ่งจะส่งผลให้เส้นทางวิ่งรวมเพิ่มขึ้นน้อยที่สุดเพียง **{min_additional_distance:.2f} กม.**"
+                            f"💡 **สรุปคำแนะนำ:** ระบบคำนวณพบว่ารหัสสมาชิกที่มี **ระยะทางเส้นถนนใกล้ที่สุด** คือ **{closest_cust_id} ({closest_cust_name})** (ระยะทางถนน **{closest_road_dist:.2f} กม.**) ดังนั้นจึงแนะนำให้นำสมาชิกใหม่ **{new_cust_id} ({new_cust_name})** เข้าไปจัดส่งใน **{best_overall_trip}** โดยแทรกต่อจากสมาชิก **{closest_cust_id}** (ลำดับที่ {insert_seq_in_trip}) ซึ่งส่งผลให้ระยะทางเพิ่มขึ้นเพียง **{min_additional_distance:.2f} กม.**"
                         )
 
                         st.markdown("#### 📊 รายละเอียดตารางเปรียบเทียบผลกระทบหากแทรกเข้าในแต่ละเที่ยว:")
@@ -2035,10 +2073,10 @@ if dw_uploaded_file and sum_uploaded_file:
                             "lng": parsed_lng,
                             "trip": best_overall_trip,
                             "insert_seq": insert_seq_in_trip,
-                            "insert_after": f"{after_cust_id} ({after_cust_name})",
+                            "insert_after": f"{closest_cust_id} ({closest_cust_name})",
                             "prev_lat": prev_point_lat,
                             "prev_lng": prev_point_lng,
-                            "prev_id": after_cust_id
+                            "prev_id": closest_cust_id
                         }, ensure_ascii=False)
                         new_route_json = json.dumps(best_new_route_path, ensure_ascii=False)
 
@@ -2155,8 +2193,8 @@ if dw_uploaded_file and sum_uploaded_file:
                             <div class="map-legend-box">
                                 <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
                                 <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ที่เพิ่มไป (✦)</div>
-                                <div class="legend-pill"><span class="legend-dot-prev">🔗</span> พิกัดรายที่จะนำไปแทรกต่อ (จุดก่อนหน้า)</div>
-                                <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป (คลิก/ชี้เพื่อดูข้อมูล)</div>
+                                <div class="legend-pill"><span class="legend-dot-prev">🔗</span> พิกัดรายที่จะนำไปแทรกต่อ (สมาชิกที่ใกล้ที่สุดตามเส้นทางถนน)</div>
+                                <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป (นำเมาส์ชี้เพื่อดูข้อมูล)</div>
                             </div>
 
                             <div id="map-tab3"></div>
@@ -2184,7 +2222,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                             let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
                                             pm.bindTooltip(`
                                                 <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                    <b style="color:#D32F2F;">📍 [จุดส่งก่อนหน้าที่จะแทรก]</b><br>
+                                                    <b style="color:#D32F2F;">📍 [สมาชิกที่ใกล้ที่สุดตามเส้นทางถนน]</b><br>
                                                     <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
                                                     <b>ชื่อ:</b> ${{pt.cust_name}}<br>
                                                     <b>เที่ยว:</b> ${{pt.trip}}
@@ -2220,7 +2258,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                         <b>จำนวนส่ง:</b> ${{newPt.qty}} ถัง<br>
                                         <b>เที่ยวจัดส่ง:</b> ${{newPt.trip}}<br>
                                         <b>ตำแหน่งแทรก:</b> ลำดับที่ ${{newPt.insert_seq}} ของเที่ยว<br>
-                                        <b>ต่อจากลูกค้า:</b> ${{newPt.insert_after}}
+                                        <b>แทรกต่อจาก:</b> ${{newPt.insert_after}}
                                     </div>`, {{direction: 'top', opacity: 0.95}});
 
                                 if(newRoutePath && newRoutePath.length > 0) {{
