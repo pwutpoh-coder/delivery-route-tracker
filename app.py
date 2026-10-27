@@ -600,9 +600,13 @@ if dw_uploaded_file and sum_uploaded_file:
             f"✅ ประมวลผลสำเร็จ! ดึงข้อมูลได้ทั้งหมด {len(df)} รายการ | ยอดจัดส่งรวม {df['qty'].sum()} ถัง | จำนวนเที่ยวการส่ง {len(trip_quotas)} เที่ยว"
         )
 
-        tab1, tab2 = st.tabs([
+        # -------------------------------------------------------------
+        # เพิ่มหน้า/แท็บที่ 3 สำหรับการตรวจสอบและแทรกพิกัดสมาชิกใหม่
+        # -------------------------------------------------------------
+        tab1, tab2, tab3 = st.tabs([
             "📊 1. แผนที่และเส้นทางตามลำดับเวลาจริง",
             "🚀 2. แผนที่และเส้นทางเหมาะสมที่สุด (ไม่เรียงเวลา)",
+            "🔍 3. ตรวจสอบและแทรกพิกัดสมาชิกใหม่",
         ])
 
         with tab1:
@@ -1886,6 +1890,104 @@ if dw_uploaded_file and sum_uploaded_file:
             st.info(
                 "💡 **คำอธิบายเพิ่มเติม:** บนแผนที่ชุดที่ 2 ตัวเลขหลักบนหมุดแสดง **ลำดับแนะนำใหม่ (Optimized Sequence)** เรียงต่อเนื่องข้ามเที่ยวตั้งแต่ต้นจนจบ และป้ายกำกับมุมขวาบนของหมุดแสดงเลข **ลำดับเดิม** โดยถ้าตำแหน่งมีการเปลี่ยนแปลงจะแสดงเป็น **สีแดง** และถ้าไม่เปลี่ยนแปลงจะแสดงเป็น **สีดำ** พร้อมปุ่มควบคุมการเล่นจำลองเส้นทางอย่างสมบูรณ์"
             )
+
+        # -------------------------------------------------------------
+        # 🔍 แท็บที่ 3: ระบบตรวจสอบและแนะนำการแทรกพิกัดสมาชิกใหม่
+        # -------------------------------------------------------------
+        with tab3:
+            st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่")
+            st.markdown(
+                "กรอกพิกัดหรือข้อมูลของสมาชิกใหม่ที่ต้องการเพิ่มเข้ามาในเส้นทาง เพื่อให้ระบบคำนวณหาว่า **ควรไปแทรกอยู่ในเที่ยวไหน และอยู่ระหว่างจุดจัดส่งใด (ลำดับที่เท่าไร)** เพื่อให้ระยะทางภาพรวมเพิ่มขึ้นน้อยที่สุด"
+            )
+
+            col_input1, col_input2 = st.columns(2)
+            with col_input1:
+                new_cust_id = st.text_input("รหัสสมาชิกใหม่ / ชื่อสมาชิก:", value="CUST-NEW-01", placeholder="เช่น CUST-99999")
+                new_cust_name = st.text_input("ชื่อ-นามสกุล หรือรายละเอียด:", value="สมาชิกทดสอบรายใหม่")
+                new_cust_qty = st.number_input("จำนวนถังที่ต้องจัดส่ง (ถัง):", min_value=1, max_value=100, value=5)
+            with col_input2:
+                new_lat_input = st.number_input("ละติจูด (Latitude):", value=warehouse_coord[0] + 0.02, format="%.6f")
+                new_lng_input = st.number_input("ลองจิจูด (Longitude):", value=warehouse_coord[1] + 0.02, format="%.6f")
+
+            if st.button("🚀 คำนวณหาตำแหน่งแทรกที่เหมาะสมที่สุด", use_container_width=True):
+                new_point = (float(new_lat_input), float(new_lng_input))
+                
+                # ค้นหาจุดในแต่ละเที่ยวที่ใกล้พิกัดใหม่ที่สุดเพื่อหาตำแหน่งแทรก
+                best_overall_trip = None
+                best_insert_after_index = 0
+                min_additional_distance = float("inf")
+                best_segment_details = ""
+
+                grouped_analysis = df.groupby("trip", sort=False)
+                
+                analysis_results = []
+
+                for trip_name, group in grouped_analysis:
+                    valid_points = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].to_dict("records")
+                    if not valid_points:
+                        continue
+                    
+                    # สร้างเส้นทางของเที่ยวนี้ [คลัง -> จุดที่ 1 -> จุดที่ 2 -> ... -> คลัง]
+                    trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_points] + [warehouse_coord]
+                    
+                    # คำนวณระยะทางเดิมของเที่ยวนี้
+                    orig_trip_dist = 0.0
+                    for i in range(len(trip_coords) - 1):
+                        _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
+                        orig_trip_dist += d
+
+                    # ทดลองแทรกพิกัดใหม่ในทุกๆ ช่วงระหว่างจุดจัดส่ง เพื่อหาระยะทางที่เพิ่มขึ้นน้อยที่สุด
+                    best_pos_in_trip = 0
+                    min_trip_new_dist = float("inf")
+
+                    for insert_idx in range(1, len(trip_coords)):
+                        test_coords = trip_coords.copy()
+                        test_coords.insert(insert_idx, new_point)
+                        
+                        test_trip_dist = 0.0
+                        for i in range(len(test_coords) - 1):
+                            _, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
+                            test_trip_dist += d
+
+                        added_dist = test_trip_dist - orig_trip_dist
+                        if added_dist < min_trip_new_dist:
+                            min_trip_new_dist = added_dist
+                            best_pos_in_trip = insert_idx  # ตำแหน่งหลังจุดจัดส่งที่ insert_idx - 1
+
+                    analysis_results.append({
+                        "trip": trip_name,
+                        "added_dist": min_trip_new_dist,
+                        "best_pos": best_pos_in_trip,
+                        "orig_dist": orig_trip_dist,
+                        "new_dist": orig_trip_dist + min_trip_new_dist
+                    })
+
+                    if min_trip_new_dist < min_additional_distance:
+                        min_additional_distance = min_trip_new_dist
+                        best_overall_trip = trip_name
+                        best_insert_after_index = best_pos_in_trip
+
+                if best_overall_trip:
+                    st.success(f"🎉 ผลการคำนวณแนะนำให้แทรกใน **{best_overall_trip}** โดยเพิ่มระยะทางน้อยที่สุดเพียง **{min_additional_distance:.2f} กม.** เท่านั้น!")
+                    
+                    # แสดงรายละเอียดตำแหน่งที่แนะนำ
+                    target_group = df[df["trip"] == best_overall_trip].reset_index(drop=True)
+                    after_cust_id = "เริ่มต้นเที่ยว (ออกจากคลัง)"
+                    after_cust_name = "คลังสินค้า"
+                    if best_insert_after_index > 1 and best_insert_after_index - 2 < len(target_group):
+                        prev_rec = target_group.iloc[best_insert_after_index - 2]
+                        after_cust_id = prev_rec["cust_id"]
+                        after_cust_name = prev_rec["cust_name"]
+
+                    st.info(f"📌 **คำแนะนำการแทรก:** นำไปแทรกต่อจากลูกค้า **{after_cust_id} ({after_cust_name})** ใน **{best_overall_trip}**")
+
+                    st.markdown("#### 📊 เปรียบเทียบผลกระทบแยกตามเที่ยวการส่ง:")
+                    res_df = pd.DataFrame(analysis_results)
+                    res_df.columns = ["เที่ยวการส่ง", "ระยะทางที่เพิ่มขึ้น (กม.)", "ตำแหน่งแทรกที่ดีที่สุด", "ระยะทางเดิม (กม.)", "ระยะทางหลังแทรก (กม.)"]
+                    st.table(res_df)
+                else:
+                    st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งที่สามารถนำมาคำนวณเปรียบเทียบได้ในไฟล์")
+
 else:
     st.info(
         "ℹ️ กรุณาอัปโหลดไฟล์ทั้ง 2 ไฟล์ (รายงานใบเบิกใบคืน และ รายงานสรุปการจัดส่ง) ที่ด้านบน เพื่อเริ่มการวิเคราะห์และแสดงผลแผนที่"
