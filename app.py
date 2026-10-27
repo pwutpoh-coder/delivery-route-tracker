@@ -1857,26 +1857,26 @@ if dw_uploaded_file and sum_uploaded_file:
                         optAnimTimer = setInterval(nextOptStep, optSpeedMs);
                     }}
 
-                    function pauseOptAnimation() {{
+                    function pauseOptAnimation() {
                         optIsPlaying = false;
-                        if (optAnimTimer) {{ clearInterval(optAnimTimer); optAnimTimer = null; }}
+                        if (optAnimTimer) { clearInterval(optAnimTimer); optAnimTimer = null; }
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
-                    }}
+                    }
 
-                    function resetOptAnimation() {{
+                    function resetOptAnimation() {
                         pauseAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }}
+                    }
 
-                    function onOptSliderChange(val) {{
+                    function onOptSliderChange(val) {
                         pauseAnimation();
                         updateOptStep(parseInt(val));
-                    }}
+                    }
 
-                    if (optSegments.length > 0) {{ updateOptStep(0); }}
+                    if (optSegments.length > 0) { updateOptStep(0); }
                 </script>
             </body>
             </html>
@@ -1889,13 +1889,10 @@ if dw_uploaded_file and sum_uploaded_file:
             )
 
         # -------------------------------------------------------------
-        # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่ พร้อมแผนที่ Leaflet (ปรับปรุงใหม่)
+        # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่ พร้อมแผนที่แสดงครบทุกราย
         # -------------------------------------------------------------
         with tab3:
             st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่")
-            st.markdown(
-                "กรอกพิกัดเป็น `ละติจูด, ลองจิจูด` ของสมาชิกใหม่ เพื่อให้ระบบประมวลผลหาว่า **ควรไปแทรกในเที่ยวไหน ลำดับที่เท่าไร และต่อจากลูกค้ารายใด** เพื่อให้ระยะทางเพิ่มขึ้นน้อยที่สุด"
-            )
 
             col_input1, col_input2 = st.columns(2)
             with col_input1:
@@ -1903,7 +1900,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 new_cust_name = st.text_input("ชื่อ-นามสกุล หรือรายละเอียด:", value="สมาชิกทดสอบรายใหม่")
                 new_cust_qty = st.number_input("จำนวนถังที่ต้องจัดส่ง (ถัง):", min_value=1, max_value=100, value=5)
             with col_input2:
-                # รวมพิกัด ละติจูด, ลองจิจูด ในช่องเดียวกันด้วยคอมม่า
                 default_coord_str = f"{warehouse_coord[0] + 0.02:.6f}, {warehouse_coord[1] + 0.02:.6f}"
                 coord_input_str = st.text_input(
                     "พิกัดสมาชิกใหม่ (ละติจูด, ลองจิจูด):",
@@ -1912,10 +1908,9 @@ if dw_uploaded_file and sum_uploaded_file:
                 )
 
             if st.button("🚀 คำนวณหาตำแหน่งแทรกและแสดงบนแผนที่", use_container_width=True):
-                # ตรวจจับพิกัด lat, lng จากช่องกรอก
                 parsed_lat, parsed_lng = None, None
                 if coord_input_str.strip():
-                    c_match = re.search(r"^(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)$", coord_input_str.strip())
+                    c_match = re.search(r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", coord_input_str.strip())
                     if c_match:
                         parsed_lat = float(c_match.group(1))
                         parsed_lng = float(c_match.group(2))
@@ -1987,8 +1982,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         after_cust_name = "คลังสินค้า"
                         prev_point_lat, prev_point_lng = warehouse_coord[0], warehouse_coord[1]
                         
-                        # คำนวณลำดับการส่งที่จะเข้าไปอยู่
-                        insert_seq_in_trip = best_insert_after_index # ลำดับที่ในเที่ยวส่งนั้น
+                        insert_seq_in_trip = best_insert_after_index
                         
                         if best_insert_after_index > 1 and best_insert_after_index - 2 < len(target_group):
                             prev_rec = target_group.iloc[best_insert_after_index - 2]
@@ -1997,7 +1991,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             prev_point_lat = prev_rec["lat"]
                             prev_point_lng = prev_rec["lng"]
 
-                        # สรุปผลลัพธ์การแทรก
                         st.markdown("### 📌 สรุปผลการประเมินตำแหน่งแทรกที่เหมาะสมที่สุด")
                         c_res1, c_res2, c_res3, c_res4 = st.columns(4)
                         c_res1.metric("เที่ยวจัดส่งที่แนะนำ", best_overall_trip)
@@ -2010,9 +2003,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         )
 
                         st.markdown("#### 📊 รายละเอียดตารางเปรียบเทียบผลกระทบหากแทรกเข้าในแต่ละเที่ยว:")
-                        res_df = pd.DataFrame(analysis_results)
-                        
-                        # ปรับรูปแบบตารางเพื่อแสดงผล
                         display_tab3_df = []
                         for item in analysis_results:
                             t_grp = df[df["trip"] == item["trip"]].reset_index(drop=True)
@@ -2034,7 +2024,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         st.dataframe(pd.DataFrame(display_tab3_df), use_container_width=True, hide_index=True)
 
-                        st.markdown("#### 🗺️ แผนที่แสดงตำแหน่งสมาชิกใหม่ และจุดส่งก่อนหน้าที่ต่อท้าย")
+                        st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิมทั้งหมด พร้อมตำแหน่งสมาชิกใหม่และจุดเชื่อมต่อ")
 
                         existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
                         new_pt_json = json.dumps({
@@ -2052,7 +2042,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         }, ensure_ascii=False)
                         new_route_json = json.dumps(best_new_route_path, ensure_ascii=False)
 
-                        # HTML & JavaScript สำหรับ Leaflet Map แท็บที่ 3 ดีไซน์หมุดเรียบหรูสไตล์ Glassmorphism
                         map_tab3_html = f"""
                         <!DOCTYPE html>
                         <html>
@@ -2061,9 +2050,8 @@ if dw_uploaded_file and sum_uploaded_file:
                             <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
                             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                             <style>
-                                #map-tab3 {{ width: 100%; height: 560px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                                #map-tab3 {{ width: 100%; height: 600px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                                 
-                                /* ดีไซน์หมุดใหม่: สไตล์ Modern Navy-Cyan Glassmorphic */
                                 .new-member-container {{
                                     position: relative;
                                     width: 36px;
@@ -2100,33 +2088,32 @@ if dw_uploaded_file and sum_uploaded_file:
                                     100% {{ transform: scale(1.5); opacity: 0; }}
                                 }}
 
-                                /* สัญลักษณ์จุดก่อนหน้าที่ถูกต่อท้าย */
                                 .prev-connected-icon {{
                                     background: #ff6b6b !important;
                                     color: #ffffff !important;
                                     border: 2px solid #ffffff !important;
                                     border-radius: 50% !important;
-                                    width: 28px !important;
-                                    height: 28px !important;
+                                    width: 30px !important;
+                                    height: 30px !important;
                                     text-align: center !important;
                                     font-weight: bold !important;
-                                    font-size: 12px !important;
-                                    line-height: 24px !important;
-                                    box-shadow: 0 0 12px rgba(255, 107, 107, 0.8) !important;
+                                    font-size: 13px !important;
+                                    line-height: 26px !important;
+                                    box-shadow: 0 0 14px rgba(255, 107, 107, 0.9) !important;
                                 }}
 
                                 .exist-icon {{
-                                    background-color: #4a6572;
+                                    background-color: #0055FF;
                                     color: white;
                                     border: 1.5px solid white;
                                     border-radius: 50%;
                                     text-align: center;
-                                    font-size: 10px;
-                                    line-height: 20px;
-                                    width: 20px;
-                                    height: 20px;
+                                    font-size: 11px;
+                                    line-height: 22px;
+                                    width: 24px;
+                                    height: 24px;
                                     font-weight: bold;
-                                    opacity: 0.75;
+                                    box-shadow: 0 2px 5px rgba(0,0,0,0.4);
                                 }}
                             </style>
                         </head>
@@ -2148,23 +2135,35 @@ if dw_uploaded_file and sum_uploaded_file:
                                 existPoints.forEach((pt, idx) => {{
                                     if(pt.lat !== 0.0 && pt.lng !== 0.0) {{
                                         let isPrevConnected = (pt.cust_id === newPt.prev_id && pt.cust_id !== "คลังสินค้า");
+                                        let seqNum = idx + 1;
                                         
                                         if (isPrevConnected) {{
-                                            // ทำสัญลักษณ์เน้นจุดลูกค้าก่อนหน้าที่ถูกต่อท้าย
                                             let prevHtml = `<div class="prev-connected-icon">🔗</div>`;
-                                            let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
+                                            let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [30, 30], iconAnchor: [15, 15] }});
                                             let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
-                                            pm.bindTooltip(`<b>📍 [จุดส่งก่อนหน้า]</b><br><b>รหัส:</b> ${{pt.cust_id}}<br><b>ชื่อ:</b> ${{pt.cust_name}}<br><b>ต่อด้วยสมาชิกใหม่ที่จุดนี้</b>`, {{permanent: true, direction: 'bottom'}});
+                                            pm.bindTooltip(`
+                                                <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
+                                                    <b style="color:#D32F2F;">📍 [จุดส่งก่อนหน้าที่จะแทรก]</b><br>
+                                                    <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
+                                                    <b>ชื่อ:</b> ${{pt.cust_name}}<br>
+                                                    <b>เที่ยว:</b> ${{pt.trip}}
+                                                </div>`, {{permanent: true, direction: 'bottom'}});
                                         }} else {{
-                                            let iconHtml = `<div class="exist-icon">${{idx+1}}</div>`;
-                                            let customIcon = L.divIcon({{ className: '', html: iconHtml, iconSize: [20, 20], iconAnchor: [10, 10] }});
+                                            let iconHtml = `<div class="exist-icon">${{seqNum}}</div>`;
+                                            let customIcon = L.divIcon({{ className: '', html: iconHtml, iconSize: [24, 24], iconAnchor: [12, 12] }});
                                             let m = L.marker([pt.lat, pt.lng], {{icon: customIcon}}).addTo(map3);
-                                            m.bindTooltip(`<b>📍 จุดส่งเดิมที่ ${{idx+1}} (${{pt.trip}})</b><br>รหัส: ${{pt.cust_id}}<br>ชื่อ: ${{pt.cust_name}}<br>ยอดส่ง: ${{pt.qty}} ถัง`);
+                                            m.bindTooltip(`
+                                                <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
+                                                    <b>📍 จุดเดิมที่ ${{seqNum}} (${{pt.trip}})</b><br>
+                                                    <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
+                                                    <b>ชื่อ:</b> ${{pt.cust_name}}<br>
+                                                    <b>ยอดส่ง:</b> ${{pt.qty}} ถัง<br>
+                                                    <b>เวลา:</b> ${{pt.time}}
+                                                </div>`, {{direction: 'top', opacity: 0.95}});
                                         }}
                                     }}
-                                me}});
+                                }});
 
-                                // หมุดสมาชิกใหม่ดีไซน์หรูหรา
                                 let newIconHtml = `
                                     <div class="new-member-container">
                                         <div class="new-member-pulse"></div>
@@ -2175,7 +2174,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 
                                 newMarker.bindTooltip(`
                                     <div style="font-family:sans-serif; font-size:12px; line-height:1.5;">
-                                        <b style="color:#2a5298; font-size:13px;">🌟 จุดสมาชิกใหม่ (แนะนำแทรก)</b><br>
+                                        <b style="color:#2a5298; font-size:13px;">🌟 สมาชิกใหม่ (แนะนำแทรก)</b><br>
                                         <b>รหัส:</b> ${{newPt.cust_id}} (${{newPt.cust_name}})<br>
                                         <b>จำนวนส่ง:</b> ${{newPt.qty}} ถัง<br>
                                         <b>เที่ยวจัดส่ง:</b> ${{newPt.trip}}<br>
@@ -2193,7 +2192,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         </body>
                         </html>
                         """
-                        st.components.v1.html(map_tab3_html, height=590, scrolling=False)
+                        st.components.v1.html(map_tab3_html, height=620, scrolling=False)
 
                     else:
                         st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งที่สามารถนำมาคำนวณเปรียบเทียบได้ในไฟล์")
