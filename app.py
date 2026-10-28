@@ -1927,6 +1927,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     closest_cust_id = None
                     closest_cust_name = None
                     closest_road_dist = float("inf")
+                    closest_seq_num = 0
                     
                     analysis_results = []
                     best_new_route_path = []
@@ -1934,12 +1935,13 @@ if dw_uploaded_file and sum_uploaded_file:
                     # 1. ค้นหารหัสสมาชิกเดิมที่มีระยะทางเส้นถนน (Road Distance) ใกล้ที่สุดกับพิกัดใหม่
                     all_valid_records = df[(df["lat"] != 0.0) & (df["lng"] != 0.0)].to_dict("records")
                     if all_valid_records:
-                        for rec in all_valid_records:
+                        for seq_idx, rec in enumerate(all_valid_records):
                             _, r_dist = get_osrm_route(parsed_lat, parsed_lng, rec["lat"], rec["lng"])
                             if r_dist < closest_road_dist:
                                 closest_road_dist = r_dist
                                 closest_cust_id = rec["cust_id"]
                                 closest_cust_name = rec["cust_name"]
+                                closest_seq_num = seq_idx + 1
 
                         # 2. หาว่ารหัสสมาชิกที่ใกล้ที่สุดนั้น อยู่ในเที่ยวไหน และลำดับที่เท่าไหร่
                         target_trip_name = None
@@ -1958,10 +1960,8 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         if target_trip_name:
                             best_overall_trip = target_trip_name
-                            # แทรกต่อท้ายสมาชิกที่ใกล้ที่สุด (index ใน trip_coords คือ index ของลูกค้า + 2)
                             best_insert_after_index = target_cust_idx_in_trip + 2
 
-                            # คำนวณระยะทางที่เพิ่มขึ้นเมื่อแทรกต่อท้ายลูกค้ารายนี้
                             target_group_df = df[df["trip"] == best_overall_trip].reset_index(drop=True)
                             valid_pts_trip = target_group_df[(target_group_df["lat"] != 0.0) & (target_group_df["lng"] != 0.0)].to_dict("records")
                             trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_pts_trip] + [warehouse_coord]
@@ -1984,7 +1984,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             min_additional_distance = test_trip_dist - orig_trip_dist
                             best_new_route_path = temp_route_segments
 
-                            # เก็บข้อมูลเปรียบเทียบทุกเที่ยวสำหรับแสดงตาราง
                             for trip_name, group in grouped_analysis:
                                 v_pts = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].to_dict("records")
                                 if not v_pts:
@@ -2032,12 +2031,12 @@ if dw_uploaded_file and sum_uploaded_file:
                         st.markdown("### 📌 สรุปผลการประเมินตำแหน่งแทรกตามความใกล้ที่สุดของเส้นถนน")
                         c_res1, c_res2, c_res3, c_res4 = st.columns(4)
                         c_res1.metric("เที่ยวจัดส่งที่แนะนำ", best_overall_trip)
-                        c_res2.metric("สมาชิกที่ใกล้ที่สุด", f"{closest_cust_id}")
+                        c_res2.metric("สมาชิกที่ใกล้ที่สุด", f"{closest_cust_id} (ลำดับที่ {closest_seq_num})")
                         c_res3.metric("ระยะทางถนนถึงสมาชิก", f"{closest_road_dist:.2f} กม.")
                         c_res4.metric("ระยะทางวิ่งเพิ่มขึ้น", f"+{min_additional_distance:.2f} กม.", delta_color="inverse")
 
                         st.info(
-                            f"💡 **สรุปคำแนะนำ:** ระบบคำนวณพบว่ารหัสสมาชิกที่มี **ระยะทางเส้นถนนใกล้ที่สุด** คือ **{closest_cust_id} ({closest_cust_name})** (ระยะทางถนน **{closest_road_dist:.2f} กม.**) ดังนั้นจึงแนะนำให้นำสมาชิกใหม่ **{new_cust_id} ({new_cust_name})** เข้าไปจัดส่งใน **{best_overall_trip}** โดยแทรกต่อจากสมาชิก **{closest_cust_id}** (ลำดับที่ {insert_seq_in_trip}) ซึ่งส่งผลให้ระยะทางเพิ่มขึ้นเพียง **{min_additional_distance:.2f} กม.**"
+                            f"💡 **สรุปคำแนะนำ:** ระบบคำนวณพบว่ารหัสสมาชิกที่มี **ระยะทางเส้นถนนใกล้ที่สุด** คือ **{closest_cust_id} ({closest_cust_name})** [จุดส่งลำดับที่ #{closest_seq_num}] (ระยะทางถนน **{closest_road_dist:.2f} กม.**) ดังนั้นจึงแนะนำให้นำสมาชิกใหม่ **{new_cust_id} ({new_cust_name})** เข้าไปจัดส่งใน **{best_overall_trip}** โดยแทรกต่อจากสมาชิก **{closest_cust_id}** (ลำดับที่ {insert_seq_in_trip}) ซึ่งส่งผลให้ระยะทางเพิ่มขึ้นเพียง **{min_additional_distance:.2f} กม.**"
                         )
 
                         st.markdown("#### 📊 รายละเอียดตารางเปรียบเทียบผลกระทบหากแทรกเข้าในแต่ละเที่ยว:")
@@ -2073,10 +2072,11 @@ if dw_uploaded_file and sum_uploaded_file:
                             "lng": parsed_lng,
                             "trip": best_overall_trip,
                             "insert_seq": insert_seq_in_trip,
-                            "insert_after": f"{closest_cust_id} ({closest_cust_name})",
+                            "insert_after": f"{closest_cust_id} ({closest_cust_name}) [ลำดับที่ #{closest_seq_num}]",
                             "prev_lat": prev_point_lat,
                             "prev_lng": prev_point_lng,
-                            "prev_id": closest_cust_id
+                            "prev_id": closest_cust_id,
+                            "prev_seq": closest_seq_num
                         }, ensure_ascii=False)
                         new_route_json = json.dumps(best_new_route_path, ensure_ascii=False)
 
@@ -2169,9 +2169,12 @@ if dw_uploaded_file and sum_uploaded_file:
                                     height: 30px !important;
                                     text-align: center !important;
                                     font-weight: bold !important;
-                                    font-size: 13px !important;
+                                    font-size: 11px !important;
                                     line-height: 26px !important;
                                     box-shadow: 0 0 14px rgba(255, 107, 107, 0.9) !important;
+                                    display: flex !important;
+                                    align-items: center !important;
+                                    justify-content: center !important;
                                 }}
 
                                 .exist-icon {{
@@ -2193,7 +2196,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             <div class="map-legend-box">
                                 <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
                                 <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ที่เพิ่มไป (✦)</div>
-                                <div class="legend-pill"><span class="legend-dot-prev">🔗</span> พิกัดรายที่จะนำไปแทรกต่อ (สมาชิกที่ใกล้ที่สุดตามเส้นทางถนน)</div>
+                                <div class="legend-pill"><span class="legend-dot-prev">#</span> พิกัดรายที่จะนำไปแทรกต่อ (แสดงเลขอ้างอิงลำดับการส่งพร้อมเครื่องหมาย 🔗)</div>
                                 <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป (นำเมาส์ชี้เพื่อดูข้อมูล)</div>
                             </div>
 
@@ -2217,12 +2220,12 @@ if dw_uploaded_file and sum_uploaded_file:
                                         let seqNum = idx + 1;
                                         
                                         if (isPrevConnected) {{
-                                            let prevHtml = `<div class="prev-connected-icon">🔗</div>`;
+                                            let prevHtml = `<div class="prev-connected-icon" title="ลำดับที่ #${{seqNum}}">${{seqNum}}</div>`;
                                             let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [30, 30], iconAnchor: [15, 15] }});
                                             let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
                                             pm.bindTooltip(`
                                                 <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                    <b style="color:#D32F2F;">📍 [สมาชิกที่ใกล้ที่สุดตามเส้นทางถนน]</b><br>
+                                                    <b style="color:#D32F2F;">📍 [สมาชิกที่ใกล้ที่สุด - ลำดับที่ #${{seqNum}}]</b><br>
                                                     <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
                                                     <b>ชื่อ:</b> ${{pt.cust_name}}<br>
                                                     <b>เที่ยว:</b> ${{pt.trip}}
@@ -2233,7 +2236,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                             let m = L.marker([pt.lat, pt.lng], {{icon: customIcon}}).addTo(map3);
                                             m.bindTooltip(`
                                                 <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                    <b>📍 จุดเดิมที่ ${{seqNum}} (${{pt.trip}})</b><br>
+                                                    <b>📍 จุดเดิมที่ #${{seqNum}} (${{pt.trip}})</b><br>
                                                     <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
                                                     <b>ชื่อ:</b> ${{pt.cust_name}}<br>
                                                     <b>ยอดส่ง:</b> ${{pt.qty}} ถัง<br>
