@@ -1984,8 +1984,8 @@ if dw_uploaded_file and sum_uploaded_file:
 
                             if target_trip_name:
                                 best_insert_idx = target_cust_idx_in_trip + 2
-                                target_group_df = df[df["trip"] == target_trip_name].reset_index(drop=True)
-                                valid_pts_trip = target_group_df[(target_group_df["lat"] != 0.0) & (target_group_df["lng"] != 0.0)].to_dict("records")
+                                target_group = df[df["trip"] == target_trip_name].reset_index(drop=True)
+                                valid_pts_trip = target_group[(target_group["lat"] != 0.0) & (target_group["lng"] != 0.0)].to_dict("records")
                                 trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_pts_trip] + [warehouse_coord]
 
                                 orig_trip_dist = 0.0
