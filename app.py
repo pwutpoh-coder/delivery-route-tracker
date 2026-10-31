@@ -640,24 +640,15 @@ if dw_uploaded_file and sum_uploaded_file:
                 for trip_name, group in grouped:
                     valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
                     
-                    # สร้างเส้นทางครอบคลุม: เริ่มจากคลัง -> จุดส่งทั้งหมด -> กลับสู่คลัง (Return to Warehouse)
-                    route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
-
+                    # สร้างลำดับจุดขนส่งภายในทริป (จุดส่งทั้งหมด + ขากลับเข้าคลังสินค้า)
+                    valid_coords_list = list(zip(valid_group["lat"], valid_group["lng"]))
+                    
                     total_trip_dist = 0.0
                     trip_times = []
 
-                    trip_route_segments = []
-                    for i in range(len(route_pts) - 1):
-                        p1, p2 = route_pts[i], route_pts[i + 1]
-                        road_path, dist_km = get_osrm_route(
-                            p1[0], p1[1], p2[0], p2[1]
-                        )
-                        total_trip_dist += dist_km
-                        trip_route_segments.append(road_path)
-
                     records_list = group.to_dict("records")
-                    valid_idx_counter = 0
-
+                    
+                    # คำนวณเส้นทางไปยังแต่ละจุด และจุดสุดท้ายวิ่งกลับคลัง
                     for idx_r, info in enumerate(records_list):
                         info["point_idx"] = point_counter
                         point_counter += 1
@@ -701,25 +692,59 @@ if dw_uploaded_file and sum_uploaded_file:
                         info["trip"] = trip_name
                         info["seg_dist_km"] = 0.0
 
-                        segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
-                        if info["lat"] != 0.0 and valid_idx_counter < len(trip_route_segments):
-                            segment_path = trip_route_segments[valid_idx_counter]
-                            valid_idx_counter += 1
+                        # กำหนดพิกัดต้นทางและปลายทางของช่วงนี้
+                        if idx_r == 0:
+                            p_from = warehouse_coord
+                        else:
+                            prev_rec = records_list[idx_r - 1]
+                            p_from = (prev_rec["lat"], prev_rec["lng"])
 
-                        # หากเป็นจุดสุดท้ายของเที่ยว ให้รวมเส้นทางขากลับคลังเข้ากับจุดสุดท้ายด้วย เพื่อให้เห็นเส้นทางวิ่งกลับคลังชัดเจน
-                        is_last_point_in_trip = (idx_r == len(records_list) - 1)
-                        if is_last_point_in_trip and valid_idx_counter < len(trip_route_segments):
-                            # ผสานเส้นทางที่เหลือจนถึงขากลับคลังเข้าด้วยกัน
-                            while valid_idx_counter < len(trip_route_segments):
-                                segment_path.extend(trip_route_segments[valid_idx_counter][1:])
-                                valid_idx_counter += 1
+                        p_to = (info["lat"], info["lng"])
+
+                        segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
+                        dist_km = 0.0
+                        if info["lat"] != 0.0 and info["lng"] != 0.0:
+                            if p_from[0] != 0.0 and p_from[1] != 0.0:
+                                segment_path, dist_km = get_osrm_route(p_from[0], p_from[1], p_to[0], p_to[1])
+                            else:
+                                segment_path = [[p_to[0], p_to[1]], [p_to[0], p_to[1]]]
+
+                        total_trip_dist += dist_km
 
                         segments_data.append({
                             "trip": trip_name,
                             "color": trip_colors.get(trip_name, "#0055FF"),
                             "path": segment_path,
                             "info": info,
-                            "dist_km": 0.0,
+                            "dist_km": round(dist_km, 2),
+                            "is_return_leg": False
+                        })
+
+                    # เพิ่มขาเดินทางกลับเข้าคลัง (Return to Warehouse Leg) เมื่อจบทริป
+                    if valid_coords_list:
+                        last_valid_lat, last_valid_lng = valid_coords_list[-1]
+                        return_path, return_dist = get_osrm_route(last_valid_lat, last_valid_lng, warehouse_coord[0], warehouse_coord[1])
+                        total_trip_dist += return_dist
+
+                        # สร้าง Dummy Segment สำหรับขากลับเข้าคลัง เพื่อให้แผนที่แสดงเส้นทางกลับคลัง
+                        return_info = records_list[-1].copy()
+                        return_info["is_return_segment"] = True
+                        return_info["cust_id"] = "WH-RETURN"
+                        return_info["cust_name"] = "วิ่งกลับคลังสินค้าหลัก"
+                        return_info["shipping_address"] = "เดินทางกลับสู่คลังสินค้า"
+                        return_info["qty"] = 0
+                        return_info["lat"] = warehouse_coord[0]
+                        return_info["lng"] = warehouse_coord[1]
+                        return_info["lat_display"] = f"{warehouse_coord[0]:.5f}"
+                        return_info["lng_display"] = f"{warehouse_coord[1]:.5f}"
+
+                        segments_data.append({
+                            "trip": trip_name,
+                            "color": trip_colors.get(trip_name, "#0055FF"),
+                            "path": return_path,
+                            "info": return_info,
+                            "dist_km": round(return_dist, 2),
+                            "is_return_leg": True
                         })
 
                     trip_distances[trip_name] = round(total_trip_dist, 2)
@@ -1149,6 +1174,9 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function createTooltipHtml(info, seqNum) {{
+                        if (info.is_return_segment) {{
+                            return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4;"><b>🏢 ขากลับเข้าคลังสินค้าหลัก (${{info.trip}})</b><br>วิ่งกลับสู่คลังสินค้า</div>`;
+                        }}
                         let badgesHtml = [];
                         let onTimeVal = info.on_time_col || 'จัดส่งตรงเวลา';
                         if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
@@ -1183,8 +1211,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         let lateBadgeHtml = isLate ? `<div class="marker-badge-late">!</div>` : '';
                         let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps">G</div>` : '';
                         let reasonBadgeHtml = isReasonNot ? `<div class="marker-badge-reason" title="${{ptInfo.short_reason_col}}">ไม่</div>` : '';
-                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeCol.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
-                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeCol.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
+                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
+                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
 
                         let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
                         return L.divIcon({{ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
@@ -1266,7 +1294,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }}
                         activeMarkerRef = null;
-                        if (!info || info.point_idx === undefined || info.point_idx === null || info.lat === 0.0) return;
+                        if (!info || info.point_idx === undefined || info.point_idx === null || info.lat === 0.0 || info.is_return_segment) return;
                         
                         let target = allMarkers[info.point_idx];
                         if (target) {{
@@ -1289,8 +1317,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         currentStep = stepIndex;
                         let currentSeg = segments[currentStep];
 
-                        if (currentSeg.info.lat === 0.0 || !pointMatchesFilter(currentSeg.info)) {{
-                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
+                        if (currentSeg.info.lat === 0.0 || (!currentSeg.info.is_return_segment && !pointMatchesFilter(currentSeg.info))) {{
+                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && (seg.info.is_return_segment || pointMatchesFilter(seg.info)));
                             if (nextValid !== -1) {{ currentStep = nextValid; currentSeg = segments[currentStep]; }}
                         }}
 
@@ -1308,15 +1336,21 @@ if dw_uploaded_file and sum_uploaded_file:
                         let qtyLabel = info.qty !== undefined ? info.qty : 0;
                         let accQtyLabel = info.acc_qty !== undefined ? info.acc_qty : 0;
                         let tripLabel = info.trip || currentSeg.trip || '-';
-                        let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
+                        let pointNumText = (info.point_idx !== undefined && info.point_idx !== null && !info.is_return_segment) ? (info.point_idx + 1) : 'ขากลับคลัง';
 
-                        slider.title = `จุดที่ ${{pointNumText}} (${{tripLabel}}) | เวลา: ${{timeLabel}} | ลูกค้า: ${{custIdLabel}} (${{custNameLabel}})`;
+                        slider.title = info.is_return_segment ? `🏢 ขากลับคลังสินค้าหลัก (${{tripLabel}})` : `จุดที่ ${{pointNumText}} (${{tripLabel}}) | เวลา: ${{timeLabel}} | ลูกค้า: ${{custIdLabel}} (${{custNameLabel}})`;
 
-                        document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#00d2ff;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#7dd3fc;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#fca5a5;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#fde047;">${{accQtyLabel}} ถัง</span>
-                        `;
-
-                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}})`;
+                        if (info.is_return_segment) {{
+                            document.getElementById('top-banner-content').innerHTML = `
+                                เที่ยว: <span style="color:#00d2ff;">${{tripLabel}}</span> | สถานะ: <b>กำลังเดินทางกลับสู่คลังสินค้าหลัก</b> | ระยะทางขากลับ: <span style="color:#fca5a5;">${{currentSeg.dist_km}} กม.</span>
+                            `;
+                            document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripLabel}}</span> - <span style="color:#f39c12;">วิ่งกลับคลัง</span>`;
+                        }} else {{
+                            document.getElementById('top-banner-content').innerHTML = `
+                                จุดที่ <span style="color:#00d2ff;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#7dd3fc;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#fca5a5;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#fde047;">${{accQtyLabel}} ถัง</span>
+                            `;
+                            document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}})`;
+                        }}
 
                         activePolylines.forEach(p => map.removeLayer(p));
                         activePolylines = [];
@@ -1324,7 +1358,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         let accumulatedDistance = 0.0;
                         for (let i = 0; i <= currentStep; i++) {{
                             let seg = segments[i];
-                            if (seg.info.lat === 0.0 || !pointMatchesFilter(seg.info)) continue;
+                            if (seg.info.lat === 0.0 || (!seg.info.is_return_segment && !pointMatchesFilter(seg.info))) continue;
                             accumulatedDistance += (seg.dist_km || 0.0);
                             if (seg.path && seg.path.length > 0) {{
                                 let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
@@ -1348,14 +1382,21 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         highlightMarkerByInfo(info);
 
-                        document.getElementById('info-box').innerHTML = `
-                            <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
-                            <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
-                            <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                            <b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
-                            <b>📌 ตรงเวลา:</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
-                        `;
+                        if (info.is_return_segment) {{
+                            document.getElementById('info-box').innerHTML = `
+                                <b>🏢 ${{currentSeg.trip}} | ขากลับเข้าคลังสินค้าหลัก</b><br>
+                                <b>🛣️ ระยะทางขากลับ:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>📍 ปลายทาง:</b> สาขาคลังสินค้าหลัก
+                            `;
+                        }} else {{
+                            document.getElementById('info-box').innerHTML = `
+                                <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
+                                <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
+                                <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
+                                <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
+                                <b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
+                                <b>📌 ตรงเวลา:</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
+                            `;
+                        }}
 
                         map.panTo([info.lat, info.lng]);
                     }}
@@ -1373,8 +1414,12 @@ if dw_uploaded_file and sum_uploaded_file:
                             let seg = segments[targetIdx];
                             if (seg && seg.info) {{
                                 let info = seg.info;
-                                let pNum = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (targetIdx + 1);
-                                slider.title = `จุดที่ ${{pNum}} (${{info.trip || seg.trip}}) | เวลา: ${{info.time || '-'}} | ลูกค้า: ${{info.cust_id || '-'}} (${{info.cust_name || '-'}})`;
+                                if (info.is_return_segment) {{
+                                    slider.title = `🏢 ขากลับคลังสินค้าหลัก (${{info.trip || seg.trip}})`;
+                                }} else {{
+                                    let pNum = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (targetIdx + 1);
+                                    slider.title = `จุดที่ ${{pNum}} (${{info.trip || seg.trip}}) | เวลา: ${{info.time || '-'}} | ลูกค้า: ${{info.cust_id || '-'}} (${{info.cust_name || '-'}})`;
+                                }}
                             }}
                         }}
                     }}
@@ -1382,7 +1427,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function nextStep() {{
                         let nextIdx = currentStep + 1;
                         while (nextIdx < segments.length) {{
-                            if (segments[nextIdx].info.lat !== 0.0 && pointMatchesFilter(segments[nextIdx].info)) break;
+                            if (segments[nextIdx].info.is_return_segment || (segments[nextIdx].info.lat !== 0.0 && pointMatchesFilter(segments[nextIdx].info))) break;
                             nextIdx++;
                         }}
                         if (nextIdx < segments.length) {{
@@ -1410,7 +1455,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     function resetAnimation() {{
                         pauseAnimation();
-                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => seg.info.is_return_segment || (seg.info.lat !== 0.0 && pointMatchesFilter(seg.info)));
                         currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
                         updateStep(currentStep);
                         document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
@@ -1612,6 +1657,32 @@ if dw_uploaded_file and sum_uploaded_file:
                         "is_swapped": is_swapped_point,
                     })
 
+                # เพิ่มขากลับคลังสำหรับทริป Optimized ใน Tab 2
+                if valid_opt:
+                    last_opt_lat, last_opt_lng = valid_opt[-1]
+                    ret_opt_path, ret_opt_dist = get_osrm_route(last_opt_lat, last_opt_lng, warehouse_coord[0], warehouse_coord[1])
+                    ret_opt_info = orig_records[-1].copy()
+                    ret_opt_info["trip"] = trip_name
+                    ret_opt_info["is_return_segment"] = True
+                    ret_opt_info["cust_id"] = "WH-RETURN-OPT"
+                    ret_opt_info["cust_name"] = "วิ่งกลับคลัง (Optimized)"
+                    ret_opt_info["shipping_address"] = "เดินทางกลับสู่คลังสินค้า"
+                    ret_opt_info["qty"] = 0
+                    ret_opt_info["lat"] = warehouse_coord[0]
+                    ret_opt_info["lng"] = warehouse_coord[1]
+
+                    opt_segments_data.append({
+                        "trip": trip_name,
+                        "color": trip_colors.get(trip_name, "#0055FF"),
+                        "path": ret_opt_path,
+                        "info": ret_opt_info,
+                        "dist_km": round(ret_opt_dist, 2),
+                        "opt_seq": global_opt_seq_counter,
+                        "orig_seq": "-",
+                        "is_swapped": False,
+                        "is_return_leg": True
+                    })
+
             total_dist_diff = total_orig_dist_all - total_opt_dist_all
             total_pct_saving = (
                 (total_dist_diff / total_orig_dist_all * 100)
@@ -1728,6 +1799,19 @@ if dw_uploaded_file and sum_uploaded_file:
                         box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
                         white-space: nowrap;
                     }}
+                    .warehouse-marker-box {{
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 40px;
+                        height: 40px;
+                        background: linear-gradient(135deg, #f39c12, #d35400);
+                        border: 3px solid #ffffff;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 15px rgba(243, 156, 18, 0.6);
+                        color: white;
+                        font-size: 20px;
+                    }}
                     #opt-info-box {{ margin-top: 10px; padding: 10px 14px; background: #f8f9fa; border-left: 6px solid #2980b9; font-family: sans-serif; border-radius: 4px; font-size: 13px; line-height: 1.5; color: #333; }}
                 </style>
             </head>
@@ -1769,14 +1853,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         attribution: '© OpenStreetMap contributors'
                     }}).addTo(optMap);
 
-                    let optWarehouseHtml = `<div class="warehouse-marker-box" title="คลังสินค้าหลัก">🏢</div>`;
-                    let optCustomWarehouseIcon = L.divIcon({{
-                        className: '',
-                        html: optWarehouseHtml,
-                        iconSize: [40, 40],
-                        iconAnchor: [20, 20]
-                    }});
-                    L.marker(optWarehouse, {{icon: optCustomWarehouseIcon, zIndexOffset: 99999}}).addTo(optMap)
+                    let optWhHtml = `<div class="warehouse-marker-box" title="คลังสินค้าหลัก">🏢</div>`;
+                    let optWhIcon = L.divIcon({{className: '', html: optWhHtml, iconSize: [40, 40], iconAnchor: [20, 20]}});
+                    L.marker(optWarehouse, {{icon: optWhIcon, zIndexOffset: 99999}}).addTo(optMap)
                         .bindTooltip("🏢 <b>คลังสินค้าหลัก</b>", {{permanent: false, direction: 'top'}});
 
                     let optMarkers = [];
@@ -1791,7 +1870,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         optMarkers = [];
                         optSegments.forEach((seg, idx) => {{
                             let info = seg.info;
-                            if (info && info.cust_id && info.cust_id !== "WH-001" && info.lat !== 0.0 && info.lng !== 0.0) {{
+                            if (info && info.cust_id && info.cust_id !== "WH-001" && info.lat !== 0.0 && info.lng !== 0.0 && !info.is_return_segment) {{
                                 let optSeq = seg.opt_seq;
                                 let origSeq = seg.orig_seq;
                                 let isSwapped = seg.is_swapped;
@@ -1835,7 +1914,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }}
                         optActiveMarkerRef = null;
-                        if (!info || info.point_idx === undefined || info.lat === 0.0) return;
+                        if (!info || info.point_idx === undefined || info.lat === 0.0 || info.is_return_segment) return;
                         
                         let target = optMarkers[info.point_idx];
                         if (target) {{
@@ -1864,11 +1943,17 @@ if dw_uploaded_file and sum_uploaded_file:
                         let custId = info.cust_id || '-';
                         let tripName = currentSeg.trip || '-';
 
-                        document.getElementById('opt-banner-content').innerHTML = `
-                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | รหัสลูกค้า: <span style="color:#64ffda;">${{custId}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
-                        `;
-
-                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span>`;
+                        if (info.is_return_segment) {{
+                            document.getElementById('opt-banner-content').innerHTML = `
+                                เที่ยว: <b>${{tripName}}</b> | ขากลับคลังสินค้าหลัก (Optimized) | ระยะทางขากลับ: <span style="color:#ff8a80;">${{currentSeg.dist_km}} กม.</span>
+                            `;
+                            document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - <span style="color:#f39c12;">กลับคลัง</span>`;
+                        }} else {{
+                            document.getElementById('opt-banner-content').innerHTML = `
+                                เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | รหัสลูกค้า: <span style="color:#64ffda;">${{custId}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
+                            `;
+                            document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span>`;
+                        }}
 
                         optActivePolylines.forEach(p => optMap.removeLayer(p));
                         optActivePolylines = [];
@@ -1886,12 +1971,19 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         highlightOptMarker(info);
 
-                        document.getElementById('opt-info-box').innerHTML = `
-                            <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
-                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{info.cust_name}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
-                            <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
-                        `;
+                        if (info.is_return_segment) {{
+                            document.getElementById('opt-info-box').innerHTML = `
+                                <b>🚛 ${{tripName}} | ขากลับเข้าคลังสินค้าหลัก (Optimized)</b><br>
+                                <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสมรวม:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
+                            `;
+                        }} else {{
+                            document.getElementById('opt-info-box').innerHTML = `
+                                <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
+                                <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{info.cust_name}})</span><br>
+                                <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
+                                <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
+                            `;
+                        }}
 
                         optMap.panTo([info.lat, info.lng]);
                     }}
@@ -2018,79 +2110,49 @@ if dw_uploaded_file and sum_uploaded_file:
                             p_lat = float(c_match.group(1))
                             p_lng = float(c_match.group(2))
 
-                            # ปรับปรุงระบบค้นหา: ประเมินทุกจุดในแต่ละเที่ยว เพื่อหาคู่จุดส่งเดิมที่เมื่อแทรกพิกัดใหม่เข้าไปแล้วทำให้ระยะทางเพิ่มขึ้นน้อยที่สุด (Minimal Added Distance)
-                            best_overall_add_dist = float("inf")
-                            best_overall_rec = None
-                            best_overall_seq = 0
-                            best_overall_trip = ""
-                            best_overall_insert_idx = 0
-                            best_overall_path = []
+                            # ค้นหาพิกัดเดิมรายที่อยู่ใกล้พิกัดใหม่มากที่สุด (Minimum Distance Check ข้ามทุกจุดส่งเดิม)
+                            closest_road_dist = float("inf")
+                            closest_rec = None
+                            closest_seq_num = 0
 
-                            grouped_by_trip = df.groupby("trip", sort=False)
-                            for trip_name, group in grouped_by_trip:
-                                trip_valid = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].reset_index(drop=True)
-                                if trip_valid.empty:
-                                    continue
+                            for seq_idx, rec in enumerate(all_valid_records):
+                                _, r_dist = get_osrm_route(p_lat, p_lng, rec["lat"], rec["lng"])
+                                if r_dist < closest_road_dist:
+                                    closest_road_dist = r_dist
+                                    closest_rec = rec
+                                    closest_seq_num = seq_idx + 1
 
-                                # สร้างลำดับพิกัดเดิมของเที่ยวนี้: คลัง -> จุดส่งทั้งหมด -> คลัง
-                                trip_coords = [warehouse_coord] + list(zip(trip_valid["lat"], trip_valid["lng"])) + [warehouse_coord]
+                            if closest_rec:
+                                target_trip_name = closest_rec["trip"]
+                                target_group = df[df["trip"] == target_trip_name].reset_index(drop=True)
                                 
+                                target_cust_idx_in_trip = -1
+                                for idx_g, g_rec in target_group.iterrows():
+                                    if g_rec["cust_id"] == closest_rec["cust_id"]:
+                                        target_cust_idx_in_trip = idx_g
+                                        break
+
+                                best_insert_idx = target_cust_idx_in_trip + 2
+                                valid_pts_trip = target_group[(target_group["lat"] != 0.0) & (target_group["lng"] != 0.0)].to_dict("records")
+                                trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_pts_trip] + [warehouse_coord]
+
                                 orig_trip_dist = 0.0
                                 for i in range(len(trip_coords) - 1):
                                     _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
                                     orig_trip_dist += d
 
-                                # ลองแทรกพิกัดใหม่ในทุกตำแหน่งที่เป็นไปได้ระหว่างจุดส่งเดิม
-                                for insert_pos in range(1, len(trip_coords)):
-                                    test_coords = trip_coords.copy()
-                                    test_coords.insert(insert_pos, (p_lat, p_lng))
+                                test_coords = trip_coords.copy()
+                                test_coords.insert(best_insert_idx, (p_lat, p_lng))
 
-                                    test_trip_dist = 0.0
-                                    temp_route_segments = []
-                                    for i in range(len(test_coords) - 1):
-                                        r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
-                                        test_trip_dist += d
-                                        temp_route_segments.extend(r_path)
+                                test_trip_dist = 0.0
+                                temp_route_segments = []
+                                for i in range(len(test_coords) - 1):
+                                    r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
+                                    test_trip_dist += d
+                                    temp_route_segments.extend(r_path)
 
-                                    added_d = test_trip_dist - orig_trip_dist
-                                    if added_d < best_overall_add_dist:
-                                        best_overall_add_dist = added_d
-                                        best_overall_trip = trip_name
-                                        best_overall_insert_idx = insert_pos
-                                        best_overall_path = temp_route_segments
-
-                                        # ระบุจุดอ้างอิงก่อนหน้าตำแหน่งที่แทรก
-                                        if insert_pos - 1 == 0:
-                                            # แทรกหลังออกจากคลัง
-                                            best_overall_rec = {"cust_id": "WAREHOUSE", "cust_name": "คลังสินค้าหลัก"}
-                                            best_overall_seq = 0
-                                        else:
-                                            prev_cust = trip_valid.iloc[insert_pos - 2]
-                                            best_overall_rec = prev_cust
-                                            # หารำดับที่แท้จริงใน dataframe หลัก
-                                            orig_global_idx = df[(df["trip"] == trip_name) & (df["cust_id"] == prev_cust["cust_id"])].index
-                                            best_overall_seq = int(orig_global_idx[0]) + 1 if len(orig_global_idx) > 0 else 0
-
-                            # แก้ไขปัญหา ValueError โดยใช้เงื่อนไขตรวจสอบไม่ให้เกิด Ambiguous Truth Value จาก Pandas Series
-                            has_valid_rec = False
-                            if isinstance(best_overall_rec, dict):
-                                has_valid_rec = True
-                            elif isinstance(best_overall_rec, pd.Series):
-                                has_valid_rec = not best_overall_rec.empty
-                            elif best_overall_rec is not None:
-                                has_valid_rec = True
-
-                            if has_valid_rec:
+                                add_dist = test_trip_dist - orig_trip_dist
                                 badge_label = f"N{idx_mem + 1}"
-                                
-                                if isinstance(best_overall_rec, dict):
-                                    rec_id = best_overall_rec.get('cust_id', '')
-                                    rec_name = best_overall_rec.get('cust_name', '')
-                                else:
-                                    rec_id = best_overall_rec['cust_id']
-                                    rec_name = best_overall_rec['cust_name']
-
-                                insert_after_text = f"{rec_id} ({rec_name})" if rec_id != "WAREHOUSE" else "ออกจากคลังสินค้าหลัก"
 
                                 processed_new_points.append({
                                     "cust_id": mem["id"],
@@ -2098,15 +2160,15 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "qty": mem["qty"],
                                     "lat": p_lat,
                                     "lng": p_lng,
-                                    "trip": best_overall_trip,
-                                    "insert_seq": best_overall_insert_idx,
-                                    "insert_after": insert_after_text,
-                                    "road_dist": best_overall_add_dist,
-                                    "add_dist": best_overall_add_dist,
+                                    "trip": target_trip_name,
+                                    "insert_seq": best_insert_idx,
+                                    "insert_after": f"{closest_rec['cust_id']} ({closest_rec['cust_name']}) [ลำดับที่ #{closest_seq_num}]",
+                                    "road_dist": closest_road_dist,
+                                    "add_dist": add_dist,
                                     "badge_label": badge_label,
-                                    "prev_id": rec_id,
-                                    "prev_seq": best_overall_seq,
-                                    "route_path": best_overall_path
+                                    "prev_id": closest_rec['cust_id'],
+                                    "prev_seq": closest_seq_num,
+                                    "route_path": temp_route_segments
                                 })
 
                         if processed_new_points:
@@ -2119,6 +2181,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "ชื่อสมาชิก": p_item["cust_name"],
                                     "เที่ยวที่แนะนำ": p_item["trip"],
                                     "แทรกต่อจากลูกค้าเดิม": p_item["insert_after"],
+                                    "ระยะทางถนนใกล้สุด (กม.)": f"{p_item['road_dist']:.2f}",
                                     "ระยะทางเพิ่มขึ้น (กม.)": f"+{p_item['add_dist']:.2f}"
                                 })
                             st.dataframe(pd.DataFrame(summary_table_data), use_container_width=True, hide_index=True)
