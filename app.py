@@ -13,8 +13,9 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title(
-    "🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
+# ปรับขนาดหัวข้อหลักให้เล็กลงพอดีตา
+st.markdown(
+    "### 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
 )
 st.markdown(
     "อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
@@ -696,6 +697,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         info["trip"] = trip_name
                         info["seg_dist_km"] = 0.0
+                        info["is_warehouse"] = False
 
                         segment_path = [[info["lat"], info["lng"]], [info["lat"], info["lng"]]]
                         if info["lat"] != 0.0 and valid_idx_counter < len(trip_route_segments):
@@ -707,6 +709,39 @@ if dw_uploaded_file and sum_uploaded_file:
                             "color": trip_colors.get(trip_name, "#0055FF"),
                             "path": segment_path,
                             "info": info,
+                            "dist_km": 0.0,
+                        })
+
+                    # --- เพิ่มสเต็ปขากลับถึงคลังสินค้าหลักเมื่อจบทริป ---
+                    if valid_idx_counter < len(trip_route_segments):
+                        return_path = trip_route_segments[valid_idx_counter]
+                        last_cust = records_list[-1]
+                        wh_info = {
+                            "point_idx": point_counter,
+                            "trip": trip_name,
+                            "cust_id": "WH-RETURN",
+                            "cust_name": "คลังสินค้าหลัก",
+                            "shipping_address": "กลับถึงคลังสินค้าประจำเที่ยว",
+                            "shipping_district": "-",
+                            "qty": 0,
+                            "acc_qty": last_cust.get("acc_qty", 0),
+                            "lat": warehouse_coord[0],
+                            "lng": warehouse_coord[1],
+                            "lat_display": f"{warehouse_coord[0]:.5f}",
+                            "lng_display": f"{warehouse_coord[1]:.5f}",
+                            "time": "สิ้นสุดเที่ยว",
+                            "on_time_col": "กลับถึงคลัง",
+                            "short_reason_col": "-",
+                            "gps_diff": "0.00",
+                            "is_warehouse": True,
+                            "warehouse_type": "trip_return"
+                        }
+                        point_counter += 1
+                        segments_data.append({
+                            "trip": trip_name,
+                            "color": trip_colors.get(trip_name, "#0055FF"),
+                            "path": return_path,
+                            "info": wh_info,
                             "dist_km": 0.0,
                         })
 
@@ -734,22 +769,22 @@ if dw_uploaded_file and sum_uploaded_file:
                 on_time_val = str(row.get("on_time_col", ""))
 
                 if "ไม่สามารถเข้าส่งได้" in on_time_val:
-                    notices.append("ไม่สามารถเข้าส่งได้ (ไม่มีพิกัด)")
+                    notices.append("เข้าส่งไม่ได้")
                 elif "ไม่ตรงเวลา" in on_time_val:
-                    notices.append("จัดส่งไม่ตรงเวลา")
+                    notices.append("ไม่ตรงเวลา")
                 elif "รอบเสริม" in on_time_val:
                     notices.append("รอบเสริม")
                 elif "สมาชิกใหม่" in on_time_val:
                     notices.append("สมาชิกใหม่")
                 else:
-                    notices.append("จัดส่งตรงเวลา")
+                    notices.append("ตรงเวลา")
 
                 if row["lat"] != 0.0 and row["lng"] != 0.0 and row["gps_diff_num"] > 100:
-                    notices.append(f"GPS ห่าง {row['gps_diff']}m")
+                    notices.append(f"GPS H:{row['gps_diff']}m")
                 if row.get("is_extra_trip"):
                     notices.append("รอบเสริม")
                 if row.get("is_cannot_calc"):
-                    notices.append("ไม่สามารถคำนวณได้")
+                    notices.append("คำนวณไม่ได้")
                 if row.get("is_new_member"):
                     notices.append("สมาชิกใหม่")
                 if row.get("is_moved_trip"):
@@ -814,7 +849,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 "🗺️ แผนที่จำลองการวิ่งจัดส่งตามเส้นทางเวลาจริง (OSRM Map)"
             )
 
-            # --- ปรับปรุง: ลบ คอลัมน์ ยอดส่งสุทธิเป้าหมาย ออกเรียบร้อยแล้ว ---
             st.subheader("📊 สรุปภาพรวมแบ่งตามเที่ยวการส่ง")
             summaries = []
             for idx, t_info in enumerate(trip_quotas):
@@ -887,6 +921,7 @@ if dw_uploaded_file and sum_uploaded_file:
             for idx, r in enumerate(df_records):
                 r["color"] = trip_colors.get(r.get("trip"), "#0055FF")
                 r["point_idx"] = idx
+                r["is_warehouse"] = False
 
             points_json = json.dumps(df_records, ensure_ascii=False)
             segments_json = json.dumps(segments_data, ensure_ascii=False)
@@ -904,7 +939,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 t_name = f"เที่ยวที่ {t_info['trip_no']}"
                 trip_filter_buttons += f'<button class="filter-btn" id="btn-trip{t_info["trip_no"]}" onclick="setTripFilter(\'{t_name}\')">{t_name}</button>\n'
 
-            # --- ปรับปรุง: ย้าย #top-active-banner ลงมาไว้ใต้ช่วงเวลา (.timeline-container) อยู่ติดบนแผนที่พอดี ---
+            # --- ปรับสีแถบพิกัดปัจจุบันเป็น "สีน้ำเงินเทา (Navy-Gray)" ไม่ฉูดฉาด และปรับภาษาอังกฤษให้สอดคล้องกัน ---
             map_html = f"""
             <!DOCTYPE html>
             <html>
@@ -916,14 +951,14 @@ if dw_uploaded_file and sum_uploaded_file:
                     #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     
                     #top-active-banner {{
-                        background: linear-gradient(135deg, #1e3d59, #17b978);
+                        background: linear-gradient(135deg, #2c3e50, #34495e);
                         color: white;
-                        padding: 12px 18px;
+                        padding: 10px 16px;
                         border-radius: 8px;
                         margin-bottom: 12px;
                         font-family: sans-serif;
-                        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
-                        border-left: 6px solid #ff6e40;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        border-left: 6px solid #5dade2;
                     }}
                     
                     .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
@@ -1010,40 +1045,39 @@ if dw_uploaded_file and sum_uploaded_file:
                 </div>
 
                 <div class="filter-bar">
-                    <span style="font-weight:bold; font-size:13px;">🔍 ตัวกรองเที่ยว:</span>
+                    <span style="font-weight:bold; font-size:13px;">🔍 Filter Trip:</span>
                     {trip_filter_buttons}
                 </div>
 
                 <div class="filter-bar" style="background: #faf2f2;">
-                    <span style="font-weight:bold; font-size:13px;">🏷️ ตัวกรองสถานะพิเศษ:</span>
-                    <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">ไม่ตรงเวลา (<span id="count-late">0</span>)</button>
+                    <span style="font-weight:bold; font-size:13px;">🏷️ Filter Status:</span>
+                    <button class="status-filter-btn" id="status-btn-late" onclick="setStatusFilter('late')">Late (<span id="count-late">0</span>)</button>
                     <button class="status-filter-btn" id="status-btn-gps" onclick="setStatusFilter('gps')">GPS>100m (<span id="count-gps">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-reason" onclick="setStatusFilter('reason')">เหตุขาดส่งขึ้นต้น 'ไม่' (<span id="count-reason">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')">รอบเสริม (<span id="count-extra">0</span>)</button>
-                    <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')">สมาชิกใหม่ (<span id="count-new">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-reason" onclick="setStatusFilter('reason')">Reason 'Not' (<span id="count-reason">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-extra" onclick="setStatusFilter('extra')">Extra (<span id="count-extra">0</span>)</button>
+                    <button class="status-filter-btn" id="status-btn-new" onclick="setStatusFilter('new')">New (<span id="count-new">0</span>)</button>
                 </div>
 
                 <div class="controls">
-                    <button onclick="startAnimation()">▶️ เริ่มเล่น (Play)</button>
-                    <button onclick="pauseAnimation()">⏸️ หยุดพัก (Pause)</button>
-                    <button onclick="resetAnimation()">🔄 รีเซ็ต (Reset)</button>
-                    <span id="status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50;">พร้อมสำหรับการจำลองเส้นทาง...</span>
+                    <button onclick="startAnimation()">▶️ Play</button>
+                    <button onclick="pauseAnimation()">⏸️ Pause</button>
+                    <button onclick="resetAnimation()">🔄 Reset</button>
+                    <span id="status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50;">Ready for simulation...</span>
                 </div>
 
                 <div class="timeline-container">
-                    <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
+                    <span style="font-weight:bold; font-size:13px;">⏱️ Timeline:</span>
                     <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
-                    <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
+                    <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:260px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - Point 1</span>
                 </div>
 
-                <!-- ย้ายแถบข้อมูลพิกัดปัจจุบันลงมาอยู่ตรงนี้ เหนือแผนที่พอดี -->
                 <div id="top-active-banner">
-                    <div style="font-size: 12px; color: #ffeb3b; font-weight: bold; margin-bottom: 3px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง:</div>
-                    <div id="top-banner-content" style="font-size: 14px; font-weight: bold;">กำลังโหลดข้อมูล...</div>
+                    <div style="font-size: 11px; color: #a9cce3; font-weight: bold; margin-bottom: 2px;">📍 Current Location / Incoming:</div>
+                    <div id="top-banner-content" style="font-size: 13px; font-weight: bold;">Loading...</div>
                 </div>
 
                 <div id="map"></div>
-                <div id="info-box">📍 <b>สถานะพิกัด</b>: กดปุ่ม "เริ่มเล่น" เพื่อดูรายละเอียดแบบเรียลไทม์</div>
+                <div id="info-box">📍 <b>Status</b>: Click "Play" to view real-time delivery tracking.</div>
 
                 <script>
                     const points = {points_json};
@@ -1060,8 +1094,14 @@ if dw_uploaded_file and sum_uploaded_file:
                         attribution: '© OpenStreetMap contributors'
                     }}).addTo(map);
 
-                    L.marker(warehouse).addTo(map)
-                        .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
+                    const warehouseIcon = L.divIcon({{
+                        className: '',
+                        html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:30px; height:30px; text-align:center; font-size:14px; line-height:26px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;">🏢</div>`,
+                        iconSize: [30, 30], iconAnchor: [15, 15]
+                    }});
+
+                    let warehouseMarker = L.marker(warehouse, {{icon: warehouseIcon}}).addTo(map)
+                        .bindTooltip("🏢 คลังสินค้าหลัก (Warehouse)", {{permanent: false, direction: 'top'}});
 
                     let allMarkers = [];
                     let activePolylines = [];
@@ -1076,6 +1116,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function pointMatchesFilter(pt) {{
+                        if (pt.is_warehouse) return true;
                         if (pt.lat === 0.0 || pt.lng === 0.0) return false;
                         if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
                         if (currentStatusFilter !== null) {{
@@ -1098,7 +1139,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function updateStatusCounts() {{
                         let counts = {{ late: 0, gps: 0, reason: 0, extra: 0, new: 0 }};
                         points.forEach(pt => {{
-                            if (pt.lat !== 0.0 && pt.lng !== 0.0 && (currentFilter === 'ALL' || pt.trip === currentFilter)) {{
+                            if (!pt.is_warehouse && pt.lat !== 0.0 && pt.lng !== 0.0 && (currentFilter === 'ALL' || pt.trip === currentFilter)) {{
                                 let onTimeCol = pt.on_time_col || '';
                                 if (onTimeCol.includes("ไม่ตรงเวลา")) counts.late++;
                                 if ((pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100)) counts.gps++;
@@ -1115,15 +1156,20 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function createTooltipHtml(info, seqNum) {{
+                        if (info.is_warehouse) {{
+                            return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
+                                <b>🏢 คลังสินค้าหลัก (${{info.trip}})</b><br>
+                                <b>สถานะ:</b> กลับถึงคลังสินค้าเรียบร้อย<br>
+                                <b>ยอดสะสมรวม:</b> ${{info.acc_qty}} ถัง
+                            </div>`;
+                        }}
                         let badgesHtml = [];
                         let onTimeVal = info.on_time_col || 'จัดส่งตรงเวลา';
                         if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
                         else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{onTimeVal}}</span>`);
                         
                         if (info.lat !== 0.0 && info.lng !== 0.0 && (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
-                        if (hasReasonStartsWithNot(info)) badgesHtml.push(`<span class="alert-badge" style="background:#C0392B;">เหตุขาดส่ง: ${{info.short_reason_col}}</span>`);
-                        if (info.is_extra_trip) badgesHtml.push(`<span class="alert-badge" style="background:#8E44AD;">รอบเสริม</span>`);
-                        if (info.is_new_member) badgesHtml.push(`<span class="alert-badge" style="background:#2980B9;">สมาชิกใหม่</span>`);
+                        if (hasReasonStartsWithNot(info)) badgesHtml.push(`<span class="alert-badge" style="background:#C0392B;">ขาดส่ง: ${{info.short_reason_col}}</span>`);
 
                         let addrInfo = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '';
                         let fullAddressText = addrInfo ? `<br><b>ที่อยู่:</b> ${{addrInfo}}` : '';
@@ -1132,15 +1178,20 @@ if dw_uploaded_file and sum_uploaded_file:
                             <b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>
                             ${{badgesHtml.join(' ')}}<br>
                             <b>เวลา:</b> ${{info.time}}<br>
-                            <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
+                            <b>ลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
                             fullAddressText + `<br>
-                            <b>ยอดส่ง:</b> ${{info.qty}} ถัง<br>
-                            <b>ตรงเวลา:</b> ${{info.on_time_col || '-'}}<br>
-                            <b>เหตุขาดส่ง:</b> ${{info.short_reason_col || '-'}}
+                            <b>ยอดส่ง:</b> ${{info.qty}} ถัง
                         </div>`;
                     }}
 
                     function createMarkerIcon(seqNum, color, ptInfo) {{
+                        if (ptInfo && ptInfo.is_warehouse) {{
+                            return L.divIcon({{
+                                className: '',
+                                html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:26px; height:26px; text-align:center; font-size:12px; line-height:22px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;">🏢</div>`,
+                                iconSize: [26, 26], iconAnchor: [13, 13]
+                            }});
+                        }}
                         let onTimeVal = ptInfo && ptInfo.on_time_col ? ptInfo.on_time_col : '';
                         let isLate = onTimeVal.includes("ไม่ตรงเวลา");
                         let isGpsDiff = ptInfo && (ptInfo.lat !== 0.0 && ptInfo.lng !== 0.0) && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
@@ -1159,10 +1210,11 @@ if dw_uploaded_file and sum_uploaded_file:
                     function initMarkers() {{
                         allMarkers.forEach(m => map.removeLayer(m));
                         allMarkers = [];
-                        points.forEach((pt, idx) => {{
-                            if (pt.lat !== 0.0 && pt.lng !== 0.0 && pointMatchesFilter(pt)) {{
+                        segments.forEach((seg, idx) => {{
+                            let pt = seg.info;
+                            if (pt && pointMatchesFilter(pt)) {{
                                 let seqNumber = idx + 1;
-                                let customIcon = createMarkerIcon(seqNumber, pt.color, pt);
+                                let customIcon = createMarkerIcon(seqNumber, seg.color, pt);
                                 let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }});
                                 
                                 if (!isMode1 && idx > currentStep) {{
@@ -1202,7 +1254,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         }}
 
                         initMarkers();
-                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
                         if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
                     }}
 
@@ -1217,35 +1269,25 @@ if dw_uploaded_file and sum_uploaded_file:
                             }}
                         }});
                         initMarkers();
-                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
                         if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
                     }}
 
-                    function highlightMarkerByInfo(info) {{
+                    function highlightMarkerByInfo(stepIdx) {{
                         if (activeMarkerRef) {{
                             if (activeMarkerRef._icon) {{
                                 let innerDiv = activeMarkerRef._icon.querySelector('.number-icon');
                                 if (innerDiv) innerDiv.classList.remove('number-icon-active');
                             }}
-                            if (activeMarkerRef.setZIndexOffset) {{
-                                activeMarkerRef.setZIndexOffset(100);
-                            }}
                         }}
                         activeMarkerRef = null;
-                        if (!info || info.point_idx === undefined || info.point_idx === null || info.lat === 0.0) return;
-                        
-                        let target = allMarkers[info.point_idx];
+                        let target = allMarkers[stepIdx];
                         if (target) {{
                             if (target._icon) {{
                                 let innerDiv = target._icon.querySelector('.number-icon');
                                 if (innerDiv) innerDiv.classList.add('number-icon-active');
                             }}
-                            if (target.setZIndexOffset) {{
-                                target.setZIndexOffset(10000);
-                            }}
-                            if (target.bringToFront) {{
-                                target.bringToFront();
-                            }}
+                            if (target.setZIndexOffset) target.setZIndexOffset(10000);
                             activeMarkerRef = target;
                         }}
                     }}
@@ -1254,33 +1296,32 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (stepIndex < 0 || stepIndex >= segments.length) return;
                         currentStep = stepIndex;
                         let currentSeg = segments[currentStep];
-
-                        if (currentSeg.info.lat === 0.0 || !pointMatchesFilter(currentSeg.info)) {{
-                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
-                            if (nextValid !== -1) {{ currentStep = nextValid; currentSeg = segments[currentStep]; }}
-                        }}
-
                         let info = currentSeg.info;
-                        if (info.lat === 0.0) return;
+
+                        if (!pointMatchesFilter(info)) {{
+                            let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && pointMatchesFilter(seg.info));
+                            if (nextValid !== -1) {{ currentStep = nextValid; currentSeg = segments[currentStep]; info = currentSeg.info; }}
+                        }}
 
                         let slider = document.getElementById('timeSlider');
                         slider.value = currentStep;
                         slider.style.accentColor = currentSeg.color;
 
                         let timeLabel = info.time || '-';
-                        let custIdLabel = info.cust_id || '-';
-                        let custNameLabel = info.cust_name || '-';
-                        let addressLabel = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '-';
-                        let qtyLabel = info.qty !== undefined ? info.qty : 0;
-                        let accQtyLabel = info.acc_qty !== undefined ? info.acc_qty : 0;
                         let tripLabel = info.trip || currentSeg.trip || '-';
-                        let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
+                        let stepNumText = currentStep + 1;
 
-                        document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#ffe082;">${{accQtyLabel}} ถัง</span>
-                        `;
-
-                        document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}})`;
+                        if (info.is_warehouse) {{
+                            document.getElementById('top-banner-content').innerHTML = `
+                                จุดที่ <span style="color:#5dade2; font-size:14px;">${{stepNumText}}</span> (${{tripLabel}}) | 🏢 <span style="color:#ffffff;">กลับถึงคลังสินค้าหลัก</span> | ยอดสะสมรวม: <span style="color:#f39c12;">${{info.acc_qty}} ถัง</span>
+                            `;
+                            document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripLabel}}</span> - <span style="color:#5dade2;">กลับถึงคลัง</span>`;
+                        }} else {{
+                            document.getElementById('top-banner-content').innerHTML = `
+                                จุดที่ <span style="color:#5dade2; font-size:14px;">${{stepNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#ffffff;">${{info.cust_id}} (${{info.cust_name}})</span> | ยอดส่ง: <span style="color:#f39c12;">${{info.qty}} ถัง</span> | สะสม: <span style="color:#5dade2;">${{info.acc_qty}} ถัง</span>
+                            `;
+                            document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#5dade2;">${{info.cust_id}}</span> (จุด ${{stepNumText}})`;
+                        }}
 
                         activePolylines.forEach(p => map.removeLayer(p));
                         activePolylines = [];
@@ -1288,7 +1329,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         let accumulatedDistance = 0.0;
                         for (let i = 0; i <= currentStep; i++) {{
                             let seg = segments[i];
-                            if (seg.info.lat === 0.0 || !pointMatchesFilter(seg.info)) continue;
+                            if (!pointMatchesFilter(seg.info)) continue;
                             accumulatedDistance += (seg.dist_km || 0.0);
                             if (seg.path && seg.path.length > 0) {{
                                 let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
@@ -1299,8 +1340,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (!isMode1) {{
                             allMarkers.forEach((marker, mIdx) => {{
                                 if (marker) {{
-                                    let ptInfo = points[mIdx];
-                                    let matches = ptInfo.lat !== 0.0 && pointMatchesFilter(ptInfo);
+                                    let ptInfo = segments[mIdx].info;
+                                    let matches = pointMatchesFilter(ptInfo);
                                     if (matches && mIdx <= currentStep) {{
                                         if (!map.hasLayer(marker)) marker.addTo(map);
                                     }} else {{
@@ -1310,16 +1351,23 @@ if dw_uploaded_file and sum_uploaded_file:
                             }});
                         }}
 
-                        highlightMarkerByInfo(info);
+                        highlightMarkerByInfo(currentStep);
 
-                        document.getElementById('info-box').innerHTML = `
-                            <b>🚛 ${{currentSeg.trip}} | จุดที่ ${{pointNumText}} จาก ${{segments.length}}</b><br>
-                            <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
-                            <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 ผลต่าง GPS:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                            <b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span><br>
-                            <b>📌 ตรงเวลา:</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
-                        `;
+                        if (info.is_warehouse) {{
+                            document.getElementById('info-box').innerHTML = `
+                                <b>🚛 ${{tripName}} | กลับถึงคลังสินค้าหลัก (จุดที่ ${{stepNumText}} / ${{segments.length}})</b><br>
+                                <b>🏢 สถานะ:</b> รถขนส่งเดินทางกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย | <b>📦 ยอดสะสมรวม:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.acc_qty}} ถัง</span>
+                            `;
+                        }} else {{
+                            let addrStr = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '-';
+                            document.getElementById('info-box').innerHTML = `
+                                <b>🚛 ${{tripLabel}} | จุดที่ ${{stepNumText}} จาก ${{segments.length}}</b><br>
+                                <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
+                                <b>🏠 ที่อยู่:</b> ${{addrStr}}<br>
+                                <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 GPS Diff:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
+                                <b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span> | <b>📌 สถานะ:</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
+                            `;
+                        }}
 
                         map.panTo([info.lat, info.lng]);
                     }}
@@ -1327,7 +1375,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function nextStep() {{
                         let nextIdx = currentStep + 1;
                         while (nextIdx < segments.length) {{
-                            if (segments[nextIdx].info.lat !== 0.0 && pointMatchesFilter(segments[nextIdx].info)) break;
+                            if (pointMatchesFilter(segments[nextIdx].info)) break;
                             nextIdx++;
                         }}
                         if (nextIdx < segments.length) {{
@@ -1335,14 +1383,14 @@ if dw_uploaded_file and sum_uploaded_file:
                             updateStep(currentStep);
                         }} else {{
                             pauseAnimation();
-                            document.getElementById('status-text').innerText = "🏁 จำลองเส้นทางเสร็จสิ้น!";
+                            document.getElementById('status-text').innerText = "🏁 Simulation Completed!";
                         }}
                     }}
 
                     function startAnimation() {{
                         if (isPlaying) return;
                         isPlaying = true;
-                        document.getElementById('status-text').innerText = "▶ กำลังวิ่งจำลองเส้นทาง...";
+                        document.getElementById('status-text').innerText = "▶ Running Simulation...";
                         updateStep(currentStep);
                         animTimer = setInterval(nextStep, currentSpeedMs);
                     }}
@@ -1350,15 +1398,15 @@ if dw_uploaded_file and sum_uploaded_file:
                     function pauseAnimation() {{
                         isPlaying = false;
                         if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
-                        document.getElementById('status-text').innerText = "⏸ หยุดพักการจำลอง";
+                        document.getElementById('status-text').innerText = "⏸ Simulation Paused";
                     }}
 
                     function resetAnimation() {{
                         pauseAnimation();
-                        let firstMatchIdx = segments.findIndex(seg => seg.info.lat !== 0.0 && pointMatchesFilter(seg.info));
+                        let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
                         currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
                         updateStep(currentStep);
-                        document.getElementById('status-text').innerText = "🔄 รีเซ็ตเส้นทางเรียบร้อย";
+                        document.getElementById('status-text').innerText = "🔄 Simulation Reset";
                     }}
 
                     function onSliderChange(val) {{
@@ -1678,30 +1726,30 @@ if dw_uploaded_file and sum_uploaded_file:
             </head>
             <body>
                 <div id="opt-top-banner">
-                    <div style="font-size: 11px; color: #f39c12; font-weight: bold; margin-bottom: 2px;">📍 เส้นทางแนะนำ (Optimized Route):</div>
-                    <div id="opt-banner-content" style="font-size: 13px; font-weight: bold;">กำลังโหลดข้อมูลเส้นทางแนะนำ...</div>
+                    <div style="font-size: 11px; color: #f39c12; font-weight: bold; margin-bottom: 2px;">📍 Optimized Route:</div>
+                    <div id="opt-banner-content" style="font-size: 13px; font-weight: bold;">Loading optimized route...</div>
                 </div>
 
                 <div class="opt-legend">
                     {opt_legend_items}
-                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 ป้ายมุมบนขวา: <span style="color:#D32F2F; font-weight:bold;">สีแดง = สลับตำแหน่ง</span> | <span style="color:#333; font-weight:bold;">สีดำ = ไม่เปลี่ยนลำดับ</span></div>
+                    <div style="margin-left:auto; color:#333; font-size:11px;">📌 Top-Right Badge: <span style="color:#D32F2F; font-weight:bold;">Red = Swapped</span> | <span style="color:#333; font-weight:bold;">Dark = Unchanged</span></div>
                 </div>
 
                 <div class="opt-controls">
-                    <button class="opt-btn" onclick="startOptAnimation()">▶️ เริ่มเล่น (Play)</button>
-                    <button class="opt-btn" onclick="pauseOptAnimation()">⏸️ หยุดพัก (Pause)</button>
-                    <button class="opt-btn" onclick="resetOptAnimation()">🔄 รีเซ็ต (Reset)</button>
-                    <span id="opt-status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50; font-size: 13px;">พร้อมจำลองเส้นทาง Optimized...</span>
+                    <button class="opt-btn" onclick="startOptAnimation()">▶️ Play</button>
+                    <button class="opt-btn" onclick="pauseOptAnimation()">⏸️ Pause</button>
+                    <button class="opt-btn" onclick="resetOptAnimation()">🔄 Reset</button>
+                    <span id="opt-status-text" style="font-weight: bold; font-family: sans-serif; color: #2c3e50; font-size: 13px;">Ready for Optimized simulation...</span>
                 </div>
 
                 <div class="opt-timeline-container">
-                    <span style="font-weight:bold; font-size:12px;">⏱️ ลำดับจุด:</span>
+                    <span style="font-weight:bold; font-size:12px;">⏱️ Sequence:</span>
                     <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="{max(len(opt_segments_data)-1, 0)}" value="0" oninput="onOptSliderChange(this.value)">
-                    <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:200px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">จุด 1</span>
+                    <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:180px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">Point 1</span>
                 </div>
 
                 <div id="opt-map"></div>
-                <div id="opt-info-box">📍 กดปุ่ม "เริ่มเล่น" เพื่อจำลองเส้นทาง Optimized ทีละจุด</div>
+                <div id="opt-info-box">📍 Click "Play" to simulate the optimized route step-by-step.</div>
 
                 <script>
                     const optWarehouse = {wh_json};
@@ -1751,11 +1799,11 @@ if dw_uploaded_file and sum_uploaded_file:
                                 let swapStatusText = isSwapped ? '<span style="color:#D32F2F; font-weight:bold;">🔄 สลับตำแหน่ง</span>' : '<span style="color:#2E7D32; font-weight:bold;">✔️ คงเดิม</span>';
                                 
                                 marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
-                                    <b>📍 ลำดับแนะนำ (Optimized): #${{optSeq}}</b><br>
-                                    <b>🔄 ลำดับเดิม:</b> #${{origSeq}} (${{swapStatusText}})<br>
-                                    <b>รหัสลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name}})` + addrText + `<br>
-                                    <b>เที่ยว:</b> ${{seg.trip}}<br>
-                                    <b>ยอดส่ง:</b> ${{info.qty}} ถัง
+                                    <b>📍 Optimized Seq: #${{optSeq}}</b><br>
+                                    <b>Original Seq:</b> #${{origSeq}} (${{swapStatusText}})<br>
+                                    <b>Customer ID:</b> ${{info.cust_id}} (${{info.cust_name}})` + addrText + `<br>
+                                    <b>Trip:</b> ${{seg.trip}}<br>
+                                    <b>Qty:</b> ${{info.qty}} ถัง
                                 </div>`, {{direction: 'top', opacity: 0.95}});
                                 
                                 optMarkers[idx] = marker;
@@ -1803,10 +1851,10 @@ if dw_uploaded_file and sum_uploaded_file:
                         let tripName = currentSeg.trip || '-';
 
                         document.getElementById('opt-banner-content').innerHTML = `
-                            เที่ยว: <b>${{tripName}}</b> | ลำดับแนะนำ: <span style="color:#ffeb3b; font-size:15px;">#${{optSeq}}</span> (เดิม: #${{origSeq}}) | รหัสลูกค้า: <span style="color:#64ffda;">${{custId}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
+                            Trip: <b>${{tripName}}</b> | Optimized: <span style="color:#ffeb3b; font-size:14px;">#${{optSeq}}</span> (Orig: #${{origSeq}}) | Customer: <span style="color:#64ffda;">${{custId}}</span> | Qty: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
                         `;
 
-                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span>`;
+                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - Seq: <span style="color:#2980b9;">#${{optSeq}}</span>`;
 
                         optActivePolylines.forEach(p => optMap.removeLayer(p));
                         optActivePolylines = [];
@@ -1825,10 +1873,10 @@ if dw_uploaded_file and sum_uploaded_file:
                         highlightOptMarker(info);
 
                         document.getElementById('opt-info-box').innerHTML = `
-                            <b>🚛 ${{tripName}} | ลำดับแนะนำ (Optimized): #${{optSeq}} (ลำดับเดิม: #${{origSeq}})</b><br>
-                            <b>👤 ลูกค้า:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{info.cust_name}})</span><br>
-                            <b>🏠 ที่อยู่:</b> ${{info.shipping_address || '-'}}<br>
-                            <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 ระยะทางช่วงนี้:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ ระยะทางสะสม (Optimized):</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
+                            <b>🚛 ${{tripName}} | Optimized Seq: #${{optSeq}} (Original Seq: #${{origSeq}})</b><br>
+                            <b>👤 Customer:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{info.cust_name}})</span><br>
+                            <b>🏠 Address:</b> ${{info.shipping_address || '-'}}<br>
+                            <b>📦 Qty:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 Segment Dist:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ Total Dist:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
                         `;
 
                         optMap.panTo([info.lat, info.lng]);
@@ -1845,14 +1893,14 @@ if dw_uploaded_file and sum_uploaded_file:
                             updateOptStep(optCurrentStep);
                         }} else {{
                             pauseOptAnimation();
-                            document.getElementById('opt-status-text').innerText = "🏁 จำลองเส้นทาง Optimized เสร็จสิ้น!";
+                            document.getElementById('opt-status-text').innerText = "🏁 Optimized Simulation Completed!";
                         }}
                     }}
 
                     function startOptAnimation() {{
                         if (optIsPlaying) return;
                         optIsPlaying = true;
-                        document.getElementById('opt-status-text').innerText = "▶ กำลังจำลองเส้นทาง Optimized...";
+                        document.getElementById('opt-status-text').innerText = "▶ Running Optimized Simulation...";
                         updateOptStep(optCurrentStep);
                         optAnimTimer = setInterval(nextOptStep, optSpeedMs);
                     }}
@@ -1860,7 +1908,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     function pauseOptAnimation() {{
                         optIsPlaying = false;
                         if (optAnimTimer) {{ clearInterval(optAnimTimer); optAnimTimer = null; }}
-                        document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
+                        document.getElementById('opt-status-text').innerText = "⏸ Optimized Simulation Paused";
                     }}
 
                     function resetOptAnimation() {{
@@ -1868,7 +1916,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
-                        document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
+                        document.getElementById('opt-status-text').innerText = "🔄 Optimized Simulation Reset";
                     }}
 
                     function onOptSliderChange(val) {{
@@ -1889,7 +1937,7 @@ if dw_uploaded_file and sum_uploaded_file:
             )
 
         # -------------------------------------------------------------
-        # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่ (ปรับปรุงหลักการแทรกให้พิจารณาการวนและระยะทาง)
+        # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่หลายราย พร้อมแผนที่แสดงครบทุกราย
         # -------------------------------------------------------------
         with tab3:
             st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่ (คำนึงถึงระยะทางที่เพิ่มขึ้นและการวิ่งวน)")
@@ -1949,8 +1997,6 @@ if dw_uploaded_file and sum_uploaded_file:
                     if not all_valid_records:
                         st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งเดิมในไฟล์")
                     else:
-                        # --- ปรับปรุงหลักการแทรกพิกัดตามโจทย์ข้อที่ 3 ---
-                        # คำนวณหาจุดแทรกโดยประเมินระยะทางเพิ่มสุทธิ (Net Added Distance) และเช็คการวิ่งวน
                         for mem in st.session_state["new_members_list"]:
                             c_match = re.search(r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", mem["coord"].strip())
                             if not c_match:
@@ -1958,7 +2004,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             p_lat = float(c_match.group(1))
                             p_lng = float(c_match.group(2))
 
-                            # 1. หาจุดเดิมที่ใกล้ทางกายภาพที่สุด 3 ลำดับแรก
                             dist_list = []
                             for seq_idx, rec in enumerate(all_valid_records):
                                 d_air = haversine(p_lat, p_lng, rec["lat"], rec["lng"])
@@ -1971,12 +2016,10 @@ if dw_uploaded_file and sum_uploaded_file:
                             min_added_distance = float("inf")
 
                             for d_air, seq_idx, rec in top_candidates:
-                                # ค้นหาว่าลูกค้าคนนี้อยู่ในเที่ยวไหน
                                 t_name = rec["trip"]
                                 target_group = df[df["trip"] == t_name].reset_index(drop=True)
                                 valid_pts_trip = target_group[(target_group["lat"] != 0.0) & (target_group["lng"] != 0.0)].to_dict("records")
                                 
-                                # หาตำแหน่งในกลุ่มพิกัดของเที่ยว
                                 local_idx = next((i for i, v in enumerate(valid_pts_trip) if v["cust_id"] == rec["cust_id"]), -1)
                                 if local_idx == -1:
                                     continue
@@ -1984,9 +2027,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 p_prev = (valid_pts_trip[local_idx]["lat"], valid_pts_trip[local_idx]["lng"])
                                 p_next = (valid_pts_trip[local_idx+1]["lat"], valid_pts_trip[local_idx+1]["lng"]) if local_idx + 1 < len(valid_pts_trip) else warehouse_coord
                                 
-                                # ระยะเดิม prev -> next
                                 _, d_orig_segment = get_osrm_route(p_prev[0], p_prev[1], p_next[0], p_next[1])
-                                # ระยะใหม่ prev -> new -> next
                                 _, d_to_new = get_osrm_route(p_prev[0], p_prev[1], p_lat, p_lng)
                                 _, d_from_new = get_osrm_route(p_lat, p_lng, p_next[0], p_next[1])
                                 
@@ -2014,7 +2055,6 @@ if dw_uploaded_file and sum_uploaded_file:
                                 add_dist = best_candidate["add_dist"]
                                 closest_road_dist = best_candidate["closest_road_dist"]
                                 
-                                # ตรวจสอบเงื่อนไขระยะทางว่าวนกลับไปกลับมาหรือไม่ (หากระยะเพิ่มเกิน 8 กม. หรือระยะอากาศเกิน 5 กม.)
                                 suitability = "✅ เหมาะสมที่จะแทรก"
                                 warning_note = "ใกล้เคียงกลุ่มพิกัดเดิม"
                                 if add_dist > 8.0 or best_candidate["air_dist"] > 5.0:
@@ -2188,10 +2228,10 @@ if dw_uploaded_file and sum_uploaded_file:
                             </head>
                             <body>
                                 <div class="map-legend-box">
-                                    <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
-                                    <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ทุกราย (✦)</div>
-                                    <div class="legend-pill"><span class="legend-dot-prev">#</span> พิกัดรายที่จะนำไปแทรกต่อ (แสดงเลขอ้างอิงลำดับการส่งพร้อมเครื่องหมาย 🔗)</div>
-                                    <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป (นำเมาส์ชี้เพื่อดูข้อมูล)</div>
+                                    <span style="font-weight:bold; color:#1e3c72;">📌 Map Legend:</span>
+                                    <div class="legend-pill"><span class="legend-dot-new"></span> New Members (✦)</div>
+                                    <div class="legend-pill"><span class="legend-dot-prev">#</span> Nearest Point to Insert After</div>
+                                    <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> Existing Customers</div>
                                 </div>
 
                                 <div id="map-tab3-multi"></div>
@@ -2215,15 +2255,15 @@ if dw_uploaded_file and sum_uploaded_file:
                                             let seqNum = idx + 1;
                                             
                                             if (isPrevConnected) {{
-                                                let prevHtml = `<div class="prev-connected-icon" title="ลำดับที่ #${{seqNum}}">${{seqNum}}</div>`;
+                                                let prevHtml = `<div class="prev-connected-icon" title="Sequence #${{seqNum}}">${{seqNum}}</div>`;
                                                 let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [30, 30], iconAnchor: [15, 15] }});
                                                 let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
                                                 pm.bindTooltip(`
                                                     <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                        <b style="color:#D32F2F;">📍 [สมาชิกที่ใกล้ที่สุด - ลำดับที่ #${{seqNum}}]</b><br>
-                                                        <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
-                                                        <b>ชื่อ:</b> ${{pt.cust_name}}<br>
-                                                        <b>เที่ยว:</b> ${{pt.trip}}
+                                                        <b style="color:#D32F2F;">📍 [Nearest Point - Seq #${{seqNum}}]</b><br>
+                                                        <b>Customer ID:</b> ${{pt.cust_id}}<br>
+                                                        <b>Name:</b> ${{pt.cust_name}}<br>
+                                                        <b>Trip:</b> ${{pt.trip}}
                                                     </div>`, {{direction: 'top', opacity: 0.95}});
                                             }} else {{
                                                 let iconHtml = `<div class="exist-icon">${{seqNum}}</div>`;
@@ -2231,11 +2271,11 @@ if dw_uploaded_file and sum_uploaded_file:
                                                 let m = L.marker([pt.lat, pt.lng], {{icon: customIcon}}).addTo(map3);
                                                 m.bindTooltip(`
                                                     <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                        <b>📍 จุดเดิมที่ #${{seqNum}} (${{pt.trip}})</b><br>
-                                                        <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
-                                                        <b>ชื่อ:</b> ${{pt.cust_name}}<br>
-                                                        <b>ยอดส่ง:</b> ${{pt.qty}} ถัง<br>
-                                                        <b>เวลา:</b> ${{pt.time}}
+                                                        <b>📍 Existing Pt #${{seqNum}} (${{pt.trip}})</b><br>
+                                                        <b>Customer ID:</b> ${{pt.cust_id}}<br>
+                                                        <b>Name:</b> ${{pt.cust_name}}<br>
+                                                        <b>Qty:</b> ${{pt.qty}} ถัง<br>
+                                                        <b>Time:</b> ${{pt.time}}
                                                     </div>`, {{direction: 'top', opacity: 0.95}});
                                             }}
                                         }}
@@ -2254,13 +2294,13 @@ if dw_uploaded_file and sum_uploaded_file:
                                         
                                         newMarker.bindTooltip(`
                                             <div style="font-family:sans-serif; font-size:12px; line-height:1.5;">
-                                                <b style="color:#2a5298; font-size:13px;">🌟 สมาชิกใหม่ (${{np.cust_id}})</b><br>
-                                                <b>ชื่อ:</b> ${{np.cust_name}}<br>
-                                                <b>จำนวนส่ง:</b> ${{np.qty}} ถัง<br>
-                                                <b>เที่ยวจัดส่ง:</b> ${{np.trip}}<br>
-                                                <b>ตำแหน่งแทรก:</b> ลำดับที่ ${{np.insert_seq}}<br>
-                                                <b>แทรกต่อจาก:</b> ${{np.insert_after}}<br>
-                                                <b>ผลประเมิน:</b> ${{np.suitability}}
+                                                <b style="color:#2a5298; font-size:13px;">🌟 New Member (${{np.cust_id}})</b><br>
+                                                <b>Name:</b> ${{np.cust_name}}<br>
+                                                <b>Qty:</b> ${{np.qty}} ถัง<br>
+                                                <b>Trip:</b> ${{np.trip}}<br>
+                                                <b>Insert Seq:</b> #${{np.insert_seq}}<br>
+                                                <b>Insert After:</b> ${{np.insert_after}}<br>
+                                                <b>Evaluation:</b> ${{np.suitability}}
                                             </div>`, {{direction: 'top', opacity: 0.95}});
 
                                         if(np.route_path && np.route_path.length > 0) {{
