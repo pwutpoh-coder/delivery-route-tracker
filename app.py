@@ -2048,9 +2048,10 @@ if dw_uploaded_file and sum_uploaded_file:
         with tab3:
             st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่ (รองรับหลายรายพร้อมกัน)")
 
+            # กำหนดค่าเริ่มต้นพิกัดให้เป็นค่าว่าง "" ตามต้องการ
             if "new_members_list" not in st.session_state:
                 st.session_state["new_members_list"] = [
-                    {"id": "NEW-CUST-001", "name": "สมาชิกใหม่ 1", "qty": 5, "coord": f"{warehouse_coord[0]+0.01:.6f}, {warehouse_coord[1]+0.01:.6f}"}
+                    {"id": "NEW-CUST-001", "name": "สมาชิกใหม่ 1", "qty": 5, "coord": ""}
                 ]
 
             col_btn1, col_btn2 = st.columns([1, 4])
@@ -2061,7 +2062,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         "id": f"NEW-CUST-{new_idx:03d}",
                         "name": f"สมาชิกใหม่ {new_idx}",
                         "qty": 5,
-                        "coord": f"{warehouse_coord[0]+(0.01*new_idx):.6f}, {warehouse_coord[1]+(0.01*new_idx):.6f}"
+                        "coord": ""  # ให้พิกัดว่างไว้เพื่อให้ผู้ใช้ใส่เอง
                     })
                     st.rerun()
             with col_btn2:
@@ -2080,7 +2081,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 with c_m3:
                     m_qty = st.number_input(f"ถัง #{i+1}", min_value=1, max_value=100, value=mem["qty"], key=f"mqty_{i}")
                 with c_m4:
-                    m_coord = st.text_input(f"พิกัด (Lat, Lng) #{i+1}", value=mem["coord"], key=f"mcoord_{i}")
+                    m_coord = st.text_input(f"พิกัด (Lat, Lng) #{i+1}", value=mem["coord"], placeholder="ตัวอย่าง: 13.7563, 100.5018", key=f"mcoord_{i}")
                 with c_m5:
                     st.markdown("<br>", unsafe_allow_html=True)
                     if st.button("❌ ลบ", key=f"iddel_{i}"):
@@ -2104,6 +2105,9 @@ if dw_uploaded_file and sum_uploaded_file:
                         st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งเดิมในไฟล์")
                     else:
                         for idx_mem, mem in enumerate(st.session_state["new_members_list"]):
+                            if not mem["coord"].strip():
+                                continue
+
                             c_match = re.search(r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", mem["coord"].strip())
                             if not c_match:
                                 continue
@@ -2146,10 +2150,24 @@ if dw_uploaded_file and sum_uploaded_file:
 
                                 test_trip_dist = 0.0
                                 temp_route_segments = []
+                                
+                                # คำนวณเส้นทางถนนจริงเพื่อไปหาพิกัดสมาชิกใหม่และจากสมาชิกใหม่ไปพิกัดถัดไป
+                                # จุดก่อนหน้า -> พิกัดสมาชิกใหม่
+                                path_to_new, d_to_new = get_osrm_route(closest_rec['lat'], closest_rec['lng'], p_lat, p_lng)
+                                
+                                # พิกัดสมาชิกใหม่ -> จุดถัดไป (หรือกลับคลังหากเป็นจุดสุดท้าย)
+                                next_lat, next_lng = warehouse_coord[0], warehouse_coord[1]
+                                if target_cust_idx_in_trip + 1 < len(valid_pts_trip):
+                                    next_rec = valid_pts_trip[target_cust_idx_in_trip + 1]
+                                    next_lat, next_lng = next_rec['lat'], next_rec['lng']
+
+                                path_from_new, d_from_new = get_osrm_route(p_lat, p_lng, next_lat, next_lng)
+
+                                temp_route_segments = path_to_new + path_from_new
+
                                 for i in range(len(test_coords) - 1):
-                                    r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
+                                    _, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
                                     test_trip_dist += d
-                                    temp_route_segments.extend(r_path)
 
                                 add_dist = test_trip_dist - orig_trip_dist
                                 badge_label = f"N{idx_mem + 1}"
@@ -2186,7 +2204,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 })
                             st.dataframe(pd.DataFrame(summary_table_data), use_container_width=True, hide_index=True)
 
-                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิม พร้อมตำแหน่งสมาชิกใหม่และสัญลักษณ์คู่ N1, N2...")
+                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิม พร้อมตำแหน่งสมาชิกใหม่และเส้นทางเชื่อมโยง (สีส้มอมน้ำตาล นุ่มนวลสบายตา)")
 
                             existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
                             new_points_json = json.dumps(processed_new_points, ensure_ascii=False)
@@ -2233,6 +2251,12 @@ if dw_uploaded_file and sum_uploaded_file:
                                         border: 2px solid #ffffff;
                                         display: inline-block;
                                         text-align: center; font-size: 9px; line-height: 12px; color: white;
+                                    }}
+                                    .legend-line-new {{
+                                        width: 24px; height: 4px;
+                                        background-color: #E07A5F;
+                                        display: inline-block;
+                                        border-radius: 2px;
                                     }}
 
                                     .new-member-container {{
@@ -2352,8 +2376,9 @@ if dw_uploaded_file and sum_uploaded_file:
                             <body>
                                 <div class="map-legend-box">
                                     <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
-                                    <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ (✦ พร้อมป้าย N1, N2...)</div>
-                                    <div class="legend-pill"><span class="legend-dot-prev">#</span> จุดเชื่อมต่อที่มีป้าย N1, N2... ที่มุมบนขวา เพื่อบอกคู่จับคู่</div>
+                                    <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ (✦ ป้าย N1, N2...)</div>
+                                    <div class="legend-pill"><span class="legend-line-new"></span> เส้นทางเข้า-ออก สมาชิกใหม่ (ส้ม Terracotta สบายตา)</div>
+                                    <div class="legend-pill"><span class="legend-dot-prev">#</span> จุดเชื่อมต่อเดิม</div>
                                     <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป</div>
                                 </div>
 
@@ -2432,8 +2457,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                                 <b>แทรกต่อจาก:</b> ${{np.insert_after}}
                                             </div>`, {{direction: 'top', opacity: 0.95}});
 
+                                        # วาดเส้นทางเชื่อมโยงสำหรับสมาชิกใหม่ด้วยสีส้ม Terracotta สบายตา (#E07A5F)
                                         if(np.route_path && np.route_path.length > 0) {{
-                                            L.polyline(np.route_path, {{color: '#00d2ff', weight: 4, opacity: 0.85, dashArray: '6, 6'}}).addTo(map3);
+                                            L.polyline(np.route_path, {{color: '#E07A5F', weight: 5, opacity: 0.9, dashArray: '6, 6'}}).addTo(map3);
                                         }}
                                         boundsArr.push([np.lat, np.lng]);
                                     }});
@@ -2447,7 +2473,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             st.components.v1.html(map_tab3_multi_html, height=650, scrolling=False)
 
                         else:
-                            st.warning("⚠️ ไม่สามารถคำนวณตำแหน่งพิกัดสมาชิกใหม่ได้ กรุณาตรวจสอบรูปแบบพิกัดอีกครั้ง")
+                            st.warning("⚠️ กรุณากรอกค่าพิกัดสมาชิกใหม่อย่างน้อย 1 รายการ และกดปุ่มคำนวณอีกครั้ง")
 
 else:
     st.info(
