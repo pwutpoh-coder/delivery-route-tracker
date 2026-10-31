@@ -1869,20 +1869,20 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
-                    function resetOptAnimation() {
+                    function resetOptAnimation() {{
                         pauseAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }
+                    }}
 
-                    function onOptSliderChange(val) {
+                    function onOptSliderChange(val) {{
                         pauseAnimation();
                         updateOptStep(parseInt(val));
-                    }
+                    }}
 
-                    if (optSegments.length > 0) { updateOptStep(0); }
+                    if (optSegments.length > 0) {{ updateOptStep(0); }}
                 </script>
             </body>
             </html>
