@@ -46,7 +46,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ปรับหัวข้อหลักแอปพลิเคชันให้เป็นขนาด H3 ตามต้องการ
 st.markdown(
     "### 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
 )
@@ -80,7 +79,6 @@ warehouse_options = {
 }
 
 
-# --- FUNCTION: แปลงรหัสรถขนส่งเป็นคลังสินค้าอัตโนมัติจากเลข 2 ตัวแรก ---
 def get_auto_warehouse_by_truck(truck_no):
     prefix_map = {
         "16": "สาขากรุงเทพกรีฑา",
@@ -109,7 +107,6 @@ def get_auto_warehouse_by_truck(truck_no):
     return None
 
 
-# --- PARSER: ประมวลผลไฟล์ Excel 2 ไฟล์ ---
 def parse_dual_excel_data(dw_file, sum_file):
     header_info = {"date": "ไม่ระบุ", "truck_no": "ไม่ระบุ"}
 
@@ -474,7 +471,6 @@ def parse_dual_excel_data(dw_file, sum_file):
     return df, trip_quotas, header_info
 
 
-# --- MAIN APP INTERFACE ---
 st.markdown("#### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
 st.markdown(
     "🔗 **ลิงก์สำหรับดาวน์โหลดรายงานต้นทาง:**\n"
@@ -567,7 +563,6 @@ play_mode = st.sidebar.radio(
     ),
 )
 
-# เปลี่ยนชื่อข้อความแถบปรับความเร็วการจำลองให้เข้าใจง่ายและเป็นมืออาชีพ
 anim_speed_ms = st.sidebar.slider(
     "ระยะเวลาหน่วงต่อจุดในการจำลอง (มิลลิวินาที/จุด)",
     min_value=100,
@@ -577,7 +572,6 @@ anim_speed_ms = st.sidebar.slider(
 )
 
 
-# --- FUNCTION: Haversine Distance ---
 def haversine(lat1, lon1, lat2, lon2):
     r = 6371
     dlat = radians(lat2 - lat1)
@@ -589,7 +583,6 @@ def haversine(lat1, lon1, lat2, lon2):
     return 2 * r * asin(sqrt(a))
 
 
-# --- FUNCTION: แปลงเวลาเป็นนาทีสำหรับเทียบช่วงเวลา ---
 def time_to_mins(t_str):
     try:
         t_clean = re.sub(r"[^\d:]", "", str(t_str))
@@ -601,7 +594,6 @@ def time_to_mins(t_str):
     return 0
 
 
-# --- FUNCTION: ดึงเส้นทางถนนจริงและระยะทางจาก OSRM ---
 @st.cache_data(show_spinner=False)
 def get_osrm_route(p1_lat, p1_lng, p2_lat, p2_lng):
     url = f"http://router.project-osrm.org/route/v1/driving/{p1_lng},{p1_lat};{p2_lng},{p2_lat}?overview=full&geometries=geojson"
@@ -973,7 +965,8 @@ if dw_uploaded_file and sum_uploaded_file:
                 t_name = f"เที่ยวที่ {t_info['trip_no']}"
                 trip_filter_buttons += f'<button class="filter-btn" id="btn-trip{t_info["trip_no"]}" onclick="setTripFilter(\'{t_name}\')">{t_name}</button>\n'
 
-            map_html = f"""
+            # แก้ไขโดยใช้ string ปกติ แล้วแทนที่ตัวแปรด้วย .replace() แทน f-string เพื่อป้องกัน SyntaxError
+            map_html = """
             <!DOCTYPE html>
             <html>
             <head>
@@ -981,9 +974,9 @@ if dw_uploaded_file and sum_uploaded_file:
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                 <style>
-                    #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                    #map { width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
                     
-                    #top-active-banner {{
+                    #top-active-banner {
                         background: linear-gradient(135deg, #2c3e50, #34495e);
                         color: white;
                         padding: 10px 16px;
@@ -992,33 +985,33 @@ if dw_uploaded_file and sum_uploaded_file:
                         font-family: sans-serif;
                         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                         border-left: 6px solid #5dade2;
-                    }}
+                    }
                     
-                    .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
-                    button {{ padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }}
-                    button:hover {{ background-color: #005f73; transform: scale(1.02); }}
+                    .controls { margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+                    button { padding: 8px 16px; background-color: #008CBA; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; transition: 0.2s; }
+                    button:hover { background-color: #005f73; transform: scale(1.02); }
                     
-                    .filter-bar {{ margin-bottom: 8px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }}
-                    .filter-btn {{ padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
-                    .filter-btn:hover {{ background-color: #cfd8dc; }}
-                    .filter-btn.active {{ background-color: #2c3e50; color: white; }}
+                    .filter-bar { margin-bottom: 8px; font-family: sans-serif; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: #f1f4f9; padding: 8px 12px; border-radius: 6px; }
+                    .filter-btn { padding: 5px 12px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }
+                    .filter-btn:hover { background-color: #cfd8dc; }
+                    .filter-btn.active { background-color: #2c3e50; color: white; }
 
-                    .status-filter-btn {{ padding: 4px 10px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 4px; }}
-                    .status-filter-btn:hover {{ background-color: #d5dbdb; opacity: 0.9; }}
-                    .status-filter-btn.active {{ background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }}
+                    .status-filter-btn { padding: 4px 10px; background-color: #e0e0e0; color: #333; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; display: inline-flex; align-items: center; gap: 4px; }
+                    .status-filter-btn:hover { background-color: #d5dbdb; opacity: 0.9; }
+                    .status-filter-btn.active { background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }
 
-                    .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
-                    .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; }}
+                    .timeline-container { width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }
+                    .timeline-slider { flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; }
                     
-                    #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
-                    .legend {{ display: flex; gap: 12px; margin-bottom: 6px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }}
-                    .legend-item {{ display: flex; align-items: center; gap: 4px; }}
-                    .color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                    #info-box { margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }
+                    .legend { display: flex; gap: 12px; margin-bottom: 6px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }
+                    .legend-item { display: flex; align-items: center; gap: 4px; }
+                    .color-box { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
                     
-                    .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
-                    .marker-container {{ position: relative; width: 28px; height: 28px; }}
+                    .leaflet-div-icon { background: transparent !important; border: none !important; }
+                    .marker-container { position: relative; width: 28px; height: 28px; }
 
-                    .number-icon {{
+                    .number-icon {
                         color: #FFFFFF !important;
                         border: 2px solid #FFFFFF !important;
                         border-radius: 50% !important;
@@ -1033,53 +1026,53 @@ if dw_uploaded_file and sum_uploaded_file:
                         align-items: center !important;
                         justify-content: center !important;
                         box-sizing: border-box !important;
-                    }}
+                    }
 
-                    .number-icon-active {{
+                    .number-icon-active {
                         transform: scale(1.6) !important;
                         z-index: 9999 !important;
                         border: 2px solid #FFFFFF !important;
                         box-shadow: 0 0 16px #FFD700, 0 4px 12px rgba(0,0,0,0.9) !important;
-                    }}
+                    }
 
-                    .marker-badge-late {{
+                    .marker-badge-late {
                         position: absolute; top: -6px; right: -8px;
                         background-color: #D32F2F; color: white; border: 1.5px solid white;
                         border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                         display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
-                    .marker-badge-gps {{
+                    }
+                    .marker-badge-gps {
                         position: absolute; top: -6px; left: -8px;
                         background-color: #FF9800; color: white; border: 1.5px solid white;
                         border-radius: 50%; width: 15px; height: 15px; font-size: 9px;
                         display: flex; align-items: center; justify-content: center; z-index: 20;
-                    }}
-                    .marker-badge-extra {{
+                    }
+                    .marker-badge-extra {
                         position: absolute; bottom: -4px; right: -6px;
                         background-color: #8E44AD; color: white; border: 1px solid white;
                         border-radius: 3px; padding: 0 2px; font-size: 8px; font-weight: bold; z-index: 20;
-                    }}
-                    .marker-badge-new {{
+                    }
+                    .marker-badge-new {
                         position: absolute; bottom: -4px; left: -6px;
                         background-color: #2980B9; color: white; border: 1px solid white;
                         border-radius: 3px; padding: 0 2px; font-size: 8px; font-weight: bold; z-index: 20;
-                    }}
-                    .marker-badge-reason {{
+                    }
+                    .marker-badge-reason {
                         position: absolute; top: 50%; left: -14px; transform: translateY(-50%);
                         background-color: #C0392B; color: white; border: 1px solid white;
                         border-radius: 3px; padding: 0 2px; font-size: 7px; font-weight: bold; z-index: 20;
-                    }}
-                    .alert-badge {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }}
+                    }
+                    .alert-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; color: white; margin-left: 4px; }
                 </style>
             </head>
             <body>
                 <div class="legend">
-                    {legend_html_items}
+                    __LEGEND_ITEMS__
                 </div>
 
                 <div class="filter-bar">
                     <span style="font-weight:bold; font-size:13px;">🔍 Filter Trip:</span>
-                    {trip_filter_buttons}
+                    __TRIP_FILTER_BUTTONS__
                 </div>
 
                 <div class="filter-bar" style="background: #faf2f2;">
@@ -1100,7 +1093,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="timeline-container">
                     <span style="font-weight:bold; font-size:13px;">⏱️ Timeline:</span>
-                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
+                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="__MAX_SEG__" value="0" oninput="onSliderChange(this.value)">
                     <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:260px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - Point 1</span>
                 </div>
 
@@ -1113,28 +1106,28 @@ if dw_uploaded_file and sum_uploaded_file:
                 <div id="info-box">📍 <b>Status</b>: Click "Play" to view real-time delivery tracking.</div>
 
                 <script>
-                    const points = {points_json};
-                    const segments = {segments_json};
-                    const warehouse = {wh_json};
-                    let currentSpeedMs = {anim_speed_ms};
-                    const isMode1 = {str(is_mode_1).lower()};
+                    const points = __POINTS_JSON__;
+                    const segments = __SEGMENTS_JSON__;
+                    const warehouse = __WH_JSON__;
+                    let currentSpeedMs = __ANIM_SPEED__;
+                    const isMode1 = __IS_MODE_1__;
 
                     let currentFilter = 'ALL';
                     let currentStatusFilter = null;
 
                     const map = L.map('map').setView([warehouse[0], warehouse[1]], 13);
-                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                         attribution: '© OpenStreetMap contributors'
-                    }}).addTo(map);
+                    }).addTo(map);
 
-                    const warehouseIcon = L.divIcon({{
+                    const warehouseIcon = L.divIcon({
                         className: '',
-                        html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:30px; height:30px; text-align:center; font-size:14px; line-height:26px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;" title="กลับถึงคลังสินค้า">🏢</div>`,
+                        html: '<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:30px; height:30px; text-align:center; font-size:14px; line-height:26px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;" title="กลับถึงคลังสินค้า">🏢</div>',
                         iconSize: [30, 30], iconAnchor: [15, 15]
-                    }});
+                    });
 
-                    let warehouseMarker = L.marker(warehouse, {{icon: warehouseIcon}}).addTo(map)
-                        .bindTooltip("🏢 คลังสินค้าหลัก (Warehouse)", {{permanent: false, direction: 'top'}});
+                    let warehouseMarker = L.marker(warehouse, {icon: warehouseIcon}).addTo(map)
+                        .bindTooltip("🏢 คลังสินค้าหลัก (Warehouse)", {permanent: false, direction: 'top'});
 
                     let allMarkers = [];
                     let activePolylines = [];
@@ -1143,16 +1136,16 @@ if dw_uploaded_file and sum_uploaded_file:
                     let isPlaying = false;
                     let activeMarkerRef = null;
 
-                    function hasReasonStartsWithNot(pt) {{
+                    function hasReasonStartsWithNot(pt) {
                         let r = pt.short_reason_col || '';
                         return r.startsWith('ไม่');
-                    }}
+                    }
 
-                    function pointMatchesFilter(pt) {{
+                    function pointMatchesFilter(pt) {
                         if (pt.is_warehouse) return true;
                         if (pt.lat === 0.0 || pt.lng === 0.0) return false;
                         if (currentFilter !== 'ALL' && pt.trip !== currentFilter) return false;
-                        if (currentStatusFilter !== null) {{
+                        if (currentStatusFilter !== null) {
                             let onTimeCol = pt.on_time_col || '';
                             let isLate = onTimeCol.includes("ไม่ตรงเวลา");
                             let isGps = (pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100);
@@ -1165,176 +1158,176 @@ if dw_uploaded_file and sum_uploaded_file:
                             if (currentStatusFilter === 'reason' && !isReasonNot) return false;
                             if (currentStatusFilter === 'extra' && !isExtra) return false;
                             if (currentStatusFilter === 'new' && !isNew) return false;
-                        }}
+                        }
                         return true;
-                    }}
+                    }
 
-                    function updateStatusCounts() {{
-                        let counts = {{ late: 0, gps: 0, reason: 0, extra: 0, new: 0 }};
-                        points.forEach(pt => {{
-                            if (!pt.is_warehouse && pt.lat !== 0.0 && pt.lng !== 0.0 && (currentFilter === 'ALL' || pt.trip === currentFilter)) {{
+                    function updateStatusCounts() {
+                        let counts = { late: 0, gps: 0, reason: 0, extra: 0, new: 0 };
+                        points.forEach(pt => {
+                            if (!pt.is_warehouse && pt.lat !== 0.0 && pt.lng !== 0.0 && (currentFilter === 'ALL' || pt.trip === currentFilter)) {
                                 let onTimeCol = pt.on_time_col || '';
                                 if (onTimeCol.includes("ไม่ตรงเวลา")) counts.late++;
                                 if ((pt.lat !== 0.0 && pt.lng !== 0.0) && ((pt.gps_diff_num || parseFloat(pt.gps_diff || 0)) > 100)) counts.gps++;
                                 if (hasReasonStartsWithNot(pt)) counts.reason++;
                                 if (pt.is_extra_trip || onTimeCol.includes("รอบเสริม")) counts.extra++;
                                 if (pt.is_new_member || onTimeCol.includes("สมาชิกใหม่")) counts.new++;
-                            }}
-                        }});
+                            }
+                        });
                         document.getElementById('count-late').innerText = counts.late;
                         document.getElementById('count-gps').innerText = counts.gps;
                         document.getElementById('count-reason').innerText = counts.reason;
                         document.getElementById('count-extra').innerText = counts.extra;
                         document.getElementById('count-new').innerText = counts.new;
-                    }}
+                    }
 
-                    function createTooltipHtml(info, seqNum) {{
-                        if (info.is_warehouse) {{
-                            return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                <b>🏢 คลังสินค้าหลัก (${{info.trip}}) - กลับถึงสาขา</b><br>
-                                <b>สถานะ:</b> รถกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย เพื่อเตรียมไปเที่ยวอื่นต่อ<br>
-                                <b>ยอดสะสมรวม:</b> ${{info.acc_qty}} ถัง
-                            </div>`;
-                        }}
+                    function createTooltipHtml(info, seqNum) {
+                        if (info.is_warehouse) {
+                            return '<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">' +
+                                '<b>🏢 คลังสินค้าหลัก (' + info.trip + ') - กลับถึงสาขา</b><br>' +
+                                '<b>สถานะ:</b> รถกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย เพื่อเตรียมไปเที่ยวอื่นต่อ<br>' +
+                                '<b>ยอดสะสมรวม:</b> ' + info.acc_qty + ' ถัง' +
+                            '</div>';
+                        }
                         let badgesHtml = [];
                         let onTimeVal = info.on_time_col || 'จัดส่งตรงเวลา';
-                        if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push(`<span class="alert-badge" style="background:#D32F2F;">${{onTimeVal}}</span>`);
-                        else badgesHtml.push(`<span class="alert-badge" style="background:#4CAF50;">${{onTimeVal}}</span>`);
+                        if (onTimeVal.includes("ไม่ตรงเวลา")) badgesHtml.push('<span class="alert-badge" style="background:#D32F2F;">' + onTimeVal + '</span>');
+                        else badgesHtml.push('<span class="alert-badge" style="background:#4CAF50;">' + onTimeVal + '</span>');
                         
-                        if (info.lat !== 0.0 && info.lng !== 0.0 && (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push(`<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>`);
-                        if (hasReasonStartsWithNot(info)) badgesHtml.push(`<span class="alert-badge" style="background:#C0392B;">ขาดส่ง: ${{info.short_reason_col}}</span>`);
+                        if (info.lat !== 0.0 && info.lng !== 0.0 && (info.gps_diff_num || parseFloat(info.gps_diff || 0)) > 100) badgesHtml.push('<span class="alert-badge" style="background:#FF9800;">GPS>100m</span>');
+                        if (hasReasonStartsWithNot(info)) badgesHtml.push('<span class="alert-badge" style="background:#C0392B;">ขาดส่ง: ' + info.short_reason_col + '</span>');
 
                         let addrInfo = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '';
-                        let fullAddressText = addrInfo ? `<br><b>ที่อยู่:</b> ${{addrInfo}}` : '';
+                        let fullAddressText = addrInfo ? '<br><b>ที่อยู่:</b> ' + addrInfo : '';
 
-                        return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
-                            <b>📍 จุดที่ ${{seqNum}} (${{info.trip}})</b><br>
-                            ${{badgesHtml.join(' ')}}<br>
-                            <b>เวลา:</b> ${{info.time}}<br>
-                            <b>ลูกค้า:</b> ${{info.cust_id}} (${{info.cust_name || '-'}})` +
-                            fullAddressText + `<br>
-                            <b>ยอดส่ง:</b> ${{info.qty}} ถัง
-                        </div>`;
-                    }}
+                        return '<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">' +
+                            '<b>📍 จุดที่ ' + seqNum + ' (' + info.trip + ')</b><br>' +
+                            badgesHtml.join(' ') + '<br>' +
+                            '<b>เวลา:</b> ' + info.time + '<br>' +
+                            '<b>ลูกค้า:</b> ' + info.cust_id + ' (' + (info.cust_name || '-') + ')' +
+                            fullAddressText + '<br>' +
+                            '<b>ยอดส่ง:</b> ' + info.qty + ' ถัง' +
+                        '</div>';
+                    }
 
-                    function createMarkerIcon(seqNum, color, ptInfo) {{
-                        if (ptInfo && ptInfo.is_warehouse) {{
-                            return L.divIcon({{
+                    function createMarkerIcon(seqNum, color, ptInfo) {
+                        if (ptInfo && ptInfo.is_warehouse) {
+                            return L.divIcon({
                                 className: '',
-                                html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:28px; height:28px; text-align:center; font-size:14px; line-height:24px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;" title="กลับถึงคลังสินค้า">🏢</div>`,
+                                html: '<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:28px; height:28px; text-align:center; font-size:14px; line-height:24px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;" title="กลับถึงคลังสินค้า">🏢</div>',
                                 iconSize: [28, 28], iconAnchor: [14, 14]
-                            }});
-                        }}
+                            });
+                        }
                         let onTimeVal = ptInfo && ptInfo.on_time_col ? ptInfo.on_time_col : '';
                         let isLate = onTimeVal.includes("ไม่ตรงเวลา");
                         let isGpsDiff = ptInfo && (ptInfo.lat !== 0.0 && ptInfo.lng !== 0.0) && ((ptInfo.gps_diff_num || parseFloat(ptInfo.gps_diff || 0)) > 100);
                         let isReasonNot = ptInfo && hasReasonStartsWithNot(ptInfo);
                         
-                        let lateBadgeHtml = isLate ? `<div class="marker-badge-late">!</div>` : '';
-                        let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps">G</div>` : '';
-                        let reasonBadgeHtml = isReasonNot ? `<div class="marker-badge-reason" title="${{ptInfo.short_reason_col}}">ไม่</div>` : '';
-                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
-                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
+                        let lateBadgeHtml = isLate ? '<div class="marker-badge-late">!</div>' : '';
+                        let gpsBadgeHtml = isGpsDiff ? '<div class="marker-badge-gps">G</div>' : '';
+                        let reasonBadgeHtml = isReasonNot ? '<div class="marker-badge-reason" title="' + ptInfo.short_reason_col + '">ไม่</div>' : '';
+                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? '<div class="marker-badge-extra">เสริม</div>' : '';
+                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? '<div class="marker-badge-new">ใหม่</div>' : '';
 
-                        let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
-                        return L.divIcon({{ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
-                    }}
+                        let innerHtml = '<div class="marker-container">' + lateBadgeHtml + gpsBadgeHtml + reasonBadgeHtml + extraBadgeHtml + newBadgeHtml + '<div class="number-icon" style="background-color: ' + (color || '#008CBA') + ' !important;">' + seqNum + '</div></div>';
+                        return L.divIcon({ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] });
+                    }
 
-                    function initMarkers() {{
+                    function initMarkers() {
                         allMarkers.forEach(m => map.removeLayer(m));
                         allMarkers = [];
-                        segments.forEach((seg, idx) => {{
+                        segments.forEach((seg, idx) => {
                             let pt = seg.info;
-                            if (pt && pointMatchesFilter(pt)) {{
+                            if (pt && pointMatchesFilter(pt)) {
                                 let seqNumber = idx + 1;
                                 let customIcon = createMarkerIcon(seqNumber, seg.color, pt);
-                                let marker = L.marker(pt.is_warehouse ? warehouse : [pt.lat, pt.lng], {{ icon: customIcon }});
+                                let marker = L.marker(pt.is_warehouse ? warehouse : [pt.lat, pt.lng], { icon: customIcon });
                                 
-                                if (!isMode1 && idx > currentStep) {{
+                                if (!isMode1 && idx > currentStep) {
                                     // ซ่อนไว้ก่อน
-                                }} else {{
+                                } else {
                                     marker.addTo(map);
-                                }}
+                                }
                                 
-                                marker.bindTooltip(createTooltipHtml(pt, seqNumber), {{ direction: 'top', opacity: 0.95 }});
+                                marker.bindTooltip(createTooltipHtml(pt, seqNumber), { direction: 'top', opacity: 0.95 });
                                 allMarkers[idx] = marker;
-                            }}
-                        }});
+                            }
+                        });
                         updateStatusCounts();
-                    }}
+                    }
 
                     initMarkers();
 
-                    function setTripFilter(filterName) {{
+                    function setTripFilter(filterName) {
                         pauseAnimation();
                         currentFilter = filterName;
                         
-                        document.querySelectorAll('.filter-btn').forEach(el => {{
-                            if (el.id.startsWith('btn-trip') || el.id === 'btn-all') {{
+                        document.querySelectorAll('.filter-btn').forEach(el => {
+                            if (el.id.startsWith('btn-trip') || el.id === 'btn-all') {
                                 el.classList.remove('active');
-                            }}
-                        }});
+                            }
+                        });
                         
-                        if (filterName === 'ALL') {{
+                        if (filterName === 'ALL') {
                             let btnAll = document.getElementById('btn-all');
                             if (btnAll) btnAll.classList.add('active');
-                        }} else {{
-                            document.querySelectorAll('.filter-btn').forEach(el => {{
-                                if (el.innerText === filterName) {{
+                        } else {
+                            document.querySelectorAll('.filter-btn').forEach(el => {
+                                if (el.innerText === filterName) {
                                     el.classList.add('active');
-                                }}
-                            }});
-                        }}
+                                }
+                            });
+                        }
 
                         initMarkers();
                         let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
-                        if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
-                    }}
+                        if (firstMatchIdx !== -1) { currentStep = firstMatchIdx; updateStep(currentStep); }
+                    }
 
-                    function setStatusFilter(statusKey) {{
+                    function setStatusFilter(statusKey) {
                         pauseAnimation();
                         currentStatusFilter = (currentStatusFilter === statusKey) ? null : statusKey;
-                        ['late', 'gps', 'reason', 'extra', 'new'].forEach(k => {{
+                        ['late', 'gps', 'reason', 'extra', 'new'].forEach(k => {
                             let btn = document.getElementById('status-btn-' + k);
-                            if (btn) {{
+                            if (btn) {
                                 if (k === currentStatusFilter) btn.classList.add('active');
                                 else btn.classList.remove('active');
-                            }}
-                        }});
+                            }
+                        });
                         initMarkers();
                         let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
-                        if (firstMatchIdx !== -1) {{ currentStep = firstMatchIdx; updateStep(currentStep); }}
-                    }}
+                        if (firstMatchIdx !== -1) { currentStep = firstMatchIdx; updateStep(currentStep); }
+                    }
 
-                    function highlightMarkerByInfo(stepIdx) {{
-                        if (activeMarkerRef) {{
-                            if (activeMarkerRef._icon) {{
+                    function highlightMarkerByInfo(stepIdx) {
+                        if (activeMarkerRef) {
+                            if (activeMarkerRef._icon) {
                                 let innerDiv = activeMarkerRef._icon.querySelector('.number-icon');
                                 if (innerDiv) innerDiv.classList.remove('number-icon-active');
-                            }}
-                        }}
+                            }
+                        }
                         activeMarkerRef = null;
                         let target = allMarkers[stepIdx];
-                        if (target) {{
-                            if (target._icon) {{
+                        if (target) {
+                            if (target._icon) {
                                 let innerDiv = target._icon.querySelector('.number-icon');
                                 if (innerDiv) innerDiv.classList.add('number-icon-active');
-                            }}
+                            }
                             if (target.setZIndexOffset) target.setZIndexOffset(10000);
                             activeMarkerRef = target;
-                        }}
-                    }}
+                        }
+                    }
 
-                    function updateStep(stepIndex) {{
+                    function updateStep(stepIndex) {
                         if (stepIndex < 0 || stepIndex >= segments.length) return;
                         currentStep = stepIndex;
                         let currentSeg = segments[currentStep];
                         let info = currentSeg.info;
 
-                        if (!pointMatchesFilter(info)) {{
+                        if (!pointMatchesFilter(info)) {
                             let nextValid = segments.findIndex((seg, idx) => idx >= currentStep && pointMatchesFilter(seg.info));
-                            if (nextValid !== -1) {{ currentStep = nextValid; currentSeg = segments[currentStep]; info = currentSeg.info; }}
-                        }}
+                            if (nextValid !== -1) { currentStep = nextValid; currentSeg = segments[currentStep]; info = currentSeg.info; }
+                        }
 
                         let slider = document.getElementById('timeSlider');
                         slider.value = currentStep;
@@ -1344,115 +1337,121 @@ if dw_uploaded_file and sum_uploaded_file:
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let stepNumText = currentStep + 1;
 
-                        if (info.is_warehouse) {{
-                            document.getElementById('top-banner-content').innerHTML = `
-                                จุดที่ <span style="color:#5dade2; font-size:14px;">${{stepNumText}}</span> (${{tripLabel}}) | 🏢 <span style="color:#ffffff;">กลับถึงคลังสินค้าหลัก (เตรียมไปเที่ยวอื่นต่อ)</span> | ยอดสะสมรวม: <span style="color:#f39c12;">${{info.acc_qty}} ถัง</span>
-                            `;
-                            document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripLabel}}</span> - <span style="color:#5dade2;">กลับถึงคลัง</span>`;
-                        }} else {{
-                            document.getElementById('top-banner-content').innerHTML = `
-                                จุดที่ <span style="color:#5dade2; font-size:14px;">${{stepNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#ffffff;">${{info.cust_id}} (${{info.cust_name}})</span> | ยอดส่ง: <span style="color:#f39c12;">${{info.qty}} ถัง</span> | สะสม: <span style="color:#5dade2;">${{info.acc_qty}} ถัง</span>
-                            `;
-                            document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#5dade2;">${{info.cust_id}}</span> (จุด ${{stepNumText}})`;
-                        }}
+                        if (info.is_warehouse) {
+                            document.getElementById('top-banner-content').innerHTML = 
+                                'จุดที่ <span style="color:#5dade2; font-size:14px;">' + stepNumText + '</span> (' + tripLabel + ') | 🏢 <span style="color:#ffffff;">กลับถึงคลังสินค้าหลัก (เตรียมไปเที่ยวอื่นต่อ)</span> | ยอดสะสมรวม: <span style="color:#f39c12;">' + info.acc_qty + ' ถัง</span>';
+                            document.getElementById('slider-label').innerHTML = '<span style="color:' + currentSeg.color + '; font-weight:bold;">' + tripLabel + '</span> - <span style="color:#5dade2;">กลับถึงคลัง</span>';
+                        } else {
+                            document.getElementById('top-banner-content').innerHTML = 
+                                'จุดที่ <span style="color:#5dade2; font-size:14px;">' + stepNumText + '</span> (' + tripLabel + ') | เวลา: <b>' + timeLabel + '</b> | ลูกค้า: <span style="color:#ffffff;">' + info.cust_id + ' (' + info.cust_name + ')</span> | ยอดส่ง: <span style="color:#f39c12;">' + info.qty + ' ถัง</span> | สะสม: <span style="color:#5dade2;">' + info.acc_qty + ' ถัง</span>';
+                            document.getElementById('slider-label').innerHTML = '<span style="color:' + currentSeg.color + '; font-weight:bold;">' + timeLabel + '</span> - <span style="color:#5dade2;">' + info.cust_id + '</span> (จุด ' + stepNumText + ')';
+                        }
 
                         activePolylines.forEach(p => map.removeLayer(p));
                         activePolylines = [];
 
                         let accumulatedDistance = 0.0;
-                        for (let i = 0; i <= currentStep; i++) {{
+                        for (let i = 0; i <= currentStep; i++) {
                             let seg = segments[i];
                             if (!pointMatchesFilter(seg.info)) continue;
                             accumulatedDistance += (seg.dist_km || 0.0);
-                            if (seg.path && seg.path.length > 0) {{
-                                let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(map);
+                            if (seg.path && seg.path.length > 0) {
+                                let polyline = L.polyline(seg.path, { color: seg.color, weight: 5, opacity: 0.85 }).addTo(map);
                                 activePolylines.push(polyline);
-                            }}
-                        }}
+                            }
+                        }
 
-                        if (!isMode1) {{
-                            allMarkers.forEach((marker, mIdx) => {{
-                                if (marker) {{
+                        if (!isMode1) {
+                            allMarkers.forEach((marker, mIdx) => {
+                                if (marker) {
                                     let ptInfo = segments[mIdx].info;
                                     let matches = pointMatchesFilter(ptInfo);
-                                    if (matches && mIdx <= currentStep) {{
+                                    if (matches && mIdx <= currentStep) {
                                         if (!map.hasLayer(marker)) marker.addTo(map);
-                                    }} else {{
+                                    } else {
                                         if (map.hasLayer(marker)) map.removeLayer(marker);
-                                    }}
-                                }}
-                            }});
-                        }}
+                                    }
+                                }
+                            });
+                        }
 
                         highlightMarkerByInfo(currentStep);
 
-                        if (info.is_warehouse) {{
-                            document.getElementById('info-box').innerHTML = `
-                                <b>🚛 ${{tripLabel}} | กลับถึงคลังสินค้าหลัก (จุดที่ ${{stepNumText}} / ${{segments.length}})</b><br>
-                                <b>🏢 สถานะ:</b> รถขนส่งเดินทางกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย พร้อมสำหรับจัดสรรเที่ยววิ่งถัดไป | <b>📦 ยอดสะสมรวม:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.acc_qty}} ถัง</span>
-                            `;
-                        }} else {{
+                        if (info.is_warehouse) {
+                            document.getElementById('info-box').innerHTML = 
+                                '<b>🚛 ' + tripLabel + ' | กลับถึงคลังสินค้าหลัก (จุดที่ ' + stepNumText + ' / ' + segments.length + ')</b><br>' +
+                                '<b>🏢 สถานะ:</b> รถขนส่งเดินทางกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย พร้อมสำหรับจัดสรรเที่ยววิ่งถัดไป | <b>📦 ยอดสะสมรวม:</b> <span style="color:#D32F2F; font-weight:bold;">' + info.acc_qty + ' ถัง</span>';
+                        } else {
                             let addrStr = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '-';
-                            document.getElementById('info-box').innerHTML = `
-                                <b>🚛 ${{tripLabel}} | จุดที่ ${{stepNumText}} จาก ${{segments.length}}</b><br>
-                                <b>🕒 เวลาส่ง:</b> ${{info.time}} | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">${{info.cust_id}} (${{info.cust_name}})</span><br>
-                                <b>🏠 ที่อยู่:</b> ${{addrStr}}<br>
-                                <b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty}} ถัง</span> | <b>📍 พิกัด:</b> ${{info.lat_display}}, ${{info.lng_display}} | <b>📏 GPS Diff:</b> <span style="color:#FF9800; font-weight:bold;">${{info.gps_diff || '0.00'}} ม.</span><br>
-                                <b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">${{info.short_reason_col || '-'}}</span> | <b>📌 สถานะ:</b> <span style="color:#2E7D32; font-weight:bold;">${{info.on_time_col || '-'}}</span>
-                            `;
-                        }}
+                            document.getElementById('info-box').innerHTML = 
+                                '<b>🚛 ' + tripLabel + ' | จุดที่ ' + stepNumText + ' จาก ' + segments.length + '</b><br>' +
+                                '<b>🕒 เวลาส่ง:</b> ' + info.time + ' | <b>👤 ลูกค้า:</b> <span style="color:#0055FF; font-weight:bold;">' + info.cust_id + ' (' + info.cust_name + ')</span><br>' +
+                                '<b>🏠 ที่อยู่:</b> ' + addrStr + '<br>' +
+                                '<b>📦 ยอดส่ง:</b> <span style="color:#D32F2F; font-weight:bold;">' + info.qty + ' ถัง</span> | <b>📍 พิกัด:</b> ' + info.lat_display + ', ' + info.lng_display + ' | <b>📏 GPS Diff:</b> <span style="color:#FF9800; font-weight:bold;">' + (info.gps_diff || '0.00') + ' ม.</span><br>' +
+                                '<b>📝 เหตุขาดส่ง:</b> <span style="color:#C0392B; font-weight:bold;">' + (info.short_reason_col || '-') + '</span> | <b>📌 สถานะ:</b> <span style="color:#2E7D32; font-weight:bold;">' + (info.on_time_col || '-') + '</span>';
+                        }
 
                         let panTarget = info.is_warehouse ? warehouse : [info.lat, info.lng];
                         map.panTo(panTarget);
-                    }}
+                    }
 
-                    function nextStep() {{
+                    function nextStep() {
                         let nextIdx = currentStep + 1;
-                        while (nextIdx < segments.length) {{
+                        while (nextIdx < segments.length) {
                             if (pointMatchesFilter(segments[nextIdx].info)) break;
                             nextIdx++;
-                        }}
-                        if (nextIdx < segments.length) {{
+                        }
+                        if (nextIdx < segments.length) {
                             currentStep = nextIdx;
                             updateStep(currentStep);
-                        }} else {{
+                        } else {
                             pauseAnimation();
                             document.getElementById('status-text').innerText = "🏁 Simulation Completed!";
-                        }}
-                    }}
+                        }
+                    }
 
-                    function startAnimation() {{
+                    function startAnimation() {
                         if (isPlaying) return;
                         isPlaying = true;
                         document.getElementById('status-text').innerText = "▶ Running Simulation...";
                         updateStep(currentStep);
                         animTimer = setInterval(nextStep, currentSpeedMs);
-                    }}
+                    }
 
-                    function pauseAnimation() {{
+                    function pauseAnimation() {
                         isPlaying = false;
-                        if (animTimer) {{ clearInterval(animTimer); animTimer = null; }}
+                        if (animTimer) { clearInterval(animTimer); animTimer = null; }
                         document.getElementById('status-text').innerText = "⏸ Simulation Paused";
-                    }}
+                    }
 
-                    function resetAnimation() {{
+                    function resetAnimation() {
                         pauseAnimation();
                         let firstMatchIdx = segments.findIndex(seg => pointMatchesFilter(seg.info));
                         currentStep = firstMatchIdx !== -1 ? firstMatchIdx : 0;
                         updateStep(currentStep);
                         document.getElementById('status-text').innerText = "🔄 Simulation Reset";
-                    }}
+                    }
 
-                    function onSliderChange(val) {{
+                    function onSliderChange(val) {
                         pauseAnimation();
                         updateStep(parseInt(val));
-                    }}
+                    }
 
-                    if (segments.length > 0) {{ updateStep(0); }}
+                    if (segments.length > 0) { updateStep(0); }
                 </script>
             </body>
             </html>
             """
+
+            # แทรกค่าตัวแปรลงใน HTML แบบปกติ ป้องกันปัญหา SyntaxError
+            map_html = map_html.replace("__LEGEND_ITEMS__", legend_html_items)
+            map_html = map_html.replace("__TRIP_FILTER_BUTTONS__", trip_filter_buttons)
+            map_html = map_html.replace("__MAX_SEG__", str(max(len(segments_data) - 1, 0)))
+            map_html = map_html.replace("__POINTS_JSON__", points_json)
+            map_html = map_html.replace("__SEGMENTS_JSON__", segments_json)
+            map_html = map_html.replace("__WH_JSON__", wh_json)
+            map_html = map_html.replace("__ANIM_SPEED__", str(anim_speed_ms))
+            map_html = map_html.replace("__IS_MODE_1__", str(is_mode_1).lower())
 
             st.components.v1.html(map_html, height=800, scrolling=False)
 
@@ -1688,7 +1687,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 t_color = trip_colors.get(t_name, "#0055FF")
                 opt_legend_items += f'<div style="display:flex; align-items:center; gap:4px;"><span class="opt-color-box" style="background:{t_color};"></span> {t_name}</div>\n'
 
-            opt_map_html = f"""
+            opt_map_html = """
             <!DOCTYPE html>
             <html>
             <head>
@@ -1696,9 +1695,9 @@ if dw_uploaded_file and sum_uploaded_file:
                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                 <style>
-                    #opt-map {{ width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                    #opt-map { width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
                     
-                    #opt-top-banner {{
+                    #opt-top-banner {
                         background: linear-gradient(135deg, #2c3e50, #2980b9);
                         color: white;
                         padding: 10px 16px;
@@ -1707,22 +1706,22 @@ if dw_uploaded_file and sum_uploaded_file:
                         font-family: sans-serif;
                         box-shadow: 0 4px 12px rgba(0,0,0,0.2);
                         border-left: 6px solid #f39c12;
-                    }}
+                    }
                     
-                    .opt-controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
-                    .opt-btn {{ padding: 6px 14px; background-color: #2980b9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }}
-                    .opt-btn:hover {{ background-color: #1f618d; transform: scale(1.02); }}
+                    .opt-controls { margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+                    .opt-btn { padding: 6px 14px; background-color: #2980b9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }
+                    .opt-btn:hover { background-color: #1f618d; transform: scale(1.02); }
 
-                    .opt-timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-family: sans-serif; background: #eef2f5; padding: 6px 10px; border-radius: 6px; box-sizing: border-box; }}
-                    .opt-timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #2980b9; }}
+                    .opt-timeline-container { width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-family: sans-serif; background: #eef2f5; padding: 6px 10px; border-radius: 6px; box-sizing: border-box; }
+                    .opt-timeline-slider { flex-grow: 1; height: 8px; cursor: pointer; accent-color: #2980b9; }
 
-                    .opt-legend {{ display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; align-items: center; flex-wrap: wrap; }}
-                    .opt-color-box {{ width: 12px; height: 12px; border-radius: 3px; display: inline-block; }}
+                    .opt-legend { display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; align-items: center; flex-wrap: wrap; }
+                    .opt-color-box { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
                     
-                    .leaflet-div-icon {{ background: transparent !important; border: none !important; }}
-                    .opt-marker-container {{ position: relative; width: 32px; height: 32px; }}
+                    .leaflet-div-icon { background: transparent !important; border: none !important; }
+                    .opt-marker-container { position: relative; width: 32px; height: 32px; }
 
-                    .opt-number-icon {{
+                    .opt-number-icon {
                         color: #FFFFFF !important;
                         border: 2px solid #FFFFFF !important;
                         border-radius: 50% !important;
@@ -1737,23 +1736,23 @@ if dw_uploaded_file and sum_uploaded_file:
                         align-items: center !important;
                         justify-content: center !important;
                         box-sizing: border-box !important;
-                    }}
+                    }
 
-                    .opt-number-icon-active {{
+                    .opt-number-icon-active {
                         transform: scale(1.6) !important;
                         z-index: 9999 !important;
                         border: 2px solid #FFFFFF !important;
                         box-shadow: 0 0 16px #FFD700, 0 4px 12px rgba(0,0,0,0.9) !important;
-                    }}
+                    }
 
-                    .opt-orig-badge {{
+                    .opt-orig-badge {
                         position: absolute; top: -8px; right: -12px;
                         color: #FFFFFF; border: 1.5px solid white;
                         border-radius: 10px; padding: 0 4px; font-size: 9px; font-weight: bold;
                         box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
                         white-space: nowrap;
-                    }}
-                    #opt-info-box {{ margin-top: 10px; padding: 10px 14px; background: #f8f9fa; border-left: 6px solid #2980b9; font-family: sans-serif; border-radius: 4px; font-size: 13px; line-height: 1.5; color: #333; }}
+                    }
+                    #opt-info-box { margin-top: 10px; padding: 10px 14px; background: #f8f9fa; border-left: 6px solid #2980b9; font-family: sans-serif; border-radius: 4px; font-size: 13px; line-height: 1.5; color: #333; }
                 </style>
             </head>
             <body>
@@ -1763,7 +1762,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 </div>
 
                 <div class="opt-legend">
-                    {opt_legend_items}
+                    __OPT_LEGEND_ITEMS__
                     <div style="margin-left:auto; color:#333; font-size:11px;">📌 Top-Right Badge: <span style="color:#D32F2F; font-weight:bold;">Red = Swapped</span> | <span style="color:#333; font-weight:bold;">Dark = Unchanged</span></div>
                 </div>
 
@@ -1776,7 +1775,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="opt-timeline-container">
                     <span style="font-weight:bold; font-size:12px;">⏱️ Sequence:</span>
-                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="{max(len(opt_segments_data)-1, 0)}" value="0" oninput="onOptSliderChange(this.value)">
+                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="__OPT_MAX_SEG__" value="0" oninput="onOptSliderChange(this.value)">
                     <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:180px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">Point 1</span>
                 </div>
 
@@ -1784,18 +1783,18 @@ if dw_uploaded_file and sum_uploaded_file:
                 <div id="opt-info-box">📍 Click "Play" to simulate the optimized route step-by-step.</div>
 
                 <script>
-                    const optWarehouse = {wh_json};
-                    const optSegments = {opt_segments_json};
-                    const optPointsFlat = {opt_points_json};
-                    let optSpeedMs = {anim_speed_ms};
+                    const optWarehouse = __WH_JSON__;
+                    const optSegments = __OPT_SEGMENTS_JSON__;
+                    const optPointsFlat = __OPT_POINTS_JSON__;
+                    let optSpeedMs = __ANIM_SPEED__;
 
                     const optMap = L.map('opt-map').setView([optWarehouse[0], optWarehouse[1]], 13);
-                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                         attribution: '© OpenStreetMap contributors'
-                    }}).addTo(optMap);
+                    }).addTo(optMap);
 
                     L.marker(optWarehouse).addTo(optMap)
-                        .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
+                        .bindTooltip("🏢 คลังสินค้าหลัก", {permanent: false, direction: 'top'});
 
                     let optMarkers = [];
                     let optActivePolylines = [];
@@ -1804,69 +1803,69 @@ if dw_uploaded_file and sum_uploaded_file:
                     let optIsPlaying = false;
                     let optActiveMarkerRef = null;
 
-                    function initOptMarkers() {{
+                    function initOptMarkers() {
                         optMarkers.forEach(m => optMap.removeLayer(m));
                         optMarkers = [];
-                        optSegments.forEach((seg, idx) => {{
+                        optSegments.forEach((seg, idx) => {
                             let info = seg.info;
-                            if (info && info.cust_id && info.cust_id !== "WH-001" && info.lat !== 0.0 && info.lng !== 0.0) {{
+                            if (info && info.cust_id && info.cust_id !== "WH-001" && info.lat !== 0.0 && info.lng !== 0.0) {
                                 let optSeq = seg.opt_seq;
                                 let origSeq = seg.orig_seq;
                                 let isSwapped = seg.is_swapped;
                                 
                                 let badgeBgColor = isSwapped ? '#D32F2F' : '#333333';
-                                let origBadgeHtml = `<div class="opt-orig-badge" style="background-color: ${{badgeBgColor}};">${{origSeq}}</div>`;
-                                let innerHtml = `<div class="opt-marker-container">${{origBadgeHtml}}<div class="opt-number-icon" style="background-color: ${{seg.color}} !important;">${{optSeq}}</div></div>`;
+                                let origBadgeHtml = '<div class="opt-orig-badge" style="background-color: ' + badgeBgColor + ';">' + origSeq + '</div>';
+                                let innerHtml = '<div class="opt-marker-container">' + origBadgeHtml + '<div class="opt-number-icon" style="background-color: ' + seg.color + ' !important;">' + optSeq + '</div></div>';
                                 
-                                let customIcon = L.divIcon({{
+                                let customIcon = L.divIcon({
                                     className: '',
                                     html: innerHtml,
                                     iconSize: [32, 32], iconAnchor: [16, 16]
-                                }});
+                                });
 
-                                let marker = L.marker([info.lat, info.lng], {{icon: customIcon}});
+                                let marker = L.marker([info.lat, info.lng], {icon: customIcon});
                                 marker.addTo(optMap);
                                 
-                                let addrText = info.shipping_address && info.shipping_address !== '-' ? `<br><b>ที่อยู่:</b> ${{info.shipping_address}}` : '';
+                                let addrText = info.shipping_address && info.shipping_address !== '-' ? '<br><b>ที่อยู่:</b> ' + info.shipping_address : '';
                                 let swapStatusText = isSwapped ? '<span style="color:#D32F2F; font-weight:bold;">🔄 สลับตำแหน่ง</span>' : '<span style="color:#2E7D32; font-weight:bold;">✔️ คงเดิม</span>';
                                 
-                                marker.bindTooltip(`<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">
-                                    <b>📍 Optimized Seq: #${{optSeq}}</b><br>
-                                    <b>Original Seq:</b> #${{origSeq}} (${{swapStatusText}})<br>
-                                    <b>Customer ID:</b> ${{info.cust_id}} (${{info.cust_name}})` + addrText + `<br>
-                                    <b>Trip:</b> ${{seg.trip}}<br>
-                                    <b>Qty:</b> ${{info.qty}} ถัง
-                                </div>`, {{direction: 'top', opacity: 0.95}});
+                                marker.bindTooltip('<div style="font-family:sans-serif; font-size:11px; line-height:1.4; width:4cm; word-break:break-word; overflow-wrap:break-word; white-space:normal;">' +
+                                    '<b>📍 Optimized Seq: #' + optSeq + '</b><br>' +
+                                    '<b>Original Seq:</b> #' + origSeq + ' (' + swapStatusText + ')<br>' +
+                                    '<b>Customer ID:</b> ' + info.cust_id + ' (' + info.cust_name + ')' + addrText + '<br>' +
+                                    '<b>Trip:</b> ' + seg.trip + '<br>' +
+                                    '<b>Qty:</b> ' + info.qty + ' ถัง' +
+                                '</div>', {direction: 'top', opacity: 0.95});
                                 
                                 optMarkers[idx] = marker;
-                            }}
-                        }});
-                    }}
+                            }
+                        });
+                    }
 
                     initOptMarkers();
 
-                    function highlightOptMarker(info) {{
-                        if (optActiveMarkerRef) {{
-                            if (optActiveMarkerRef._icon) {{
+                    function highlightOptMarker(info) {
+                        if (optActiveMarkerRef) {
+                            if (optActiveMarkerRef._icon) {
                                 let innerDiv = optActiveMarkerRef._icon.querySelector('.opt-number-icon');
                                 if (innerDiv) innerDiv.classList.remove('opt-number-icon-active');
-                            }}
-                        }}
+                            }
+                        }
                         optActiveMarkerRef = null;
                         if (!info || info.point_idx === undefined || info.lat === 0.0) return;
                         
                         let target = optMarkers[info.point_idx];
-                        if (target) {{
-                            if (target._icon) {{
+                        if (target) {
+                            if (target._icon) {
                                 let innerDiv = target._icon.querySelector('.opt-number-icon');
                                 if (innerDiv) innerDiv.classList.add('opt-number-icon-active');
-                            }}
+                            }
                             if (target.setZIndexOffset) target.setZIndexOffset(10000);
                             optActiveMarkerRef = target;
-                        }}
-                    }}
+                        }
+                    }
 
-                    function updateOptStep(stepIndex) {{
+                    function updateOptStep(stepIndex) {
                         if (stepIndex < 0 || stepIndex >= optSegments.length) return;
                         optCurrentStep = stepIndex;
                         let currentSeg = optSegments[optCurrentStep];
@@ -1882,66 +1881,64 @@ if dw_uploaded_file and sum_uploaded_file:
                         let custId = info.cust_id || '-';
                         let tripName = currentSeg.trip || '-';
 
-                        document.getElementById('opt-banner-content').innerHTML = `
-                            Trip: <b>${{tripName}}</b> | Optimized: <span style="color:#ffeb3b; font-size:14px;">#${{optSeq}}</span> (Orig: #${{origSeq}}) | Customer: <span style="color:#64ffda;">${{custId}}</span> | Qty: <span style="color:#ff8a80;">${{info.qty || 0}} ถัง</span>
-                        `;
+                        document.getElementById('opt-banner-content').innerHTML = 
+                            'Trip: <b>' + tripName + '</b> | Optimized: <span style="color:#ffeb3b; font-size:14px;">#' + optSeq + '</span> (Orig: #' + origSeq + ') | Customer: <span style="color:#64ffda;">' + custId + '</span> | Qty: <span style="color:#ff8a80;">' + (info.qty || 0) + ' ถัง</span>';
 
-                        document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - Seq: <span style="color:#2980b9;">#${{optSeq}}</span>`;
+                        document.getElementById('opt-slider-label').innerHTML = '<span style="color:' + currentSeg.color + '; font-weight:bold;">' + tripName + '</span> - Seq: <span style="color:#2980b9;">#' + optSeq + '</span>';
 
                         optActivePolylines.forEach(p => optMap.removeLayer(p));
                         optActivePolylines = [];
 
                         let accumulatedDist = 0.0;
-                        for (let i = 0; i <= optCurrentStep; i++) {{
+                        for (let i = 0; i <= optCurrentStep; i++) {
                             let seg = optSegments[i];
                             if (seg.info.lat === 0.0) continue;
                             accumulatedDist += (seg.dist_km || 0.0);
-                            if (seg.path && seg.path.length > 0) {{
-                                let polyline = L.polyline(seg.path, {{ color: seg.color, weight: 5, opacity: 0.85 }}).addTo(optMap);
+                            if (seg.path && seg.path.length > 0) {
+                                let polyline = L.polyline(seg.path, { color: seg.color, weight: 5, opacity: 0.85 }).addTo(optMap);
                                 optActivePolylines.push(polyline);
-                            }}
-                        }}
+                            }
+                        }
 
                         highlightOptMarker(info);
 
-                        document.getElementById('opt-info-box').innerHTML = `
-                            <b>🚛 ${{tripName}} | Optimized Seq: #${{optSeq}} (Original Seq: #${{origSeq}})</b><br>
-                            <b>👤 Customer:</b> <span style="color:#2980b9; font-weight:bold;">${{custId}} (${{info.cust_name}})</span><br>
-                            <b>🏠 Address:</b> ${{info.shipping_address || '-'}}<br>
-                            <b>📦 Qty:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.qty || 0}} ถัง</span> | <b>🚗 Segment Dist:</b> <span style="color:#2E7D32; font-weight:bold;">${{currentSeg.dist_km}} กม.</span> | <b>🛣️ Total Dist:</b> <span style="color:#2E7D32; font-weight:bold;">${{accumulatedDist.toFixed(2)}} กม.</span>
-                        `;
+                        document.getElementById('opt-info-box').innerHTML = 
+                            '<b>🚛 ' + tripName + ' | Optimized Seq: #' + optSeq + ' (Original Seq: #' + origSeq + ')</b><br>' +
+                            '<b>👤 Customer:</b> <span style="color:#2980b9; font-weight:bold;">' + custId + ' (' + info.cust_name + ')</span><br>' +
+                            '<b>🏠 Address:</b> ' + (info.shipping_address || '-') + '<br>' +
+                            '<b>📦 Qty:</b> <span style="color:#D32F2F; font-weight:bold;">' + (info.qty || 0) + ' ถัง</span> | <b>🚗 Segment Dist:</b> <span style="color:#2E7D32; font-weight:bold;">' + currentSeg.dist_km + ' กม.</span> | <b>🛣️ Total Dist:</b> <span style="color:#2E7D32; font-weight:bold;">' + accumulatedDist.toFixed(2) + ' กม.</span>';
 
                         optMap.panTo([info.lat, info.lng]);
-                    }}
+                    }
 
-                    function nextOptStep() {{
+                    function nextOptStep() {
                         let nextIdx = optCurrentStep + 1;
-                        while (nextIdx < optSegments.length) {{
+                        while (nextIdx < optSegments.length) {
                             if (optSegments[nextIdx].info.lat !== 0.0) break;
                             nextIdx++;
-                        }}
-                        if (nextIdx < optSegments.length) {{
+                        }
+                        if (nextIdx < optSegments.length) {
                             optCurrentStep = nextIdx;
                             updateOptStep(optCurrentStep);
-                        }} else {{
+                        } else {
                             pauseOptAnimation();
                             document.getElementById('opt-status-text').innerText = "🏁 Optimized Simulation Completed!";
-                        }}
-                    }}
+                        }
+                    }
 
-                    function startOptAnimation() {{
+                    function startOptAnimation() {
                         if (optIsPlaying) return;
                         optIsPlaying = true;
                         document.getElementById('opt-status-text').innerText = "▶ Running Optimized Simulation...";
                         updateOptStep(optCurrentStep);
                         optAnimTimer = setInterval(nextOptStep, optSpeedMs);
-                    }}
+                    }
 
-                    function pauseOptAnimation() {{
+                    function pauseOptAnimation() {
                         optIsPlaying = false;
-                        if (optAnimTimer) {{ clearInterval(optAnimTimer); optAnimTimer = null; }}
+                        if (optAnimTimer) { clearInterval(optAnimTimer); optAnimTimer = null; }
                         document.getElementById('opt-status-text').innerText = "⏸ Optimized Simulation Paused";
-                    }}
+                    }
 
                     function resetOptAnimation() {
                         pauseAnimation();
@@ -1961,6 +1958,13 @@ if dw_uploaded_file and sum_uploaded_file:
             </body>
             </html>
             """
+
+            opt_map_html = opt_map_html.replace("__OPT_LEGEND_ITEMS__", opt_legend_items)
+            opt_map_html = opt_map_html.replace("__OPT_MAX_SEG__", str(max(len(opt_segments_data) - 1, 0)))
+            opt_map_html = opt_map_html.replace("__WH_JSON__", wh_json)
+            opt_map_html = opt_map_html.replace("__OPT_SEGMENTS_JSON__", opt_segments_json)
+            opt_map_html = opt_map_html.replace("__OPT_POINTS_JSON__", opt_points_json)
+            opt_map_html = opt_map_html.replace("__ANIM_SPEED__", str(anim_speed_ms))
 
             st.components.v1.html(opt_map_html, height=620, scrolling=False)
 
@@ -2146,7 +2150,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
                             new_points_json = json.dumps(processed_new_points, ensure_ascii=False)
 
-                            map_tab3_multi_html = f"""
+                            map_tab3_multi_html = """
                             <!DOCTYPE html>
                             <html>
                             <head>
@@ -2154,9 +2158,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
                                 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
                                 <style>
-                                    #map-tab3-multi {{ width: 100%; height: 600px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
+                                    #map-tab3-multi { width: 100%; height: 600px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
                                     
-                                    .map-legend-box {{
+                                    .map-legend-box {
                                         background: #ffffff;
                                         padding: 8px 14px;
                                         border-radius: 6px;
@@ -2168,34 +2172,34 @@ if dw_uploaded_file and sum_uploaded_file:
                                         gap: 16px;
                                         align-items: center;
                                         flex-wrap: wrap;
-                                    }}
-                                    .legend-pill {{
+                                    }
+                                    .legend-pill {
                                         display: flex;
                                         align-items: center;
                                         gap: 6px;
                                         font-weight: bold;
                                         color: #333;
-                                    }}
-                                    .legend-dot-new {{
+                                    }
+                                    .legend-dot-new {
                                         width: 16px; height: 16px; border-radius: 50%;
                                         background: linear-gradient(135deg, #1e3c72, #2a5298);
                                         border: 2px solid #00d2ff;
                                         display: inline-block;
-                                    }}
-                                    .legend-dot-prev {{
+                                    }
+                                    .legend-dot-prev {
                                         width: 16px; height: 16px; border-radius: 50%;
                                         background: #ff6b6b;
                                         border: 2px solid #ffffff;
                                         display: inline-block;
                                         text-align: center; font-size: 9px; line-height: 12px; color: white;
-                                    }}
+                                    }
 
-                                    .new-member-container {{
+                                    .new-member-container {
                                         position: relative;
                                         width: 36px;
                                         height: 36px;
-                                    }}
-                                    .new-member-card {{
+                                    }
+                                    .new-member-card {
                                         background: linear-gradient(135deg, #1e3c72, #2a5298) !important;
                                         color: #ffffff !important;
                                         border: 2px solid #00d2ff !important;
@@ -2210,8 +2214,8 @@ if dw_uploaded_file and sum_uploaded_file:
                                         display: flex !important;
                                         align-items: center !important;
                                         justify-content: center !important;
-                                    }}
-                                    .new-member-pulse {{
+                                    }
+                                    .new-member-pulse {
                                         position: absolute;
                                         top: -4px;
                                         left: -4px;
@@ -2220,13 +2224,13 @@ if dw_uploaded_file and sum_uploaded_file:
                                         border-radius: 50%;
                                         border: 2px solid #00d2ff;
                                         animation: pulse-ring 1.8s infinite ease-out;
-                                    }}
-                                    @keyframes pulse-ring {{
-                                        0% {{ transform: scale(0.8); opacity: 1; }}
-                                        100% {{ transform: scale(1.5); opacity: 0; }}
-                                    }}
+                                    }
+                                    @keyframes pulse-ring {
+                                        0% { transform: scale(0.8); opacity: 1; }
+                                        100% { transform: scale(1.5); opacity: 0; }
+                                    }
 
-                                    .prev-connected-icon {{
+                                    .prev-connected-icon {
                                         background: #ff6b6b !important;
                                         color: #ffffff !important;
                                         border: 2px solid #ffffff !important;
@@ -2241,9 +2245,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                         display: flex !important;
                                         align-items: center !important;
                                         justify-content: center !important;
-                                    }}
+                                    }
 
-                                    .exist-icon {{
+                                    .exist-icon {
                                         background-color: #0055FF;
                                         color: white;
                                         border: 1.5px solid white;
@@ -2255,7 +2259,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                         height: 24px;
                                         font-weight: bold;
                                         box-shadow: 0 2px 5px rgba(0,0,0,0.4);
-                                    }}
+                                    }
                                 </style>
                             </head>
                             <body>
@@ -2268,85 +2272,90 @@ if dw_uploaded_file and sum_uploaded_file:
 
                                 <div id="map-tab3-multi"></div>
                                 <script>
-                                    const warehouse = {wh_json};
-                                    const existPoints = {existing_pts_json};
-                                    const newPoints = {new_points_json};
+                                    const warehouse = __WH_JSON__;
+                                    const existPoints = __EXIST_POINTS_JSON__;
+                                    const newPoints = __NEW_POINTS_JSON__;
 
                                     const map3 = L.map('map-tab3-multi').setView([warehouse[0], warehouse[1]], 13);
-                                    L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                                         attribution: '© OpenStreetMap contributors'
-                                    }}).addTo(map3);
+                                    }).addTo(map3);
 
                                     L.marker(warehouse).addTo(map3).bindTooltip("🏢 คลังสินค้าหลัก");
 
                                     let prevIdsList = newPoints.map(p => p.prev_id);
 
-                                    existPoints.forEach((pt, idx) => {{
-                                        if(pt.lat !== 0.0 && pt.lng !== 0.0) {{
+                                    existPoints.forEach((pt, idx) => {
+                                        if(pt.lat !== 0.0 && pt.lng !== 0.0) {
                                             let isPrevConnected = prevIdsList.includes(pt.cust_id) && pt.cust_id !== "คลังสินค้า";
                                             let seqNum = idx + 1;
                                             
-                                            if (isPrevConnected) {{
-                                                let prevHtml = `<div class="prev-connected-icon" title="Sequence #${{seqNum}}">${{seqNum}}</div>`;
-                                                let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [30, 30], iconAnchor: [15, 15] }});
-                                                let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
-                                                pm.bindTooltip(`
-                                                    <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                        <b style="color:#D32F2F;">📍 [Nearest Point - Seq #${{seqNum}}]</b><br>
-                                                        <b>Customer ID:</b> ${{pt.cust_id}}<br>
-                                                        <b>Name:</b> ${{pt.cust_name}}<br>
-                                                        <b>Trip:</b> ${{pt.trip}}
-                                                    </div>`, {{direction: 'top', opacity: 0.95}});
-                                            }} else {{
-                                                let iconHtml = `<div class="exist-icon">${{seqNum}}</div>`;
-                                                let customIcon = L.divIcon({{ className: '', html: iconHtml, iconSize: [24, 24], iconAnchor: [12, 12] }});
-                                                let m = L.marker([pt.lat, pt.lng], {{icon: customIcon}}).addTo(map3);
-                                                m.bindTooltip(`
-                                                    <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                        <b>📍 Existing Pt #${{seqNum}} (${{pt.trip}})</b><br>
-                                                        <b>Customer ID:</b> ${{pt.cust_id}}<br>
-                                                        <b>Name:</b> ${{pt.cust_name}}<br>
-                                                        <b>Qty:</b> ${{pt.qty}} ถัง<br>
-                                                        <b>Time:</b> ${{pt.time}}
-                                                    </div>`, {{direction: 'top', opacity: 0.95}});
-                                            }}
-                                        }}
-                                    }});
+                                            if (isPrevConnected) {
+                                                let prevHtml = '<div class="prev-connected-icon" title="Sequence #' + seqNum + '">' + seqNum + '</div>';
+                                                let prevIcon = L.divIcon({ className: '', html: prevHtml, iconSize: [30, 30], iconAnchor: [15, 15] });
+                                                let pm = L.marker([pt.lat, pt.lng], {icon: prevIcon, zIndexOffset: 5000}).addTo(map3);
+                                                pm.bindTooltip(
+                                                    '<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">' +
+                                                        '<b style="color:#D32F2F;">📍 [Nearest Point - Seq #' + seqNum + ']</b><br>' +
+                                                        '<b>Customer ID:</b> ' + pt.cust_id + '<br>' +
+                                                        '<b>Name:</b> ' + pt.cust_name + '<br>' +
+                                                        '<b>Trip:</b> ' + pt.trip +
+                                                    '</div>', {direction: 'top', opacity: 0.95});
+                                            } else {
+                                                let iconHtml = '<div class="exist-icon">' + seqNum + '</div>';
+                                                let customIcon = L.divIcon({ className: '', html: iconHtml, iconSize: [24, 24], iconAnchor: [12, 12] });
+                                                let m = L.marker([pt.lat, pt.lng], {icon: customIcon}).addTo(map3);
+                                                m.bindTooltip(
+                                                    '<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">' +
+                                                        '<b>📍 Existing Pt #' + seqNum + ' (' + pt.trip + ')</b><br>' +
+                                                        '<b>Customer ID:</b> ' + pt.cust_id + '<br>' +
+                                                        '<b>Name:</b> ' + pt.cust_name + '<br>' +
+                                                        '<b>Qty:</b> ' + pt.qty + ' ถัง<br>' +
+                                                        '<b>Time:</b> ' + pt.time +
+                                                    '</div>', {direction: 'top', opacity: 0.95});
+                                            }
+                                        }
+                                    });
 
                                     let boundsArr = [warehouse];
 
-                                    newPoints.forEach(np => {{
-                                        let newIconHtml = `
-                                            <div class="new-member-container">
-                                                <div class="new-member-pulse"></div>
-                                                <div class="new-member-card">✦</div>
-                                            </div>`;
-                                        let newCustomIcon = L.divIcon({{ className: '', html: newIconHtml, iconSize: [36, 36], iconAnchor: [18, 18] }});
-                                        let newMarker = L.marker([np.lat, np.lng], {{icon: newCustomIcon, zIndexOffset: 10000}}).addTo(map3);
+                                    newPoints.forEach(np => {
+                                        let newIconHtml = 
+                                            '<div class="new-member-container">' +
+                                                '<div class="new-member-pulse"></div>' +
+                                                '<div class="new-member-card">✦</div>' +
+                                            '</div>';
+                                        let newCustomIcon = L.divIcon({ className: '', html: newIconHtml, iconSize: [36, 36], iconAnchor: [18, 18] });
+                                        let newMarker = L.marker([np.lat, np.lng], {icon: newCustomIcon, zIndexOffset: 10000}).addTo(map3);
                                         
-                                        newMarker.bindTooltip(`
-                                            <div style="font-family:sans-serif; font-size:12px; line-height:1.5;">
-                                                <b style="color:#2a5298; font-size:13px;">🌟 New Member (${{np.cust_id}})</b><br>
-                                                <b>Name:</b> ${{np.cust_name}}<br>
-                                                <b>Qty:</b> ${{np.qty}} ถัง<br>
-                                                <b>Trip:</b> ${{np.trip}}<br>
-                                                <b>Insert Seq:</b> #${{np.insert_seq}}<br>
-                                                <b>Insert After:</b> ${{np.insert_after}}<br>
-                                                <b>Evaluation:</b> ${{np.suitability}}
-                                            </div>`, {{direction: 'top', opacity: 0.95}});
+                                        newMarker.bindTooltip(
+                                            '<div style="font-family:sans-serif; font-size:12px; line-height:1.5;">' +
+                                                '<b style="color:#2a5298; font-size:13px;">🌟 New Member (' + np.cust_id + ')</b><br>' +
+                                                '<b>Name:</b> ' + np.cust_name + '<br>' +
+                                                '<b>Qty:</b> ' + np.qty + ' ถัง<br>' +
+                                                '<b>Trip:</b> ' + np.trip + '<br>' +
+                                                '<b>Insert Seq:</b> #' + np.insert_seq + '<br>' +
+                                                '<b>Insert After:</b> ' + np.insert_after + '<br>' +
+                                                '<b>Evaluation:</b> ' + np.suitability +
+                                            '</div>', {direction: 'top', opacity: 0.95});
 
-                                        if(np.route_path && np.route_path.length > 0) {{
-                                            L.polyline(np.route_path, {{color: '#00d2ff', weight: 4, opacity: 0.85, dashArray: '6, 6'}}).addTo(map3);
-                                        }}
+                                        if(np.route_path && np.route_path.length > 0) {
+                                            L.polyline(np.route_path, {color: '#00d2ff', weight: 4, opacity: 0.85, dashArray: '6, 6'}).addTo(map3);
+                                        }
                                         boundsArr.push([np.lat, np.lng]);
-                                    }});
+                                    });
 
                                     let groupBounds = L.latLngBounds(boundsArr);
-                                    map3.fitBounds(groupBounds, {{padding: [60, 60]}});
+                                    map3.fitBounds(groupBounds, {padding: [60, 60]});
                                 </script>
                             </body>
                             </html>
                             """
+
+                            map_tab3_multi_html = map_tab3_multi_html.replace("__WH_JSON__", wh_json)
+                            map_tab3_multi_html = map_tab3_multi_html.replace("__EXIST_POINTS_JSON__", existing_pts_json)
+                            map_tab3_multi_html = map_tab3_multi_html.replace("__NEW_POINTS_JSON__", new_points_json)
+
                             st.components.v1.html(map_tab3_multi_html, height=650, scrolling=False)
 
                         else:
