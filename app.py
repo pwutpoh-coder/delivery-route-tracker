@@ -640,7 +640,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 for trip_name, group in grouped:
                     valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
                     
-                    # บังคับให้เส้นทางเริ่มต้นและสิ้นสุดที่คลังสินค้าหลักทุกเที่ยว (Return to Warehouse)
+                    # สร้างเส้นทางครอบคลุม: เริ่มจากคลัง -> จุดส่งทั้งหมด -> กลับสู่คลัง (Return to Warehouse)
                     route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
@@ -705,6 +705,14 @@ if dw_uploaded_file and sum_uploaded_file:
                         if info["lat"] != 0.0 and valid_idx_counter < len(trip_route_segments):
                             segment_path = trip_route_segments[valid_idx_counter]
                             valid_idx_counter += 1
+
+                        # หากเป็นจุดสุดท้ายของเที่ยว ให้รวมเส้นทางขากลับคลังเข้ากับจุดสุดท้ายด้วย เพื่อให้เห็นเส้นทางวิ่งกลับคลังชัดเจน
+                        is_last_point_in_trip = (idx_r == len(records_list) - 1)
+                        if is_last_point_in_trip and valid_idx_counter < len(trip_route_segments):
+                            # ผสานเส้นทางที่เหลือจนถึงขากลับคลังเข้าด้วยกัน
+                            while valid_idx_counter < len(trip_route_segments):
+                                segment_path.extend(trip_route_segments[valid_idx_counter][1:])
+                                valid_idx_counter += 1
 
                         segments_data.append({
                             "trip": trip_name,
@@ -980,7 +988,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         box-shadow: 0 0 16px #FFD700, 0 4px 12px rgba(0,0,0,0.9) !important;
                     }}
 
-                    /* ไอคอนคลังสินค้าสุดสวยงาม */
                     .warehouse-marker-box {{
                         display: flex;
                         align-items: center;
@@ -1080,7 +1087,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         attribution: '© OpenStreetMap contributors'
                     }}).addTo(map);
 
-                    // สร้างไอคอนคลังสินค้าหลักสุดหรู
                     let warehouseIconHtml = `<div class="warehouse-marker-box" title="คลังสินค้าหลัก">🏢</div>`;
                     let customWarehouseIcon = L.divIcon({{
                         className: '',
@@ -1304,7 +1310,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
-                        // อัปเดต Title และ Tooltip เมื่อเอาเมาส์ชี้ที่ Slider
                         slider.title = `จุดที่ ${{pointNumText}} (${{tripLabel}}) | เวลา: ${{timeLabel}} | ลูกค้า: ${{custIdLabel}} (${{custNameLabel}})`;
 
                         document.getElementById('top-banner-content').innerHTML = `
@@ -1355,7 +1360,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         map.panTo([info.lat, info.lng]);
                     }}
 
-                    // ฟังก์ชันแสดงข้อมูลเมื่อเอาเมาส์ชี้ผ่านตำแหน่งต่างๆ บน Slider
                     function onSliderHover(event) {{
                         let slider = event.target;
                         let rect = slider.getBoundingClientRect();
@@ -2014,49 +2018,62 @@ if dw_uploaded_file and sum_uploaded_file:
                             p_lat = float(c_match.group(1))
                             p_lng = float(c_match.group(2))
 
-                            # พิจารณาจากเส้นทางถนนจริง (OSRM Road Distance) ที่ใกล้ที่สุดกับพิกัดใหม่
-                            closest_road_dist = float("inf")
-                            closest_rec = None
-                            closest_seq_num = 0
+                            # ปรับปรุงระบบค้นหา: ประเมินทุกจุดในแต่ละเที่ยว เพื่อหาคู่จุดส่งเดิมที่เมื่อแทรกพิกัดใหม่เข้าไปแล้วทำให้ระยะทางเพิ่มขึ้นน้อยที่สุด (Minimal Added Distance)
+                            best_overall_add_dist = float("inf")
+                            best_overall_rec = None
+                            best_overall_seq = 0
+                            best_overall_trip = ""
+                            best_overall_insert_idx = 0
+                            best_overall_path = []
 
-                            for seq_idx, rec in enumerate(all_valid_records):
-                                _, r_dist = get_osrm_route(p_lat, p_lng, rec["lat"], rec["lng"])
-                                if r_dist < closest_road_dist:
-                                    closest_road_dist = r_dist
-                                    closest_rec = rec
-                                    closest_seq_num = seq_idx + 1
+                            grouped_by_trip = df.groupby("trip", sort=False)
+                            for trip_name, group in grouped_by_trip:
+                                trip_valid = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].reset_index(drop=True)
+                                if trip_valid.empty:
+                                    continue
 
-                            if closest_rec:
-                                target_trip_name = closest_rec["trip"]
-                                target_group = df[df["trip"] == target_trip_name].reset_index(drop=True)
+                                # สร้างลำดับพิกัดเดิมของเที่ยวนี้: คลัง -> จุดส่งทั้งหมด -> คลัง
+                                trip_coords = [warehouse_coord] + list(zip(trip_valid["lat"], trip_valid["lng"])) + [warehouse_coord]
                                 
-                                target_cust_idx_in_trip = -1
-                                for idx_g, g_rec in target_group.iterrows():
-                                    if g_rec["cust_id"] == closest_rec["cust_id"]:
-                                        target_cust_idx_in_trip = idx_g
-                                        break
-
-                                best_insert_idx = target_cust_idx_in_trip + 2
-                                valid_pts_trip = target_group[(target_group["lat"] != 0.0) & (target_group["lng"] != 0.0)].to_dict("records")
-                                trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_pts_trip] + [warehouse_coord]
-
                                 orig_trip_dist = 0.0
                                 for i in range(len(trip_coords) - 1):
                                     _, d = get_osrm_route(trip_coords[i][0], trip_coords[i][1], trip_coords[i+1][0], trip_coords[i+1][1])
                                     orig_trip_dist += d
 
-                                test_coords = trip_coords.copy()
-                                test_coords.insert(best_insert_idx, (p_lat, p_lng))
+                                # ลองแทรกพิกัดใหม่ในทุกตำแหน่งที่เป็นไปได้ระหว่างจุดส่งเดิม
+                                for insert_pos in range(1, len(trip_coords)):
+                                    test_coords = trip_coords.copy()
+                                    test_coords.insert(insert_pos, (p_lat, p_lng))
 
-                                test_trip_dist = 0.0
-                                temp_route_segments = []
-                                for i in range(len(test_coords) - 1):
-                                    r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
-                                    test_trip_dist += d
-                                    temp_route_segments.extend(r_path)
+                                    test_trip_dist = 0.0
+                                    temp_route_segments = []
+                                    for i in range(len(test_coords) - 1):
+                                        r_path, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
+                                        test_trip_dist += d
+                                        temp_route_segments.extend(r_path)
 
-                                add_dist = test_trip_dist - orig_trip_dist
+                                    added_d = test_trip_dist - orig_trip_dist
+                                    if added_d < best_overall_add_dist:
+                                        best_overall_add_dist = added_d
+                                        best_overall_trip = trip_name
+                                        best_overall_insert_idx = insert_pos
+                                        best_overall_path = temp_route_segments
+
+                                        # ระบุจุดอ้างอิงก่อนหน้าตำแหน่งที่แทรก
+                                        if insert_pos - 1 == 0:
+                                            # แทรกหลังออกจากคลัง
+                                            best_overall_rec = {"cust_id": "WAREHOUSE", "cust_name": "คลังสินค้าหลัก"}
+                                            best_overall_seq = 0
+                                        else:
+                                            prev_cust = trip_valid.iloc[insert_pos - 2]
+                                            best_overall_rec = prev_cust
+                                            # หารำดับที่แท้จริงใน dataframe หลัก
+                                            orig_global_idx = df[(df["trip"] == trip_name) & (df["cust_id"] == prev_cust["cust_id"])].index
+                                            best_overall_seq = int(orig_global_idx[0]) + 1 if len(orig_global_idx) > 0 else 0
+
+                            if best_overall_rec:
                                 badge_label = f"N{idx_mem + 1}"
+                                insert_after_text = f"{best_overall_rec['cust_id']} ({best_overall_rec['cust_name']})" if best_overall_rec['cust_id'] != "WAREHOUSE" else "ออกจากคลังสินค้าหลัก"
 
                                 processed_new_points.append({
                                     "cust_id": mem["id"],
@@ -2064,15 +2081,15 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "qty": mem["qty"],
                                     "lat": p_lat,
                                     "lng": p_lng,
-                                    "trip": target_trip_name,
-                                    "insert_seq": best_insert_idx,
-                                    "insert_after": f"{closest_rec['cust_id']} ({closest_rec['cust_name']}) [ลำดับที่ #{closest_seq_num}]",
-                                    "road_dist": closest_road_dist,
-                                    "add_dist": add_dist,
+                                    "trip": best_overall_trip,
+                                    "insert_seq": best_overall_insert_idx,
+                                    "insert_after": insert_after_text,
+                                    "road_dist": best_overall_add_dist,
+                                    "add_dist": best_overall_add_dist,
                                     "badge_label": badge_label,
-                                    "prev_id": closest_rec['cust_id'],
-                                    "prev_seq": closest_seq_num,
-                                    "route_path": temp_route_segments
+                                    "prev_id": best_overall_rec['cust_id'],
+                                    "prev_seq": best_overall_seq,
+                                    "route_path": best_overall_path
                                 })
 
                         if processed_new_points:
@@ -2085,7 +2102,6 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "ชื่อสมาชิก": p_item["cust_name"],
                                     "เที่ยวที่แนะนำ": p_item["trip"],
                                     "แทรกต่อจากลูกค้าเดิม": p_item["insert_after"],
-                                    "ระยะทางถนนใกล้สุด (กม.)": f"{p_item['road_dist']:.2f}",
                                     "ระยะทางเพิ่มขึ้น (กม.)": f"+{p_item['add_dist']:.2f}"
                                 })
                             st.dataframe(pd.DataFrame(summary_table_data), use_container_width=True, hide_index=True)
