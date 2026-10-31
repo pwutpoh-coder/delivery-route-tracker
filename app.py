@@ -1808,7 +1808,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span>`;
 
-                        optActivePolylines.forEach(p => optMap.removeLayer(p));
+                        optActivePolylines.forEach(p => map.removeLayer(p));
                         optActivePolylines = [];
 
                         let accumulatedDist = 0.0;
@@ -1949,42 +1949,36 @@ if dw_uploaded_file and sum_uploaded_file:
                     if not all_valid_records:
                         st.warning("⚠️ ไม่พบข้อมูลพิกัดจุดจัดส่งเดิมในไฟล์")
                     else:
-                        for mem in st.session_state["new_members_list"]:
+                        for idx_mem, mem in enumerate(st.session_state["new_members_list"]):
                             c_match = re.search(r"^(-?\d+\.\d+)\s*[\s,]\s*(-?\d+\.\d+)$", mem["coord"].strip())
                             if not c_match:
                                 continue
                             p_lat = float(c_match.group(1))
                             p_lng = float(c_match.group(2))
 
+                            # พิจารณาจากพิกัด Lat/Long และระยะทางถนนจริง (OSRM Road Distance) ที่ใกล้ที่สุด
                             closest_road_dist = float("inf")
-                            closest_cust_id = None
-                            closest_cust_name = None
+                            closest_rec = None
                             closest_seq_num = 0
 
                             for seq_idx, rec in enumerate(all_valid_records):
                                 _, r_dist = get_osrm_route(p_lat, p_lng, rec["lat"], rec["lng"])
                                 if r_dist < closest_road_dist:
                                     closest_road_dist = r_dist
-                                    closest_cust_id = rec["cust_id"]
-                                    closest_cust_name = rec["cust_name"]
+                                    closest_rec = rec
                                     closest_seq_num = seq_idx + 1
 
-                            target_trip_name = None
-                            target_cust_idx_in_trip = -1
-                            grouped_analysis = df.groupby("trip", sort=False)
-                            for trip_name, group in grouped_analysis:
-                                g_records = group.to_dict("records")
-                                for idx_g, g_rec in enumerate(g_records):
-                                    if g_rec["cust_id"] == closest_cust_id:
-                                        target_trip_name = trip_name
+                            if closest_rec:
+                                target_trip_name = closest_rec["trip"]
+                                target_group = df[df["trip"] == target_trip_name].reset_index(drop=True)
+                                
+                                target_cust_idx_in_trip = -1
+                                for idx_g, g_rec in target_group.iterrows():
+                                    if g_rec["cust_id"] == closest_rec["cust_id"]:
                                         target_cust_idx_in_trip = idx_g
                                         break
-                                if target_trip_name:
-                                    break
 
-                            if target_trip_name:
                                 best_insert_idx = target_cust_idx_in_trip + 2
-                                target_group = df[df["trip"] == target_trip_name].reset_index(drop=True)
                                 valid_pts_trip = target_group[(target_group["lat"] != 0.0) & (target_group["lng"] != 0.0)].to_dict("records")
                                 trip_coords = [warehouse_coord] + [(p["lat"], p["lng"]) for p in valid_pts_trip] + [warehouse_coord]
 
@@ -2004,12 +1998,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                     temp_route_segments.extend(r_path)
 
                                 add_dist = test_trip_dist - orig_trip_dist
-
-                                prev_lat, prev_lng = warehouse_coord[0], warehouse_coord[1]
-                                if target_cust_idx_in_trip >= 0 and target_cust_idx_in_trip < len(target_group):
-                                    prev_rec = target_group.iloc[target_cust_idx_in_trip]
-                                    prev_lat = prev_rec["lat"]
-                                    prev_lng = prev_rec["lng"]
+                                badge_label = f"N{idx_mem + 1}"
 
                                 processed_new_points.append({
                                     "cust_id": mem["id"],
@@ -2019,12 +2008,11 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "lng": p_lng,
                                     "trip": target_trip_name,
                                     "insert_seq": best_insert_idx,
-                                    "insert_after": f"{closest_cust_id} ({closest_cust_name}) [ลำดับที่ #{closest_seq_num}]",
+                                    "insert_after": f"{closest_rec['cust_id']} ({closest_rec['cust_name']}) [ลำดับที่ #{closest_seq_num}]",
                                     "road_dist": closest_road_dist,
                                     "add_dist": add_dist,
-                                    "prev_lat": prev_lat,
-                                    "prev_lng": prev_lng,
-                                    "prev_id": closest_cust_id,
+                                    "badge_label": badge_label,
+                                    "prev_id": closest_rec['cust_id'],
                                     "prev_seq": closest_seq_num,
                                     "route_path": temp_route_segments
                                 })
@@ -2034,6 +2022,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             summary_table_data = []
                             for p_item in processed_new_points:
                                 summary_table_data.append({
+                                    "สัญลักษณ์": p_item["badge_label"],
                                     "รหัสสมาชิกใหม่": p_item["cust_id"],
                                     "ชื่อสมาชิก": p_item["cust_name"],
                                     "เที่ยวที่แนะนำ": p_item["trip"],
@@ -2043,7 +2032,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 })
                             st.dataframe(pd.DataFrame(summary_table_data), use_container_width=True, hide_index=True)
 
-                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิมทั้งหมด พร้อมตำแหน่งสมาชิกใหม่หลายรายและการเชื่อมต่อ")
+                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิมทั้งหมด พร้อมตำแหน่งสมาชิกใหม่และสัญลักษณ์คู่ N1, N2...")
 
                             existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
                             new_points_json = json.dumps(processed_new_points, ensure_ascii=False)
@@ -2104,7 +2093,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                         border-radius: 50% !important;
                                         text-align: center !important;
                                         font-weight: bold !important;
-                                        font-size: 18px !important;
+                                        font-size: 16px !important;
                                         line-height: 32px !important;
                                         width: 34px !important;
                                         height: 34px !important;
@@ -2112,6 +2101,19 @@ if dw_uploaded_file and sum_uploaded_file:
                                         display: flex !important;
                                         align-items: center !important;
                                         justify-content: center !important;
+                                    }}
+                                    .new-member-label {{
+                                        position: absolute;
+                                        bottom: -6px;
+                                        right: -8px;
+                                        background-color: #1e3c72;
+                                        color: #00d2ff;
+                                        border: 1px solid white;
+                                        border-radius: 4px;
+                                        padding: 0 3px;
+                                        font-size: 9px;
+                                        font-weight: bold;
+                                        z-index: 30;
                                     }}
                                     .new-member-pulse {{
                                         position: absolute;
@@ -2128,6 +2130,11 @@ if dw_uploaded_file and sum_uploaded_file:
                                         100% {{ transform: scale(1.5); opacity: 0; }}
                                     }}
 
+                                    .prev-connected-container {{
+                                        position: relative;
+                                        width: 30px;
+                                        height: 30px;
+                                    }}
                                     .prev-connected-icon {{
                                         background: #ff6b6b !important;
                                         color: #ffffff !important;
@@ -2143,6 +2150,20 @@ if dw_uploaded_file and sum_uploaded_file:
                                         display: flex !important;
                                         align-items: center !important;
                                         justify-content: center !important;
+                                    }}
+                                    .matched-badge {{
+                                        position: absolute;
+                                        top: -6px;
+                                        right: -10px;
+                                        background-color: #1e3c72;
+                                        color: #00d2ff;
+                                        border: 1.5px solid white;
+                                        border-radius: 4px;
+                                        padding: 0 3px;
+                                        font-size: 9px;
+                                        font-weight: bold;
+                                        z-index: 30;
+                                        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
                                     }}
 
                                     .exist-icon {{
@@ -2163,9 +2184,9 @@ if dw_uploaded_file and sum_uploaded_file:
                             <body>
                                 <div class="map-legend-box">
                                     <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
-                                    <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ทุกราย (✦)</div>
-                                    <div class="legend-pill"><span class="legend-dot-prev">#</span> พิกัดรายที่จะนำไปแทรกต่อ (แสดงเลขอ้างอิงลำดับการส่งพร้อมเครื่องหมาย 🔗)</div>
-                                    <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป (นำเมาส์ชี้เพื่อดูข้อมูล)</div>
+                                    <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ (✦ พร้อมป้าย N1, N2...)</div>
+                                    <div class="legend-pill"><span class="legend-dot-prev">#</span> จุดเชื่อมต่อที่มีป้าย N1, N2... ที่มุมบนขวา เพื่อบอกคู่จับคู่</div>
+                                    <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป</div>
                                 </div>
 
                                 <div id="map-tab3-multi"></div>
@@ -2181,20 +2202,24 @@ if dw_uploaded_file and sum_uploaded_file:
 
                                     L.marker(warehouse).addTo(map3).bindTooltip("🏢 คลังสินค้าหลัก");
 
-                                    let prevIdsList = newPoints.map(p => p.prev_id);
+                                    let matchedMap = {{}};
+                                    newPoints.forEach(np => {{
+                                        matchedMap[np.prev_id] = np.badge_label;
+                                    }});
 
                                     existPoints.forEach((pt, idx) => {{
                                         if(pt.lat !== 0.0 && pt.lng !== 0.0) {{
-                                            let isPrevConnected = prevIdsList.includes(pt.cust_id) && pt.cust_id !== "คลังสินค้า";
                                             let seqNum = idx + 1;
+                                            let matchBadge = matchedMap[pt.cust_id];
                                             
-                                            if (isPrevConnected) {{
-                                                let prevHtml = `<div class="prev-connected-icon" title="ลำดับที่ #${{seqNum}}">${{seqNum}}</div>`;
+                                            if (matchBadge) {{
+                                                let prevHtml = `<div class="prev-connected-container"><div class="prev-connected-icon">${{seqNum}}</div><div class="matched-badge">${{matchBadge}}</div></div>`;
                                                 let prevIcon = L.divIcon({{ className: '', html: prevHtml, iconSize: [30, 30], iconAnchor: [15, 15] }});
                                                 let pm = L.marker([pt.lat, pt.lng], {{icon: prevIcon, zIndexOffset: 5000}}).addTo(map3);
                                                 pm.bindTooltip(`
                                                     <div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                                        <b style="color:#D32F2F;">📍 [สมาชิกที่ใกล้ที่สุด - ลำดับที่ #${{seqNum}}]</b><br>
+                                                        <b style="color:#1e3c72;">📍 [จับคู่กับสมาชิกใหม่ ${{matchBadge}}]</b><br>
+                                                        <b>ลำดับจุดเดิม:</b> #${{seqNum}}<br>
                                                         <b>รหัสลูกค้า:</b> ${{pt.cust_id}}<br>
                                                         <b>ชื่อ:</b> ${{pt.cust_name}}<br>
                                                         <b>เที่ยว:</b> ${{pt.trip}}
@@ -2222,13 +2247,14 @@ if dw_uploaded_file and sum_uploaded_file:
                                             <div class="new-member-container">
                                                 <div class="new-member-pulse"></div>
                                                 <div class="new-member-card">✦</div>
+                                                <div class="new-member-label">${{np.badge_label}}</div>
                                             </div>`;
-                                        let newCustomIcon = L.divIcon({{ className: '', html: newIconHtml, iconSize: [36, 36], iconAnchor: [18, 18] }});
+                                        let newCustomIcon = L.divIcon({{ className: '', html: newIconHtml, iconSize: [40, 40], iconAnchor: [20, 20] }});
                                         let newMarker = L.marker([np.lat, np.lng], {{icon: newCustomIcon, zIndexOffset: 10000}}).addTo(map3);
                                         
                                         newMarker.bindTooltip(`
                                             <div style="font-family:sans-serif; font-size:12px; line-height:1.5;">
-                                                <b style="color:#2a5298; font-size:13px;">🌟 สมาชิกใหม่ (${{np.cust_id}})</b><br>
+                                                <b style="color:#2a5298; font-size:13px;">🌟 สมาชิกใหม่ ${{np.badge_label}} (${{np.cust_id}})</b><br>
                                                 <b>ชื่อ:</b> ${{np.cust_name}}<br>
                                                 <b>จำนวนส่ง:</b> ${{np.qty}} ถัง<br>
                                                 <b>เที่ยวจัดส่ง:</b> ${{np.trip}}<br>
