@@ -13,11 +13,13 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title(
-    "🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
+st.markdown(
+    "<h3 style='margin-bottom: 0px;'>🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)</h3>",
+    unsafe_allow_html=True,
 )
 st.markdown(
-    "อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
+    "<p style='font-size: 13px; color: #555;'>อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM</p>",
+    unsafe_allow_html=True,
 )
 
 # --- SIDEBAR: ตั้งค่าคลังสินค้าและการจัดการข้อมูล ---
@@ -917,14 +919,15 @@ if dw_uploaded_file and sum_uploaded_file:
                     #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     
                     #top-active-banner {{
-                        background: linear-gradient(135deg, #1e3d59, #17b978);
-                        color: white;
-                        padding: 12px 18px;
+                        background: linear-gradient(135deg, #2b5876, #4e4376);
+                        color: #f1f5f9;
+                        padding: 10px 16px;
                         border-radius: 8px;
+                        margin-top: 10px;
                         margin-bottom: 12px;
                         font-family: sans-serif;
-                        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
-                        border-left: 6px solid #ff6e40;
+                        box-shadow: 0 3px 10px rgba(0,0,0,0.15);
+                        border-left: 5px solid #38bdf8;
                     }}
                     
                     .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
@@ -940,7 +943,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     .status-filter-btn:hover {{ background-color: #d5dbdb; opacity: 0.9; }}
                     .status-filter-btn.active {{ background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }}
 
-                    .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
+                    .timeline-container {{ width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 6px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }}
                     .timeline-slider {{ flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; }}
                     
                     #info-box {{ margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }}
@@ -1006,11 +1009,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 </style>
             </head>
             <body>
-                <div id="top-active-banner">
-                    <div style="font-size: 12px; color: #ffeb3b; font-weight: bold; margin-bottom: 3px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง:</div>
-                    <div id="top-banner-content" style="font-size: 14px; font-weight: bold;">กำลังโหลดข้อมูล...</div>
-                </div>
-
                 <div class="legend">
                     {legend_html_items}
                 </div>
@@ -1040,6 +1038,11 @@ if dw_uploaded_file and sum_uploaded_file:
                     <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
                     <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
                     <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
+                </div>
+
+                <div id="top-active-banner">
+                    <div style="font-size: 11px; color: #38bdf8; font-weight: bold; margin-bottom: 2px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง:</div>
+                    <div id="top-banner-content" style="font-size: 13px; font-weight: bold;">กำลังโหลดข้อมูล...</div>
                 </div>
 
                 <div id="map"></div>
@@ -1276,8 +1279,11 @@ if dw_uploaded_file and sum_uploaded_file:
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
+                        // อัปเดต Title ของ Slider เพื่อให้เวลาเอาเมาส์ชี้แล้วแสดงจุดและเวลา
+                        slider.title = `จุดที่ ${{pointNumText}} (${{tripLabel}}) | เวลา: ${{timeLabel}} | ลูกค้า: ${{custIdLabel}} (${{custNameLabel}})`;
+
                         document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#ffeb3b; font-size:16px;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#64ffda;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#ff8a80;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#ffe082;">${{accQtyLabel}} ถัง</span>
+                            จุดที่ <span style="color:#38bdf8;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#7dd3fc;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#fca5a5;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#fde047;">${{accQtyLabel}} ถัง</span>
                         `;
 
                         document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}})`;
@@ -1808,7 +1814,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         document.getElementById('opt-slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripName}}</span> - ลำดับ: <span style="color:#2980b9;">#${{optSeq}}</span>`;
 
-                        optActivePolylines.forEach(p => map.removeLayer(p));
+                        optActivePolylines.forEach(p => optMap.removeLayer(p));
                         optActivePolylines = [];
 
                         let accumulatedDist = 0.0;
@@ -1863,20 +1869,20 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ หยุดพักการจำลอง";
                     }}
 
-                    function resetOptAnimation() {{
+                    function resetOptAnimation() {
                         pauseAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 รีเซ็ตเส้นทาง Optimized เรียบร้อย";
-                    }}
+                    }
 
-                    function onOptSliderChange(val) {{
+                    function onOptSliderChange(val) {
                         pauseAnimation();
                         updateOptStep(parseInt(val));
-                    }}
+                    }
 
-                    if (optSegments.length > 0) {{ updateOptStep(0); }}
+                    if (optSegments.length > 0) { updateOptStep(0); }
                 </script>
             </body>
             </html>
