@@ -13,9 +13,9 @@ st.set_page_config(
     layout="wide",
 )
 
-# ปรับขนาดหัวข้อหลักให้เล็กลงพอดีตา
+# ปรับขนาดหัวข้อหลักให้ใหญ่ขึ้นกว่าป้ายอัปโหลดเล็กน้อย
 st.markdown(
-    "### 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
+    "## 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
 )
 st.markdown(
     "อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
@@ -441,7 +441,8 @@ def parse_dual_excel_data(dw_file, sum_file):
 
 
 # --- MAIN APP INTERFACE ---
-st.markdown("### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
+# ปรับขนาดหัวข้ออัปโหลดไฟล์ให้เล็กลง (ใช้ H4)
+st.markdown("#### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
 st.markdown(
     "🔗 **ลิงก์สำหรับดาวน์โหลดรายงานต้นทาง:**\n"
     "- [📥 ดาวน์โหลดไฟล์รายงานใบเบิกใบคืนประจำวัน](https://customreport.sprinkle-th.work/customsql/report/nn_daily_requisition_and_return)\n"
@@ -712,7 +713,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             "dist_km": 0.0,
                         })
 
-                    # --- เพิ่มสเต็ปขากลับถึงคลังสินค้าหลักเมื่อจบทริป ---
                     if valid_idx_counter < len(trip_route_segments):
                         return_path = trip_route_segments[valid_idx_counter]
                         last_cust = records_list[-1]
@@ -939,7 +939,6 @@ if dw_uploaded_file and sum_uploaded_file:
                 t_name = f"เที่ยวที่ {t_info['trip_no']}"
                 trip_filter_buttons += f'<button class="filter-btn" id="btn-trip{t_info["trip_no"]}" onclick="setTripFilter(\'{t_name}\')">{t_name}</button>\n'
 
-            # --- ปรับสีแถบพิกัดปัจจุบันเป็น "สีน้ำเงินเทา (Navy-Gray)" ไม่ฉูดฉาด และปรับภาษาอังกฤษให้สอดคล้องกัน ---
             map_html = f"""
             <!DOCTYPE html>
             <html>
@@ -1355,7 +1354,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         if (info.is_warehouse) {{
                             document.getElementById('info-box').innerHTML = `
-                                <b>🚛 ${{tripName}} | กลับถึงคลังสินค้าหลัก (จุดที่ ${{stepNumText}} / ${{segments.length}})</b><br>
+                                <b>🚛 ${{tripLabel}} | กลับถึงคลังสินค้าหลัก (จุดที่ ${{stepNumText}} / ${{segments.length}})</b><br>
                                 <b>🏢 สถานะ:</b> รถขนส่งเดินทางกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย | <b>📦 ยอดสะสมรวม:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.acc_qty}} ถัง</span>
                             `;
                         }} else {{
@@ -1424,8 +1423,9 @@ if dw_uploaded_file and sum_uploaded_file:
 
         # --- TAB 2: เปรียบเทียบเส้นทางเหมาะสมที่สุด (Optimized Route & Maps) ---
         with tab2:
+            # ตัด (Optimized Route / TSP Heuristic) ออก
             st.subheader(
-                "🚀 2. แผนที่และเส้นทางที่เหมาะสมที่สุด (Optimized Route / TSP Heuristic)"
+                "🚀 2. แผนที่และเส้นทางที่เหมาะสมที่สุด"
             )
             st.markdown(
                 "ระบบประมวลผลเส้นทางจากแบบที่ 1 เสร็จสิ้นแล้ว นำระยะทางรวมตั้งต้นมาเปรียบเทียบ และคำนวณเส้นทางใหม่โดยให้ระยะทางน้อยกว่าแบบที่ 1 และมีการสลับเวลาน้อยที่สุด"
@@ -1644,8 +1644,9 @@ if dw_uploaded_file and sum_uploaded_file:
                 hide_index=True,
             )
 
+            # ตัด (Optimized Map พร้อมปุ่มเล่น) ออก เหลือเพียง "แผนที่เส้นทางที่เหมาะสมที่สุด"
             st.markdown(
-                "### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด (Optimized Map พร้อมปุ่มเล่น)"
+                "### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด"
             )
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
             opt_points_json = json.dumps(all_opt_points_flat, ensure_ascii=False)
@@ -1940,7 +1941,8 @@ if dw_uploaded_file and sum_uploaded_file:
         # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่หลายราย พร้อมแผนที่แสดงครบทุกราย
         # -------------------------------------------------------------
         with tab3:
-            st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่ (คำนึงถึงระยะทางที่เพิ่มขึ้นและการวิ่งวน)")
+            # ตัด (คำนึงถึงระยะทางที่เพิ่มขึ้นและการวิ่งวน) ออก
+            st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่")
 
             if "new_members_list" not in st.session_state:
                 st.session_state["new_members_list"] = [
