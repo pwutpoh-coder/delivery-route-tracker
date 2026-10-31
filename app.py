@@ -2048,7 +2048,6 @@ if dw_uploaded_file and sum_uploaded_file:
         with tab3:
             st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่ (รองรับหลายรายพร้อมกัน)")
 
-            # กำหนดค่าเริ่มต้นพิกัดให้เป็นค่าว่าง "" ตามต้องการ
             if "new_members_list" not in st.session_state:
                 st.session_state["new_members_list"] = [
                     {"id": "NEW-CUST-001", "name": "สมาชิกใหม่ 1", "qty": 5, "coord": ""}
@@ -2062,7 +2061,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         "id": f"NEW-CUST-{new_idx:03d}",
                         "name": f"สมาชิกใหม่ {new_idx}",
                         "qty": 5,
-                        "coord": ""  # ให้พิกัดว่างไว้เพื่อให้ผู้ใช้ใส่เอง
+                        "coord": ""
                     })
                     st.rerun()
             with col_btn2:
@@ -2152,16 +2151,14 @@ if dw_uploaded_file and sum_uploaded_file:
                                 temp_route_segments = []
                                 
                                 # คำนวณเส้นทางถนนจริงเพื่อไปหาพิกัดสมาชิกใหม่และจากสมาชิกใหม่ไปพิกัดถัดไป
-                                # จุดก่อนหน้า -> พิกัดสมาชิกใหม่
-                                path_to_new, d_to_new = get_osrm_route(closest_rec['lat'], closest_rec['lng'], p_lat, p_lng)
+                                path_to_new, _ = get_osrm_route(closest_rec['lat'], closest_rec['lng'], p_lat, p_lng)
                                 
-                                # พิกัดสมาชิกใหม่ -> จุดถัดไป (หรือกลับคลังหากเป็นจุดสุดท้าย)
                                 next_lat, next_lng = warehouse_coord[0], warehouse_coord[1]
                                 if target_cust_idx_in_trip + 1 < len(valid_pts_trip):
                                     next_rec = valid_pts_trip[target_cust_idx_in_trip + 1]
                                     next_lat, next_lng = next_rec['lat'], next_rec['lng']
 
-                                path_from_new, d_from_new = get_osrm_route(p_lat, p_lng, next_lat, next_lng)
+                                path_from_new, _ = get_osrm_route(p_lat, p_lng, next_lat, next_lng)
 
                                 temp_route_segments = path_to_new + path_from_new
 
@@ -2457,7 +2454,6 @@ if dw_uploaded_file and sum_uploaded_file:
                                                 <b>แทรกต่อจาก:</b> ${{np.insert_after}}
                                             </div>`, {{direction: 'top', opacity: 0.95}});
 
-                                        # วาดเส้นทางเชื่อมโยงสำหรับสมาชิกใหม่ด้วยสีส้ม Terracotta สบายตา (#E07A5F)
                                         if(np.route_path && np.route_path.length > 0) {{
                                             L.polyline(np.route_path, {{color: '#E07A5F', weight: 5, opacity: 0.9, dashArray: '6, 6'}}).addTo(map3);
                                         }}
