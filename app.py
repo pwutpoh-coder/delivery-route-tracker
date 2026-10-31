@@ -1657,7 +1657,6 @@ if dw_uploaded_file and sum_uploaded_file:
                         "is_swapped": is_swapped_point,
                     })
 
-                # เพิ่มขากลับคลังสำหรับทริป Optimized ใน Tab 2
                 if valid_opt:
                     last_opt_lat, last_opt_lng = valid_opt[-1]
                     ret_opt_path, ret_opt_dist = get_osrm_route(last_opt_lat, last_opt_lng, warehouse_coord[0], warehouse_coord[1])
@@ -2113,7 +2112,6 @@ if dw_uploaded_file and sum_uploaded_file:
                             p_lat = float(c_match.group(1))
                             p_lng = float(c_match.group(2))
 
-                            # ค้นหาพิกัดเดิมรายที่อยู่ใกล้พิกัดใหม่มากที่สุด (Minimum Distance Check ข้ามทุกจุดส่งเดิม)
                             closest_road_dist = float("inf")
                             closest_rec = None
                             closest_seq_num = 0
@@ -2148,9 +2146,8 @@ if dw_uploaded_file and sum_uploaded_file:
                                 test_coords.insert(best_insert_idx, (p_lat, p_lng))
 
                                 test_trip_dist = 0.0
-                                temp_route_segments = []
                                 
-                                # คำนวณเส้นทางถนนจริงเพื่อไปหาพิกัดสมาชิกใหม่และจากสมาชิกใหม่ไปพิกัดถัดไป
+                                # แยกเส้นทางขาเข้าและขาออกจากพิกัดสมาชิกใหม่เพื่อใช้คนละสี
                                 path_to_new, _ = get_osrm_route(closest_rec['lat'], closest_rec['lng'], p_lat, p_lng)
                                 
                                 next_lat, next_lng = warehouse_coord[0], warehouse_coord[1]
@@ -2159,8 +2156,6 @@ if dw_uploaded_file and sum_uploaded_file:
                                     next_lat, next_lng = next_rec['lat'], next_rec['lng']
 
                                 path_from_new, _ = get_osrm_route(p_lat, p_lng, next_lat, next_lng)
-
-                                temp_route_segments = path_to_new + path_from_new
 
                                 for i in range(len(test_coords) - 1):
                                     _, d = get_osrm_route(test_coords[i][0], test_coords[i][1], test_coords[i+1][0], test_coords[i+1][1])
@@ -2183,7 +2178,8 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "badge_label": badge_label,
                                     "prev_id": closest_rec['cust_id'],
                                     "prev_seq": closest_seq_num,
-                                    "route_path": temp_route_segments
+                                    "path_to_new": path_to_new,
+                                    "path_from_new": path_from_new
                                 })
 
                         if processed_new_points:
@@ -2201,7 +2197,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                 })
                             st.dataframe(pd.DataFrame(summary_table_data), use_container_width=True, hide_index=True)
 
-                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิม พร้อมตำแหน่งสมาชิกใหม่และเส้นทางเชื่อมโยง (สีส้มอมน้ำตาล นุ่มนวลสบายตา)")
+                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิม พร้อมตำแหน่งสมาชิกใหม่และเส้นทางเชื่อมโยง (สีส้มอมน้ำตาลสำหรับขาเข้า และสีม่วงอมเทาสำหรับขาออก)")
 
                             existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
                             new_points_json = json.dumps(processed_new_points, ensure_ascii=False)
@@ -2249,9 +2245,15 @@ if dw_uploaded_file and sum_uploaded_file:
                                         display: inline-block;
                                         text-align: center; font-size: 9px; line-height: 12px; color: white;
                                     }}
-                                    .legend-line-new {{
+                                    .legend-line-to {{
                                         width: 24px; height: 4px;
                                         background-color: #E07A5F;
+                                        display: inline-block;
+                                        border-radius: 2px;
+                                    }}
+                                    .legend-line-from {{
+                                        width: 24px; height: 4px;
+                                        background-color: #7B68EE;
                                         display: inline-block;
                                         border-radius: 2px;
                                     }}
@@ -2374,9 +2376,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                 <div class="map-legend-box">
                                     <span style="font-weight:bold; color:#1e3c72;">📌 คำอธิบายสัญลักษณ์แผนที่:</span>
                                     <div class="legend-pill"><span class="legend-dot-new"></span> สมาชิกใหม่ (✦ ป้าย N1, N2...)</div>
-                                    <div class="legend-pill"><span class="legend-line-new"></span> เส้นทางเข้า-ออก สมาชิกใหม่ (ส้ม Terracotta สบายตา)</div>
+                                    <div class="legend-pill"><span class="legend-line-to"></span> ทางมาสมาชิกใหม่ (ส้ม Terracotta `#E07A5F`)</div>
+                                    <div class="legend-pill"><span class="legend-line-from"></span> ทางไปจุดถัดไป (ม่วงอมเทา `#7B68EE`)</div>
                                     <div class="legend-pill"><span class="legend-dot-prev">#</span> จุดเชื่อมต่อเดิม</div>
-                                    <div class="legend-pill"><span style="width:14px; height:14px; background:#0055FF; border-radius:50%; display:inline-block;"></span> ลูกค้าเดิมทั่วไป</div>
                                 </div>
 
                                 <div id="map-tab3-multi"></div>
@@ -2454,9 +2456,15 @@ if dw_uploaded_file and sum_uploaded_file:
                                                 <b>แทรกต่อจาก:</b> ${{np.insert_after}}
                                             </div>`, {{direction: 'top', opacity: 0.95}});
 
-                                        if(np.route_path && np.route_path.length > 0) {{
-                                            L.polyline(np.route_path, {{color: '#E07A5F', weight: 5, opacity: 0.9, dashArray: '6, 6'}}).addTo(map3);
+                                        // 1. เส้นทางจากจุดเดิมใกล้สุดมายังสมาชิกใหม่: สีส้มอมน้ำตาล (#E07A5F) แบบเส้นปรุ
+                                        if(np.path_to_new && np.path_to_new.length > 0) {{
+                                            L.polyline(np.path_to_new, {{color: '#E07A5F', weight: 5, opacity: 0.9, dashArray: '6, 6'}}).addTo(map3);
                                         }}
+                                        // 2. เส้นทางจากสมาชิกใหม่ไปยังพิกัดถัดไป: สีม่วงอมเทา (#7B68EE) แบบเส้นทึบ
+                                        if(np.path_from_new && np.path_from_new.length > 0) {{
+                                            L.polyline(np.path_from_new, {{color: '#7B68EE', weight: 5, opacity: 0.9}}).addTo(map3);
+                                        }}
+
                                         boundsArr.push([np.lat, np.lng]);
                                     }});
 
