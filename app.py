@@ -1183,8 +1183,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         let lateBadgeHtml = isLate ? `<div class="marker-badge-late">!</div>` : '';
                         let gpsBadgeHtml = isGpsDiff ? `<div class="marker-badge-gps">G</div>` : '';
                         let reasonBadgeHtml = isReasonNot ? `<div class="marker-badge-reason" title="${{ptInfo.short_reason_col}}">ไม่</div>` : '';
-                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeVal.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
-                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeVal.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
+                        let extraBadgeHtml = (ptInfo && (ptInfo.is_extra_trip || onTimeCol.includes("รอบเสริม"))) ? `<div class="marker-badge-extra">เสริม</div>` : '';
+                        let newBadgeHtml = (ptInfo && (ptInfo.is_new_member || onTimeCol.includes("สมาชิกใหม่"))) ? `<div class="marker-badge-new">ใหม่</div>` : '';
 
                         let innerHtml = `<div class="marker-container">${{lateBadgeHtml}}${{gpsBadgeHtml}}${{reasonBadgeHtml}}${{extraBadgeHtml}}${{newBadgeHtml}}<div class="number-icon" style="background-color: ${{color || '#008CBA'}} !important;">${{seqNum}}</div></div>`;
                         return L.divIcon({{ className: '', html: innerHtml, iconSize: [28, 28], iconAnchor: [14, 14] }});
@@ -2071,9 +2071,26 @@ if dw_uploaded_file and sum_uploaded_file:
                                             orig_global_idx = df[(df["trip"] == trip_name) & (df["cust_id"] == prev_cust["cust_id"])].index
                                             best_overall_seq = int(orig_global_idx[0]) + 1 if len(orig_global_idx) > 0 else 0
 
-                            if best_overall_rec:
+                            # แก้ไขปัญหา ValueError โดยใช้เงื่อนไขตรวจสอบไม่ให้เกิด Ambiguous Truth Value จาก Pandas Series
+                            has_valid_rec = False
+                            if isinstance(best_overall_rec, dict):
+                                has_valid_rec = True
+                            elif isinstance(best_overall_rec, pd.Series):
+                                has_valid_rec = not best_overall_rec.empty
+                            elif best_overall_rec is not None:
+                                has_valid_rec = True
+
+                            if has_valid_rec:
                                 badge_label = f"N{idx_mem + 1}"
-                                insert_after_text = f"{best_overall_rec['cust_id']} ({best_overall_rec['cust_name']})" if best_overall_rec['cust_id'] != "WAREHOUSE" else "ออกจากคลังสินค้าหลัก"
+                                
+                                if isinstance(best_overall_rec, dict):
+                                    rec_id = best_overall_rec.get('cust_id', '')
+                                    rec_name = best_overall_rec.get('cust_name', '')
+                                else:
+                                    rec_id = best_overall_rec['cust_id']
+                                    rec_name = best_overall_rec['cust_name']
+
+                                insert_after_text = f"{rec_id} ({rec_name})" if rec_id != "WAREHOUSE" else "ออกจากคลังสินค้าหลัก"
 
                                 processed_new_points.append({
                                     "cust_id": mem["id"],
@@ -2087,7 +2104,7 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "road_dist": best_overall_add_dist,
                                     "add_dist": best_overall_add_dist,
                                     "badge_label": badge_label,
-                                    "prev_id": best_overall_rec['cust_id'],
+                                    "prev_id": rec_id,
                                     "prev_seq": best_overall_seq,
                                     "route_path": best_overall_path
                                 })
