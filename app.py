@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- CUSTOM CSS: ปรับแต่งแท็บ (Tabs) ให้เปลี่ยนสีอักษรและเส้นใต้เมื่อเลือก, ปรับขนาดหัวข้อให้เหมาะสม ---
+# --- CUSTOM CSS: ปรับแต่งแท็บ (Tabs) ให้เปลี่ยนสีอักษรและเส้นใต้เมื่อเลือก, ปรับขนาดหัวข้อหลัก ---
 st.markdown(
     """
     <style>
@@ -40,13 +40,22 @@ st.markdown(
         font-weight: bold !important;
         border-bottom: 3px solid #0284c7 !important;
     }
+    /* ปรับขนาดหัวข้อหลักให้ใหญ่ขึ้น */
+    .main-header-title {
+        font-size: 28px !important;
+        font-weight: bold !important;
+        color: #0f172a;
+        margin-top: 10px;
+        margin-bottom: 8px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 st.markdown(
-    "### 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
+    '<div class="main-header-title">🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)</div>',
+    unsafe_allow_html=True,
 )
 st.markdown(
     "อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
@@ -562,7 +571,6 @@ play_mode = st.sidebar.radio(
     ),
 )
 
-# เปลี่ยนชื่อสไลเดอร์ตามที่ขอ
 anim_speed_ms = st.sidebar.slider(
     "ระยะเวลาต่อจุด(มิลลิวินาที/จุด)",
     min_value=100,
@@ -973,6 +981,14 @@ if dw_uploaded_file and sum_uploaded_file:
                 <style>
                     #map { width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
                     
+                    /* ปรับแต่ง Leaflet Tooltip ให้มีมุมโค้งมนสบายตา */
+                    .leaflet-tooltip {
+                        border-radius: 8px !important;
+                        padding: 8px 12px !important;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.18) !important;
+                        border: 1px solid #cbd5e1 !important;
+                    }
+                    
                     #top-active-banner {
                         background: linear-gradient(135deg, #2c3e50, #34495e);
                         color: white;
@@ -997,10 +1013,37 @@ if dw_uploaded_file and sum_uploaded_file:
                     .status-filter-btn:hover { background-color: #d5dbdb; opacity: 0.9; }
                     .status-filter-btn.active { background-color: #d9534f; color: white; box-shadow: 0 0 6px rgba(0,0,0,0.3); }
 
-                    .timeline-container { width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }
+                    .timeline-container { position: relative; width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-family: sans-serif; background: #eef2f5; padding: 8px 12px; border-radius: 6px; box-sizing: border-box; }
                     .timeline-slider { flex-grow: 1; height: 8px; cursor: pointer; accent-color: #0055FF; }
                     
-                    #info-box { margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 4px; font-size: 14px; line-height: 1.6; color: #333; }
+                    /* Tooltip แสดงตัวเลขจุดเมื่อเอาเมาส์ชี้บนสไลเดอร์ */
+                    #slider-hover-tip {
+                        position: absolute;
+                        display: none;
+                        background: #0284c7;
+                        color: #ffffff;
+                        padding: 3px 8px;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: bold;
+                        pointer-events: none;
+                        white-space: nowrap;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+                        z-index: 1000;
+                        transform: translate(-50%, -34px);
+                    }
+                    #slider-hover-tip::after {
+                        content: '';
+                        position: absolute;
+                        top: 100%;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        border-width: 4px;
+                        border-style: solid;
+                        border-color: #0284c7 transparent transparent transparent;
+                    }
+
+                    #info-box { margin-top: 10px; padding: 12px 16px; background: #f8f9fa; border-left: 6px solid #008CBA; font-family: sans-serif; border-radius: 6px; font-size: 14px; line-height: 1.6; color: #333; }
                     .legend { display: flex; gap: 12px; margin-bottom: 6px; font-family: sans-serif; font-size: 12px; font-weight: bold; flex-wrap: wrap; align-items: center; }
                     .legend-item { display: flex; align-items: center; gap: 4px; }
                     .color-box { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
@@ -1090,7 +1133,8 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="timeline-container">
                     <span style="font-weight:bold; font-size:13px;">⏱️ ไทม์ไลน์:</span>
-                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="__MAX_SEG__" value="0" oninput="onSliderChange(this.value)">
+                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="__MAX_SEG__" value="0" oninput="onSliderChange(this.value)" onmousemove="showSliderHoverTooltip(event)" onmouseleave="hideSliderHoverTooltip()">
+                    <div id="slider-hover-tip">จุดที่ 1</div>
                     <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:260px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุดที่ 1</span>
                 </div>
 
@@ -1132,6 +1176,27 @@ if dw_uploaded_file and sum_uploaded_file:
                     let animTimer = null;
                     let isPlaying = false;
                     let activeMarkerRef = null;
+
+                    function showSliderHoverTooltip(e) {
+                        const slider = document.getElementById('timeSlider');
+                        const tip = document.getElementById('slider-hover-tip');
+                        const rect = slider.getBoundingClientRect();
+                        const containerRect = slider.parentElement.getBoundingClientRect();
+                        
+                        const offsetX = e.clientX - rect.left;
+                        const pct = Math.max(0, Math.min(1, offsetX / rect.width));
+                        const maxVal = parseInt(slider.max) || 0;
+                        const hoverIdx = Math.round(pct * maxVal);
+                        
+                        tip.innerText = "จุดที่ " + (hoverIdx + 1);
+                        tip.style.display = "block";
+                        tip.style.left = (e.clientX - containerRect.left) + "px";
+                    }
+
+                    function hideSliderHoverTooltip() {
+                        const tip = document.getElementById('slider-hover-tip');
+                        tip.style.display = "none";
+                    }
 
                     function hasReasonStartsWithNot(pt) {
                         let r = pt.short_reason_col || '';
@@ -1691,6 +1756,14 @@ if dw_uploaded_file and sum_uploaded_file:
                 <style>
                     #opt-map { width: 100%; height: 500px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
                     
+                    /* ปรับแต่ง Leaflet Tooltip ให้มีมุมโค้งมนสบายตา */
+                    .leaflet-tooltip {
+                        border-radius: 8px !important;
+                        padding: 8px 12px !important;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.18) !important;
+                        border: 1px solid #cbd5e1 !important;
+                    }
+
                     #opt-top-banner {
                         background: linear-gradient(135deg, #2c3e50, #2980b9);
                         color: white;
@@ -1706,8 +1779,35 @@ if dw_uploaded_file and sum_uploaded_file:
                     .opt-btn { padding: 6px 14px; background-color: #2980b9; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: bold; transition: 0.2s; }
                     .opt-btn:hover { background-color: #1f618d; transform: scale(1.02); }
 
-                    .opt-timeline-container { width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-family: sans-serif; background: #eef2f5; padding: 6px 10px; border-radius: 6px; box-sizing: border-box; }
+                    .opt-timeline-container { position: relative; width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-family: sans-serif; background: #eef2f5; padding: 6px 10px; border-radius: 6px; box-sizing: border-box; }
                     .opt-timeline-slider { flex-grow: 1; height: 8px; cursor: pointer; accent-color: #2980b9; }
+
+                    /* Tooltip แสดงตัวเลขจุดเมื่อเอาเมาส์ชี้บนสไลเดอร์ */
+                    #opt-slider-hover-tip {
+                        position: absolute;
+                        display: none;
+                        background: #2980b9;
+                        color: #ffffff;
+                        padding: 3px 8px;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: bold;
+                        pointer-events: none;
+                        white-space: nowrap;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+                        z-index: 1000;
+                        transform: translate(-50%, -34px);
+                    }
+                    #opt-slider-hover-tip::after {
+                        content: '';
+                        position: absolute;
+                        top: 100%;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        border-width: 4px;
+                        border-style: solid;
+                        border-color: #2980b9 transparent transparent transparent;
+                    }
 
                     .opt-legend { display: flex; gap: 12px; margin-bottom: 8px; font-family: sans-serif; font-size: 12px; font-weight: bold; align-items: center; flex-wrap: wrap; }
                     .opt-color-box { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
@@ -1746,7 +1846,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         box-shadow: 0 1px 4px rgba(0,0,0,0.4); z-index: 20;
                         white-space: nowrap;
                     }
-                    #opt-info-box { margin-top: 10px; padding: 10px 14px; background: #f8f9fa; border-left: 6px solid #2980b9; font-family: sans-serif; border-radius: 4px; font-size: 13px; line-height: 1.5; color: #333; }
+                    #opt-info-box { margin-top: 10px; padding: 10px 14px; background: #f8f9fa; border-left: 6px solid #2980b9; font-family: sans-serif; border-radius: 6px; font-size: 13px; line-height: 1.5; color: #333; }
                 </style>
             </head>
             <body>
@@ -1769,7 +1869,8 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="opt-timeline-container">
                     <span style="font-weight:bold; font-size:12px;">⏱️ ลำดับ:</span>
-                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="__OPT_MAX_SEG__" value="0" oninput="onOptSliderChange(this.value)">
+                    <input type="range" id="optTimeSlider" class="opt-timeline-slider" min="0" max="__OPT_MAX_SEG__" value="0" oninput="onOptSliderChange(this.value)" onmousemove="showOptSliderHoverTooltip(event)" onmouseleave="hideOptSliderHoverTooltip()">
+                    <div id="opt-slider-hover-tip">จุดที่ 1</div>
                     <span id="opt-slider-label" style="font-weight:bold; font-size:12px; min-width:180px; text-align:right; background:#fff; padding:3px 8px; border-radius:4px; border:1px solid #ccc;">จุดที่ 1</span>
                 </div>
 
@@ -1796,6 +1897,27 @@ if dw_uploaded_file and sum_uploaded_file:
                     let optAnimTimer = null;
                     let optIsPlaying = false;
                     let optActiveMarkerRef = null;
+
+                    function showOptSliderHoverTooltip(e) {
+                        const slider = document.getElementById('optTimeSlider');
+                        const tip = document.getElementById('opt-slider-hover-tip');
+                        const rect = slider.getBoundingClientRect();
+                        const containerRect = slider.parentElement.getBoundingClientRect();
+                        
+                        const offsetX = e.clientX - rect.left;
+                        const pct = Math.max(0, Math.min(1, offsetX / rect.width));
+                        const maxVal = parseInt(slider.max) || 0;
+                        const hoverIdx = Math.round(pct * maxVal);
+                        
+                        tip.innerText = "จุดที่ " + (hoverIdx + 1);
+                        tip.style.display = "block";
+                        tip.style.left = (e.clientX - containerRect.left) + "px";
+                    }
+
+                    function hideOptSliderHoverTooltip() {
+                        const tip = document.getElementById('opt-slider-hover-tip');
+                        tip.style.display = "none";
+                    }
 
                     function initOptMarkers() {
                         optMarkers.forEach(m => optMap.removeLayer(m));
@@ -2154,6 +2276,14 @@ if dw_uploaded_file and sum_uploaded_file:
                                 <style>
                                     #map-tab3-multi { width: 100%; height: 600px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
                                     
+                                    /* ปรับแต่ง Leaflet Tooltip ให้มีมุมโค้งมนสบายตา */
+                                    .leaflet-tooltip {
+                                        border-radius: 8px !important;
+                                        padding: 8px 12px !important;
+                                        box-shadow: 0 4px 12px rgba(0,0,0,0.18) !important;
+                                        border: 1px solid #cbd5e1 !important;
+                                    }
+
                                     .map-legend-box {
                                         background: #ffffff;
                                         padding: 8px 14px;
