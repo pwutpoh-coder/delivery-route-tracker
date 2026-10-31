@@ -13,9 +13,42 @@ st.set_page_config(
     layout="wide",
 )
 
-# ปรับขนาดหัวข้อหลักให้ใหญ่ขึ้นกว่าป้ายอัปโหลดเล็กน้อย
+# --- CUSTOM CSS: ปรับแต่งสีแท็บ (Tabs) ให้เป็นโทนน้ำเงิน และสีเทาเมื่อเลือก ---
 st.markdown(
-    "## 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
+    """
+    <style>
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #f8fafc;
+        padding: 8px;
+        border-radius: 10px;
+        border: 1px solid #e2e8f0;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #e0f2fe;
+        border-radius: 6px;
+        color: #0369a1;
+        font-weight: bold;
+        padding: 10px 18px;
+        border: 1px solid #bae6fd;
+    }
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #bae6fd;
+        color: #0c4a6e;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #64748b !important;
+        color: #ffffff !important;
+        border: 1px solid #475569 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ปรับหัวข้อหลักแอปพลิเคชันให้เป็นขนาด H3 ตามต้องการ
+st.markdown(
+    "### 🚚 ระบบวิเคราะห์และติดตามเส้นทางการจัดส่ง (Sprinkle Delivery Inspector)"
 )
 st.markdown(
     "อัปโหลดไฟล์รายงานใบเบิกใบคืนประจำวัน และ รายงานสรุปการจัดส่งประจำวัน เพื่อตรวจสอบรายการจัดส่งตามจริง พร้อมคำนวณเส้นทางและระยะทางผ่าน OSRM"
@@ -45,6 +78,7 @@ warehouse_options = {
     "สาขาสุขุมวิท 50": (13.699439, 100.587817),
     "อื่นๆ (ระบุพิกัดเอง)": None,
 }
+
 
 # --- FUNCTION: แปลงรหัสรถขนส่งเป็นคลังสินค้าอัตโนมัติจากเลข 2 ตัวแรก ---
 def get_auto_warehouse_by_truck(truck_no):
@@ -441,7 +475,6 @@ def parse_dual_excel_data(dw_file, sum_file):
 
 
 # --- MAIN APP INTERFACE ---
-# ปรับขนาดหัวข้ออัปโหลดไฟล์ให้เล็กลง (ใช้ H4)
 st.markdown("#### 📂 อัปโหลดไฟล์ข้อมูลประจำวัน (2 ไฟล์)")
 st.markdown(
     "🔗 **ลิงก์สำหรับดาวน์โหลดรายงานต้นทาง:**\n"
@@ -534,8 +567,9 @@ play_mode = st.sidebar.radio(
     ),
 )
 
+# เปลี่ยนชื่อข้อความแถบปรับความเร็วการจำลองให้เข้าใจง่ายและเป็นมืออาชีพ
 anim_speed_ms = st.sidebar.slider(
-    "ความเร็วการจำลอง (มิลลิวินาที/จุด)",
+    "ระยะเวลาหน่วงต่อจุดในการจำลอง (มิลลิวินาที/จุด)",
     min_value=100,
     max_value=3000,
     value=600,
@@ -604,7 +638,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
         tab1, tab2, tab3 = st.tabs([
             "📊 1. แผนที่และเส้นทางตามลำดับเวลาจริง",
-            "🚀 2. แผนที่และเส้นทางเหมาะสมที่สุด (ไม่เรียงเวลา)",
+            "🚀 2. แผนที่และเส้นทางเหมาะสมที่สุด",
             "🔍 3. ตรวจสอบและแทรกพิกัดสมาชิกใหม่",
         ])
 
@@ -1095,7 +1129,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                     const warehouseIcon = L.divIcon({{
                         className: '',
-                        html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:30px; height:30px; text-align:center; font-size:14px; line-height:26px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;">🏢</div>`,
+                        html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:30px; height:30px; text-align:center; font-size:14px; line-height:26px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center;" title="กลับถึงคลังสินค้า">🏢</div>`,
                         iconSize: [30, 30], iconAnchor: [15, 15]
                     }});
 
@@ -1157,8 +1191,8 @@ if dw_uploaded_file and sum_uploaded_file:
                     function createTooltipHtml(info, seqNum) {{
                         if (info.is_warehouse) {{
                             return `<div style="font-family:sans-serif; font-size:11px; line-height:1.4;">
-                                <b>🏢 คลังสินค้าหลัก (${{info.trip}})</b><br>
-                                <b>สถานะ:</b> กลับถึงคลังสินค้าเรียบร้อย<br>
+                                <b>🏢 คลังสินค้าหลัก (${{info.trip}}) - กลับถึงสาขา</b><br>
+                                <b>สถานะ:</b> รถกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย เพื่อเตรียมไปเที่ยวอื่นต่อ<br>
                                 <b>ยอดสะสมรวม:</b> ${{info.acc_qty}} ถัง
                             </div>`;
                         }}
@@ -1187,8 +1221,8 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (ptInfo && ptInfo.is_warehouse) {{
                             return L.divIcon({{
                                 className: '',
-                                html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:26px; height:26px; text-align:center; font-size:12px; line-height:22px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;">🏢</div>`,
-                                iconSize: [26, 26], iconAnchor: [13, 13]
+                                html: `<div style="background:#2c3e50; color:white; border:2px solid white; border-radius:50%; width:28px; height:28px; text-align:center; font-size:14px; line-height:24px; font-weight:bold; box-shadow:0 2px 6px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center;" title="กลับถึงคลังสินค้า">🏢</div>`,
+                                iconSize: [28, 28], iconAnchor: [14, 14]
                             }});
                         }}
                         let onTimeVal = ptInfo && ptInfo.on_time_col ? ptInfo.on_time_col : '';
@@ -1214,7 +1248,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             if (pt && pointMatchesFilter(pt)) {{
                                 let seqNumber = idx + 1;
                                 let customIcon = createMarkerIcon(seqNumber, seg.color, pt);
-                                let marker = L.marker([pt.lat, pt.lng], {{ icon: customIcon }});
+                                let marker = L.marker(pt.is_warehouse ? warehouse : [pt.lat, pt.lng], {{ icon: customIcon }});
                                 
                                 if (!isMode1 && idx > currentStep) {{
                                     // ซ่อนไว้ก่อน
@@ -1312,7 +1346,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
                         if (info.is_warehouse) {{
                             document.getElementById('top-banner-content').innerHTML = `
-                                จุดที่ <span style="color:#5dade2; font-size:14px;">${{stepNumText}}</span> (${{tripLabel}}) | 🏢 <span style="color:#ffffff;">กลับถึงคลังสินค้าหลัก</span> | ยอดสะสมรวม: <span style="color:#f39c12;">${{info.acc_qty}} ถัง</span>
+                                จุดที่ <span style="color:#5dade2; font-size:14px;">${{stepNumText}}</span> (${{tripLabel}}) | 🏢 <span style="color:#ffffff;">กลับถึงคลังสินค้าหลัก (เตรียมไปเที่ยวอื่นต่อ)</span> | ยอดสะสมรวม: <span style="color:#f39c12;">${{info.acc_qty}} ถัง</span>
                             `;
                             document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{tripLabel}}</span> - <span style="color:#5dade2;">กลับถึงคลัง</span>`;
                         }} else {{
@@ -1355,7 +1389,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         if (info.is_warehouse) {{
                             document.getElementById('info-box').innerHTML = `
                                 <b>🚛 ${{tripLabel}} | กลับถึงคลังสินค้าหลัก (จุดที่ ${{stepNumText}} / ${{segments.length}})</b><br>
-                                <b>🏢 สถานะ:</b> รถขนส่งเดินทางกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย | <b>📦 ยอดสะสมรวม:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.acc_qty}} ถัง</span>
+                                <b>🏢 สถานะ:</b> รถขนส่งเดินทางกลับถึงคลังสินค้าประจำเที่ยวเรียบร้อย พร้อมสำหรับจัดสรรเที่ยววิ่งถัดไป | <b>📦 ยอดสะสมรวม:</b> <span style="color:#D32F2F; font-weight:bold;">${{info.acc_qty}} ถัง</span>
                             `;
                         }} else {{
                             let addrStr = info.shipping_address && info.shipping_address !== '-' ? info.shipping_address : '-';
@@ -1368,7 +1402,8 @@ if dw_uploaded_file and sum_uploaded_file:
                             `;
                         }}
 
-                        map.panTo([info.lat, info.lng]);
+                        let panTarget = info.is_warehouse ? warehouse : [info.lat, info.lng];
+                        map.panTo(panTarget);
                     }}
 
                     function nextStep() {{
@@ -1423,10 +1458,7 @@ if dw_uploaded_file and sum_uploaded_file:
 
         # --- TAB 2: เปรียบเทียบเส้นทางเหมาะสมที่สุด (Optimized Route & Maps) ---
         with tab2:
-            # ตัด (Optimized Route / TSP Heuristic) ออก
-            st.subheader(
-                "🚀 2. แผนที่และเส้นทางที่เหมาะสมที่สุด"
-            )
+            st.markdown("## 🚀 2. แผนที่และเส้นทางที่เหมาะสมที่สุด")
             st.markdown(
                 "ระบบประมวลผลเส้นทางจากแบบที่ 1 เสร็จสิ้นแล้ว นำระยะทางรวมตั้งต้นมาเปรียบเทียบ และคำนวณเส้นทางใหม่โดยให้ระยะทางน้อยกว่าแบบที่ 1 และมีการสลับเวลาน้อยที่สุด"
             )
@@ -1612,7 +1644,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 else 0.0
             )
 
-            st.markdown("### 📊 3. สรุปเปรียบเทียบระยะทางและลำดับ (แบบที่ 1 vs แบบที่ 2)")
+            st.markdown("## 📊 3. สรุปเปรียบเทียบระยะทางและลำดับ (แบบที่ 1 vs แบบที่ 2)")
             col_a1, col_a2, col_a3, col_a4 = st.columns(4)
             col_a1.metric(
                 "ระยะทางเดิมรวม (แบบที่ 1)", f"{total_orig_dist_all:.2f} กม."
@@ -1630,11 +1662,11 @@ if dw_uploaded_file and sum_uploaded_file:
                 delta=f"{(total_swapped_points/total_points_count*100):.1f}% ของจุดทั้งหมด",
             )
 
-            st.markdown("#### 📋 ตารางเปรียบเทียบระยะทางแยกตามเที่ยวการส่ง")
+            st.markdown("### 📋 ตารางเปรียบเทียบระยะทางแยกตามเที่ยวการส่ง")
             st.table(pd.DataFrame(optimized_comparison_data))
 
             st.markdown(
-                "#### 🔄 ตารางเปรียบเทียบการสลับลำดับจุดส่ง (เทียบแบบที่ 2 กับ แบบที่ 1)"
+                "### 🔄 ตารางเปรียบเทียบการสลับลำดับจุดส่ง (เทียบแบบที่ 2 กับ แบบที่ 1)"
             )
             display_swap_df = pd.DataFrame(detailed_swap_records).drop(columns=["is_swapped"])
             st.dataframe(
@@ -1644,9 +1676,8 @@ if dw_uploaded_file and sum_uploaded_file:
                 hide_index=True,
             )
 
-            # ตัด (Optimized Map พร้อมปุ่มเล่น) ออก เหลือเพียง "แผนที่เส้นทางที่เหมาะสมที่สุด"
             st.markdown(
-                "### 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด"
+                "## 🗺️ แผนที่เส้นทางที่เหมาะสมที่สุด"
             )
             opt_segments_json = json.dumps(opt_segments_data, ensure_ascii=False)
             opt_points_json = json.dumps(all_opt_points_flat, ensure_ascii=False)
@@ -1912,20 +1943,20 @@ if dw_uploaded_file and sum_uploaded_file:
                         document.getElementById('opt-status-text').innerText = "⏸ Optimized Simulation Paused";
                     }}
 
-                    function resetOptAnimation() {{
+                    function resetOptAnimation() {
                         pauseAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
                         document.getElementById('opt-status-text').innerText = "🔄 Optimized Simulation Reset";
-                    }}
+                    }
 
-                    function onOptSliderChange(val) {{
+                    function onOptSliderChange(val) {
                         pauseAnimation();
                         updateOptStep(parseInt(val));
-                    }}
+                    }
 
-                    if (optSegments.length > 0) {{ updateOptStep(0); }}
+                    if (optSegments.length > 0) { updateOptStep(0); }
                 </script>
             </body>
             </html>
@@ -1941,8 +1972,7 @@ if dw_uploaded_file and sum_uploaded_file:
         # 🔍 แท็บที่ 3: ระบบตรวจสอบ แทรกพิกัดสมาชิกใหม่หลายราย พร้อมแผนที่แสดงครบทุกราย
         # -------------------------------------------------------------
         with tab3:
-            # ตัด (คำนึงถึงระยะทางที่เพิ่มขึ้นและการวิ่งวน) ออก
-            st.subheader("🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่")
+            st.markdown("## 🔍 ระบบจำลองและแนะนำตำแหน่งแทรกพิกัดสมาชิกใหม่")
 
             if "new_members_list" not in st.session_state:
                 st.session_state["new_members_list"] = [
