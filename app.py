@@ -624,7 +624,7 @@ if dw_uploaded_file and sum_uploaded_file:
             }
 
             with st.spinner(
-                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (เฉพาะจุดที่มีพิกัด)..."
+                "กำลังคำนวณเส้นทางถนนจริงและระยะทางรวม (รวมการวิ่งกลับคลัง)..."
             ):
                 segments_data = []
                 grouped = df.groupby("trip", sort=False)
@@ -639,6 +639,8 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 for trip_name, group in grouped:
                     valid_group = group[(group["lat"] != 0.0) & (group["lng"] != 0.0)].copy()
+                    
+                    # บังคับให้เส้นทางเริ่มต้นและสิ้นสุดที่คลังสินค้าหลักทุกเที่ยว (Return to Warehouse)
                     route_pts = [warehouse_coord] + list(zip(valid_group["lat"], valid_group["lng"])) + [warehouse_coord]
 
                     total_trip_dist = 0.0
@@ -723,7 +725,7 @@ if dw_uploaded_file and sum_uploaded_file:
                 total_day_distance = round(sum(trip_distances.values()), 2)
 
             c3.success(
-                f"📏 **ระยะทางวิ่งรวมทั้งหมด:** {total_day_distance:.2f} กม."
+                f"📏 **ระยะทางวิ่งรวมทั้งหมด (รวมขากลับคลัง):** {total_day_distance:.2f} กม."
             )
 
             df["inc_dist"] = row_incremental_distances
@@ -919,7 +921,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     #map {{ width: 100%; height: 540px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }}
                     
                     #top-active-banner {{
-                        background: linear-gradient(135deg, #2b5876, #4e4376);
+                        background: linear-gradient(135deg, #1e3c72, #2a5298);
                         color: #f1f5f9;
                         padding: 10px 16px;
                         border-radius: 8px;
@@ -927,7 +929,7 @@ if dw_uploaded_file and sum_uploaded_file:
                         margin-bottom: 12px;
                         font-family: sans-serif;
                         box-shadow: 0 3px 10px rgba(0,0,0,0.15);
-                        border-left: 5px solid #38bdf8;
+                        border-left: 5px solid #00d2ff;
                     }}
                     
                     .controls {{ margin-bottom: 10px; font-family: sans-serif; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }}
@@ -976,6 +978,21 @@ if dw_uploaded_file and sum_uploaded_file:
                         z-index: 9999 !important;
                         border: 2px solid #FFFFFF !important;
                         box-shadow: 0 0 16px #FFD700, 0 4px 12px rgba(0,0,0,0.9) !important;
+                    }}
+
+                    /* ไอคอนคลังสินค้าสุดสวยงาม */
+                    .warehouse-marker-box {{
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 40px;
+                        height: 40px;
+                        background: linear-gradient(135deg, #f39c12, #d35400);
+                        border: 3px solid #ffffff;
+                        border-radius: 12px;
+                        box-shadow: 0 4px 15px rgba(243, 156, 18, 0.6);
+                        color: white;
+                        font-size: 20px;
                     }}
 
                     .marker-badge-late {{
@@ -1036,12 +1053,12 @@ if dw_uploaded_file and sum_uploaded_file:
 
                 <div class="timeline-container">
                     <span style="font-weight:bold; font-size:13px;">⏱️ ช่วงเวลา:</span>
-                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)">
+                    <input type="range" id="timeSlider" class="timeline-slider" min="0" max="{max(len(segments_data)-1, 0)}" value="0" oninput="onSliderChange(this.value)" onmousemove="onSliderHover(event)" title="เลื่อนเพื่อเลือกจุดเวลาจัดส่ง">
                     <span id="slider-label" style="font-weight:bold; font-size:12px; min-width:280px; text-align:right; background:#fff; padding:4px 10px; border-radius:4px; border:1px solid #ccc;">09:00 - จุด 1</span>
                 </div>
 
                 <div id="top-active-banner">
-                    <div style="font-size: 11px; color: #38bdf8; font-weight: bold; margin-bottom: 2px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง:</div>
+                    <div style="font-size: 11px; color: #00d2ff; font-weight: bold; margin-bottom: 2px;">📍 พิกัดปัจจุบัน / กำลังเดินทางมาถึง:</div>
                     <div id="top-banner-content" style="font-size: 13px; font-weight: bold;">กำลังโหลดข้อมูล...</div>
                 </div>
 
@@ -1063,8 +1080,16 @@ if dw_uploaded_file and sum_uploaded_file:
                         attribution: '© OpenStreetMap contributors'
                     }}).addTo(map);
 
-                    L.marker(warehouse).addTo(map)
-                        .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
+                    // สร้างไอคอนคลังสินค้าหลักสุดหรู
+                    let warehouseIconHtml = `<div class="warehouse-marker-box" title="คลังสินค้าหลัก">🏢</div>`;
+                    let customWarehouseIcon = L.divIcon({{
+                        className: '',
+                        html: warehouseIconHtml,
+                        iconSize: [40, 40],
+                        iconAnchor: [20, 20]
+                    }});
+                    L.marker(warehouse, {{icon: customWarehouseIcon, zIndexOffset: 99999}}).addTo(map)
+                        .bindTooltip("🏢 <b>คลังสินค้าหลัก (จุดเริ่มต้นและสิ้นสุดทุกเที่ยว)</b>", {{permanent: false, direction: 'top'}});
 
                     let allMarkers = [];
                     let activePolylines = [];
@@ -1279,11 +1304,11 @@ if dw_uploaded_file and sum_uploaded_file:
                         let tripLabel = info.trip || currentSeg.trip || '-';
                         let pointNumText = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (currentStep + 1);
 
-                        // อัปเดต Title ของ Slider เพื่อให้เวลาเอาเมาส์ชี้แล้วแสดงจุดและเวลา
+                        // อัปเดต Title และ Tooltip เมื่อเอาเมาส์ชี้ที่ Slider
                         slider.title = `จุดที่ ${{pointNumText}} (${{tripLabel}}) | เวลา: ${{timeLabel}} | ลูกค้า: ${{custIdLabel}} (${{custNameLabel}})`;
 
                         document.getElementById('top-banner-content').innerHTML = `
-                            จุดที่ <span style="color:#38bdf8;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#7dd3fc;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#fca5a5;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#fde047;">${{accQtyLabel}} ถัง</span>
+                            จุดที่ <span style="color:#00d2ff;">${{pointNumText}}</span> (${{tripLabel}}) | เวลา: <b>${{timeLabel}}</b> | ลูกค้า: <span style="color:#7dd3fc;">${{custIdLabel}} (${{custNameLabel}})</span> | ที่อยู่: <span style="color:#ffffff;">${{addressLabel}}</span> | ยอดส่ง: <span style="color:#fca5a5;">${{qtyLabel}} ถัง</span> | ยอดสะสม: <span style="color:#fde047;">${{accQtyLabel}} ถัง</span>
                         `;
 
                         document.getElementById('slider-label').innerHTML = `<span style="color:${{currentSeg.color}}; font-weight:bold;">${{timeLabel}}</span> - <span style="color:#0055FF;">${{custIdLabel}}</span> (จุด ${{pointNumText}})`;
@@ -1328,6 +1353,26 @@ if dw_uploaded_file and sum_uploaded_file:
                         `;
 
                         map.panTo([info.lat, info.lng]);
+                    }}
+
+                    // ฟังก์ชันแสดงข้อมูลเมื่อเอาเมาส์ชี้ผ่านตำแหน่งต่างๆ บน Slider
+                    function onSliderHover(event) {{
+                        let slider = event.target;
+                        let rect = slider.getBoundingClientRect();
+                        let x = event.clientX - rect.left;
+                        let width = rect.width;
+                        let percent = Math.max(0, Math.min(1, x / width));
+                        let maxVal = parseInt(slider.max) || 0;
+                        let targetIdx = Math.round(percent * maxVal);
+                        
+                        if (targetIdx >= 0 && targetIdx < segments.length) {{
+                            let seg = segments[targetIdx];
+                            if (seg && seg.info) {{
+                                let info = seg.info;
+                                let pNum = (info.point_idx !== undefined && info.point_idx !== null) ? (info.point_idx + 1) : (targetIdx + 1);
+                                slider.title = `จุดที่ ${{pNum}} (${{info.trip || seg.trip}}) | เวลา: ${{info.time || '-'}} | ลูกค้า: ${{info.cust_id || '-'}} (${{info.cust_name || '-'}})`;
+                            }}
+                        }}
                     }}
 
                     function nextStep() {{
@@ -1720,8 +1765,15 @@ if dw_uploaded_file and sum_uploaded_file:
                         attribution: '© OpenStreetMap contributors'
                     }}).addTo(optMap);
 
-                    L.marker(optWarehouse).addTo(optMap)
-                        .bindTooltip("🏢 คลังสินค้าหลัก", {{permanent: false, direction: 'top'}});
+                    let optWarehouseHtml = `<div class="warehouse-marker-box" title="คลังสินค้าหลัก">🏢</div>`;
+                    let optCustomWarehouseIcon = L.divIcon({{
+                        className: '',
+                        html: optWarehouseHtml,
+                        iconSize: [40, 40],
+                        iconAnchor: [20, 20]
+                    }});
+                    L.marker(optWarehouse, {{icon: optCustomWarehouseIcon, zIndexOffset: 99999}}).addTo(optMap)
+                        .bindTooltip("🏢 <b>คลังสินค้าหลัก</b>", {{permanent: false, direction: 'top'}});
 
                     let optMarkers = [];
                     let optActivePolylines = [];
@@ -1870,7 +1922,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function resetOptAnimation() {{
-                        pauseAnimation();
+                        pauseOptAnimation();
                         let firstValid = optSegments.findIndex(seg => seg.info.lat !== 0.0);
                         optCurrentStep = firstValid !== -1 ? firstValid : 0;
                         updateOptStep(optCurrentStep);
@@ -1878,7 +1930,7 @@ if dw_uploaded_file and sum_uploaded_file:
                     }}
 
                     function onOptSliderChange(val) {{
-                        pauseAnimation();
+                        pauseOptAnimation();
                         updateOptStep(parseInt(val));
                     }}
 
@@ -1962,7 +2014,7 @@ if dw_uploaded_file and sum_uploaded_file:
                             p_lat = float(c_match.group(1))
                             p_lng = float(c_match.group(2))
 
-                            # พิจารณาจากพิกัด Lat/Long และระยะทางถนนจริง (OSRM Road Distance) ที่ใกล้ที่สุด
+                            # พิจารณาจากเส้นทางถนนจริง (OSRM Road Distance) ที่ใกล้ที่สุดกับพิกัดใหม่
                             closest_road_dist = float("inf")
                             closest_rec = None
                             closest_seq_num = 0
@@ -2033,12 +2085,12 @@ if dw_uploaded_file and sum_uploaded_file:
                                     "ชื่อสมาชิก": p_item["cust_name"],
                                     "เที่ยวที่แนะนำ": p_item["trip"],
                                     "แทรกต่อจากลูกค้าเดิม": p_item["insert_after"],
-                                    "ระยะทางถนนถึงจุด (กม.)": f"{p_item['road_dist']:.2f}",
+                                    "ระยะทางถนนใกล้สุด (กม.)": f"{p_item['road_dist']:.2f}",
                                     "ระยะทางเพิ่มขึ้น (กม.)": f"+{p_item['add_dist']:.2f}"
                                 })
                             st.dataframe(pd.DataFrame(summary_table_data), use_container_width=True, hide_index=True)
 
-                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิมทั้งหมด พร้อมตำแหน่งสมาชิกใหม่และสัญลักษณ์คู่ N1, N2...")
+                            st.markdown("#### 🗺️ แผนที่แสดงพิกัดลูกค้าเดิม พร้อมตำแหน่งสมาชิกใหม่และสัญลักษณ์คู่ N1, N2...")
 
                             existing_pts_json = json.dumps(df.to_dict("records"), ensure_ascii=False)
                             new_points_json = json.dumps(processed_new_points, ensure_ascii=False)
@@ -2185,6 +2237,20 @@ if dw_uploaded_file and sum_uploaded_file:
                                         font-weight: bold;
                                         box-shadow: 0 2px 5px rgba(0,0,0,0.4);
                                     }}
+
+                                    .warehouse-marker-box {{
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        width: 40px;
+                                        height: 40px;
+                                        background: linear-gradient(135deg, #f39c12, #d35400);
+                                        border: 3px solid #ffffff;
+                                        border-radius: 12px;
+                                        box-shadow: 0 4px 15px rgba(243, 156, 18, 0.6);
+                                        color: white;
+                                        font-size: 20px;
+                                    }}
                                 </style>
                             </head>
                             <body>
@@ -2206,7 +2272,9 @@ if dw_uploaded_file and sum_uploaded_file:
                                         attribution: '© OpenStreetMap contributors'
                                     }}).addTo(map3);
 
-                                    L.marker(warehouse).addTo(map3).bindTooltip("🏢 คลังสินค้าหลัก");
+                                    let whHtml3 = `<div class="warehouse-marker-box" title="คลังสินค้าหลัก">🏢</div>`;
+                                    let whIcon3 = L.divIcon({{className: '', html: whHtml3, iconSize: [40, 40], iconAnchor: [20, 20]}});
+                                    L.marker(warehouse, {{icon: whIcon3, zIndexOffset: 99999}}).addTo(map3).bindTooltip("🏢 <b>คลังสินค้าหลัก</b>");
 
                                     let matchedMap = {{}};
                                     newPoints.forEach(np => {{
